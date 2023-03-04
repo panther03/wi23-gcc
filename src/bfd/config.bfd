@@ -1436,6 +1436,10 @@ case "${targ}" in
     targ_selvecs="wasm_vec"
     ;;
 
+  wi23-*-elf)
+    targ_defvec=wi23_elf32_vec
+    ;;
+
   xgate-*-*)
     targ_defvec=xgate_elf32_vec
     targ_selvecs="xgate_elf32_vec"

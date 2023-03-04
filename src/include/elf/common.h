@@ -452,6 +452,8 @@
 
 #define EM_ADAPTEVA_EPIPHANY	0x1223  /* Adapteva's Epiphany architecture.  */
 
+#define EM_WI23   0x2023 /* WI-23 architecture */
+
 /* Old constant that might be in use by some software. */
 #define EM_OPENRISC		EM_OR1K
 

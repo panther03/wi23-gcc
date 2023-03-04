@@ -1328,6 +1328,9 @@ case "${target}" in
   wasm32-*-*)
     noconfigdirs="$noconfigdirs ld"
     ;;
+  wi23-*-*)
+    noconfigdirs="$noconfigdirs gdb sim binutils opcodes gas ld gprof"
+    ;;
   loongarch*-*-linux*)
     ;;
   loongarch*-*-*)

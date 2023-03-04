@@ -1278,6 +1278,7 @@ case $cpu-$vendor in
 			| w65 \
 			| wasm32 | wasm64 \
 			| we32k \
+			| wi23 \
 			| x86 | x86_64 | xc16x | xgate | xps100 \
 			| xstormy16 | xtensa* \
 			| ymp \
