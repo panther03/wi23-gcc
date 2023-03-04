@@ -3821,6 +3821,8 @@ case "${target}" in
   vax-*-*)
     noconfigdirs="$noconfigdirs target-newlib target-libgloss"
     ;;
+  wi23-*-*)
+    noconfigdirs="$noconfigdirs gdb sim binutils opcodes gas ld gprof"
 esac
 
 # If we aren't building newlib, then don't build libgloss, since libgloss
