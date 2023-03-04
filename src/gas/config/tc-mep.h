@@ -1,5 +1,5 @@
 /* tc-mep.h -- Header file for tc-mep.c.
-   Copyright (C) 2001, 2002, 2005, 2007, 2009 Free Software Foundation, Inc.
+   Copyright (C) 2001-2023 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -53,13 +53,12 @@ extern void mep_apply_fix (struct fix *, valueT *, segT);
 
 /* Call md_pcrel_from_section(), not md_pcrel_from().  */
 #define MD_PCREL_FROM_SECTION(FIXP, SEC) md_pcrel_from_section (FIXP, SEC)
-extern long md_pcrel_from_section (struct fix *, segT);
 
 #define tc_frob_file() mep_frob_file ()
 extern void mep_frob_file (void);
 
 #define tc_fix_adjustable(fixP) mep_fix_adjustable (fixP)
-extern bfd_boolean mep_fix_adjustable (struct fix *);
+extern bool mep_fix_adjustable (struct fix *);
 
 /* After creating a fixup for an instruction operand, we need
    to check for HI16 relocs and queue them up for later sorting.  */
@@ -97,7 +96,8 @@ extern void mep_prepare_relax_scan (fragS *, offsetT *, relax_substateT);
 #define VTEXT_SECTION_NAME ".vtext"
 
 /* Needed to process pending instructions when a label is encountered.  */
-#define TC_START_LABEL(ch, s, ptr)    ((ch == ':') && mep_flush_pending_output ())
+#define TC_START_LABEL(STR, NUL_CHAR, NEXT_CHAR)	\
+  (NEXT_CHAR == ':' && mep_flush_pending_output ())
 
 #define tc_unrecognized_line(c) mep_unrecognized_line (c)
 extern int mep_unrecognized_line (int);
@@ -105,15 +105,15 @@ extern int mep_unrecognized_line (int);
 extern void mep_cleanup (void);
 
 #define md_elf_section_letter		mep_elf_section_letter
-extern bfd_vma mep_elf_section_letter (int, char **);
+extern bfd_vma mep_elf_section_letter (int, const char **);
 #define md_elf_section_flags		mep_elf_section_flags
 extern flagword mep_elf_section_flags  (flagword, bfd_vma, int);
 
 #define ELF_TC_SPECIAL_SECTIONS \
   { VTEXT_SECTION_NAME, SHT_PROGBITS, SHF_ALLOC|SHF_EXECINSTR|SHF_MEP_VLIW },
 
-/* The values of the following enum are for use with parinsnum, which 
+/* The values of the following enum are for use with parinsnum, which
    is a variable in md_assemble that keeps track of whether or not the
-   next instruction is expected to be the first or second instrucion in
+   next instruction is expected to be the first or second instruction in
    a parallelization group.  */
 typedef enum exp_par_insn_{FIRST, SECOND} EXP_PAR_INSN;

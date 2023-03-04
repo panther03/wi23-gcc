@@ -1,23 +1,23 @@
 ## Process this file with automake to generate Makefile.in
 #
-#   Copyright 2012 Free Software Foundation
+#   Copyright (C) 2012-2023 Free Software Foundation, Inc.
 #
 # This file is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation; either version 3 of the License, or
 # (at your option) any later version.
-# 
+#
 # This program is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
-# 
+#
 # You should have received a copy of the GNU General Public License
 # along with this program; see the file COPYING3.  If not see
 # <http://www.gnu.org/licenses/>.
 #
 
-AUTOMAKE_OPTIONS = 1.11 foreign no-dist
+AUTOMAKE_OPTIONS = foreign no-dist
 ACLOCAL_AMFLAGS = -I .. -I ../config -I ../bfd
 
 # Build '.' first so all generated files exist.
@@ -28,7 +28,6 @@ BFDDIR = $(srcdir)/../bfd
 
 WARN_CFLAGS = @WARN_CFLAGS@
 NO_WERROR = @NO_WERROR@
-NO_WMISSING_FIELD_INITIALIZERS = @NO_WMISSING_FIELD_INITIALIZERS@
 AM_CFLAGS = $(WARN_CFLAGS)
 
 COMPILE_FOR_BUILD = $(CC_FOR_BUILD) $(INCLUDES) $(AM_CPPFLAGS) \
@@ -60,13 +59,12 @@ BUILD_LIB_DEPS = @BUILD_LIB_DEPS@
 # Header files.
 HFILES = \
 	aarch64-asm.h aarch64-dis.h aarch64-opc.h aarch64-tbl.h \
+	bpf-desc.h bpf-opc.h \
+	cris-desc.h cris-opc.h \
 	epiphany-desc.h epiphany-opc.h \
 	fr30-desc.h fr30-opc.h \
 	frv-desc.h frv-opc.h \
-	h8500-opc.h \
-	i386-init.h \
 	i386-opc.h \
-	i386-tbl.h \
 	ia64-asmtab.h \
 	ia64-opc.h \
 	ip2k-desc.h ip2k-opc.h \
@@ -79,19 +77,15 @@ HFILES = \
 	mep-desc.h mep-opc.h \
 	microblaze-opc.h \
 	mt-desc.h mt-opc.h \
-	openrisc-desc.h openrisc-opc.h \
 	score-opc.h \
 	sh-opc.h \
-	sh64-opc.h \
 	sysdep.h \
-	w65-opc.h \
-	xc16x-desc.h xc16x-opc.h \
 	xstormy16-desc.h xstormy16-opc.h \
 	z8k-opc.h
 
 # C source files that correspond to .o's ending up in libopcodes
 # for all machines.
-TARGET_LIBOPCODES_CFILES = \
+TARGET64_LIBOPCODES_CFILES = \
 	aarch64-asm.c \
 	aarch64-asm-2.c \
 	aarch64-dis.c \
@@ -100,6 +94,29 @@ TARGET_LIBOPCODES_CFILES = \
 	aarch64-opc-2.c \
 	alpha-dis.c \
 	alpha-opc.c \
+	bpf-asm.c \
+	bpf-desc.c \
+	bpf-dis.c \
+	bpf-ibld.c \
+	bpf-opc.c \
+	ia64-dis.c \
+	ia64-opc.c \
+	loongarch-opc.c \
+	loongarch-dis.c \
+	loongarch-coder.c \
+	mips-dis.c \
+	mips-opc.c \
+	mips16-opc.c \
+	micromips-opc.c \
+	mmix-dis.c \
+	mmix-opc.c \
+	nfp-dis.c \
+	riscv-dis.c \
+	riscv-opc.c \
+	tilegx-dis.c \
+	tilegx-opc.c
+
+TARGET32_LIBOPCODES_CFILES = \
 	arc-dis.c \
 	arc-ext.c \
 	arc-opc.c \
@@ -112,10 +129,12 @@ TARGET_LIBOPCODES_CFILES = \
 	cgen-opc.c \
 	cr16-dis.c \
 	cr16-opc.c \
+	cris-desc.c \
 	cris-dis.c \
 	cris-opc.c \
 	crx-dis.c \
 	crx-opc.c \
+	csky-dis.c \
 	d10v-dis.c \
 	d10v-opc.c \
 	d30v-dis.c \
@@ -136,17 +155,11 @@ TARGET_LIBOPCODES_CFILES = \
 	frv-dis.c \
 	frv-ibld.c \
 	frv-opc.c \
+	ft32-dis.c \
+	ft32-opc.c \
 	h8300-dis.c \
-	h8500-dis.c \
 	hppa-dis.c \
-	i370-dis.c \
-	i370-opc.c \
 	i386-dis.c \
-	i386-opc.c \
-	i860-dis.c \
-	i960-dis.c \
-	ia64-dis.c \
-	ia64-opc.c \
 	ip2k-asm.c \
 	ip2k-desc.c \
 	ip2k-dis.c \
@@ -182,7 +195,8 @@ TARGET_LIBOPCODES_CFILES = \
 	m68hc11-opc.c \
 	m68k-dis.c \
 	m68k-opc.c \
-	m88k-dis.c \
+	s12z-dis.c \
+	s12z-opc.c \
 	mcore-dis.c \
 	mep-asm.c \
 	mep-desc.c \
@@ -191,12 +205,6 @@ TARGET_LIBOPCODES_CFILES = \
 	mep-opc.c \
 	metag-dis.c \
 	microblaze-dis.c \
-	micromips-opc.c \
-	mips-dis.c \
-	mips-opc.c \
-	mips16-opc.c \
-	mmix-dis.c \
-	mmix-opc.c \
 	moxie-dis.c \
 	moxie-opc.c \
 	msp430-decode.c \
@@ -206,22 +214,24 @@ TARGET_LIBOPCODES_CFILES = \
 	mt-dis.c \
 	mt-ibld.c \
 	mt-opc.c \
+	nds32-asm.c \
+	nds32-dis.c \
 	nios2-dis.c \
 	nios2-opc.c \
 	ns32k-dis.c \
-	openrisc-asm.c \
-	openrisc-desc.c \
-	openrisc-dis.c \
-	openrisc-ibld.c \
-	openrisc-opc.c \
-	or32-dis.c \
-	or32-opc.c \
+	or1k-asm.c \
+	or1k-desc.c \
+	or1k-dis.c \
+	or1k-ibld.c \
+	or1k-opc.c \
 	pdp11-dis.c \
 	pdp11-opc.c \
 	pj-dis.c \
 	pj-opc.c \
 	ppc-dis.c \
 	ppc-opc.c \
+	pru-dis.c \
+	pru-opc.c \
 	rl78-decode.c \
 	rl78-dis.c \
 	rx-decode.c \
@@ -231,8 +241,6 @@ TARGET_LIBOPCODES_CFILES = \
 	score-dis.c \
 	score7-dis.c \
 	sh-dis.c \
-	sh64-dis.c \
-	sh64-opc.c \
 	sparc-dis.c \
 	sparc-opc.c \
 	spu-dis.c \
@@ -242,21 +250,14 @@ TARGET_LIBOPCODES_CFILES = \
 	tic54x-dis.c \
 	tic54x-opc.c \
 	tic6x-dis.c \
-	tic80-dis.c \
-	tic80-opc.c \
-	tilegx-dis.c \
-	tilegx-opc.c \
 	tilepro-dis.c \
 	tilepro-opc.c \
 	v850-dis.c \
 	v850-opc.c \
 	vax-dis.c \
-	w65-dis.c \
-	xc16x-asm.c \
-	xc16x-desc.c \
-	xc16x-dis.c \
-	xc16x-ibld.c \
-	xc16x-opc.c \
+	visium-dis.c \
+	visium-opc.c \
+	wasm32-dis.c \
 	xstormy16-asm.c \
 	xstormy16-desc.c \
 	xstormy16-dis.c \
@@ -270,56 +271,35 @@ TARGET_LIBOPCODES_CFILES = \
 
 # C source files that correspond to .o's ending up in libopcodes.
 LIBOPCODES_CFILES = \
-	$(TARGET_LIBOPCODES_CFILES) \
+	$(TARGET32_LIBOPCODES_CFILES) \
+	$(TARGET64_LIBOPCODES_CFILES) \
 	dis-buf.c \
 	dis-init.c \
 	disassemble.c
 
-# C source files that correspond to .o's.
-CFILES = \
-	$(LIBOPCODES_CFILES) \
-	aarch64-gen.c \
-	i386-gen.c \
-	ia64-asmtab.c \
-	ia64-gen.c \
-	ia64-opc-a.c \
-	ia64-opc-b.c \
-	ia64-opc-f.c \
-	ia64-opc-i.c \
-	ia64-opc-m.c \
-	ia64-opc-d.c \
-	s390-mkopc.c \
-	z8kgen.c
-
-ALL_MACHINES = $(TARGET_LIBOPCODES_CFILES:.c=.lo)
+ALL32_MACHINES = $(TARGET32_LIBOPCODES_CFILES:.c=.lo)
+ALL64_MACHINES = $(TARGET64_LIBOPCODES_CFILES:.c=.lo)
 
 OFILES = @BFD_MACHINES@
 
-# We should reconfigure whenever bfd/configure.in changes, because
-# that's where the version number in Makefile comes from.
-CONFIG_STATUS_DEPENDENCIES = $(BFDDIR)/configure.in
+# development.sh is used to determine -Werror default.
+CONFIG_STATUS_DEPENDENCIES = $(BFDDIR)/development.sh
 
 AM_CPPFLAGS = -I. -I$(srcdir) -I../bfd -I$(INCDIR) -I$(BFDDIR) @HDEFINES@ @INCINTL@
 
 disassemble.lo: disassemble.c
 if am__fastdepCC
-	$(LTCOMPILE) -MT $@ -MD -MP -MF $(DEPDIR)/$*.Tpo -c -o $@ @archdefs@ $(srcdir)/disassemble.c
-	mv -f $(DEPDIR)/$*.Tpo $(DEPDIR)/$*.Plo
+	$(AM_V_CC)$(LTCOMPILE) -MT $@ -MD -MP -MF $(DEPDIR)/$*.Tpo -c -o $@ @archdefs@ $(srcdir)/disassemble.c
+	$(AM_V_at)mv -f $(DEPDIR)/$*.Tpo $(DEPDIR)/$*.Plo
 else
 if AMDEP
 	source='disassemble.c' object='$@' libtool=yes @AMDEPBACKSLASH@
 	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
 endif
-	$(LTCOMPILE) -c -o $@ @archdefs@ $(srcdir)/disassemble.c
+	$(AM_V_CC)$(LTCOMPILE) -c -o $@ @archdefs@ $(srcdir)/disassemble.c
 endif
 
 libopcodes_la_SOURCES =  dis-buf.c disassemble.c dis-init.c
-# It's desirable to list ../bfd/libbfd.la in DEPENDENCIES and LIBADD.
-# Unfortunately this causes libtool to add -L$(libdir), referring to the
-# planned install directory of libbfd.  This can cause us to pick up an
-# old version of libbfd, or to pick up libbfd for the wrong architecture
-# if host != build. So for building with shared libraries we use a
-# hardcoded path to libbfd.so instead of relying on the entries in libbfd.la.
 libopcodes_la_DEPENDENCIES = $(OFILES) @SHARED_DEPENDENCIES@
 libopcodes_la_LIBADD = $(OFILES) @SHARED_LIBADD@
 libopcodes_la_LDFLAGS += -release `cat ../bfd/libtool-soversion` @SHARED_LDFLAGS@
@@ -345,21 +325,21 @@ stamp-lib: libopcodes.la
 
 libopcodes.a: stamp-lib ; @true
 
-POTFILES = $(HFILES) $(CFILES)
+POTFILES = $(HFILES) $(LIBOPCODES_CFILES)
 po/POTFILES.in: @MAINT@ Makefile
 	for f in $(POTFILES); do echo $$f; done | LC_ALL=C sort > tmp \
 	  && mv tmp $(srcdir)/po/POTFILES.in
 
 CLEANFILES = \
 	stamp-epiphany stamp-fr30 stamp-frv stamp-ip2k stamp-iq2000 stamp-lm32 \
-	stamp-m32c stamp-m32r stamp-mep stamp-mt \
-	stamp-openrisc stamp-xc16x stamp-xstormy16 \
+	stamp-m32c stamp-m32r stamp-mep stamp-mt stamp-or1k stamp-xstormy16 \
 	libopcodes.a stamp-lib
 
 
 CGENDIR = @cgendir@
 CPUDIR = $(srcdir)/../cpu
-CGEN = "`if test -f ../guile/libguile/guile ; then echo ../guile/libguile/guile; else echo guile ; fi` -l ${cgendir}/guile.scm -s"
+GUILE = `if test -f ../guile/libguile/guile ; then echo ../guile/libguile/guile; else echo guile ; fi`
+CGEN = "$(GUILE) -l ${cgendir}/guile.scm -s"
 CGENFLAGS = -v
 
 CGENDEPS = \
@@ -369,9 +349,11 @@ CGENDEPS = \
 	$(CGENDIR)/opc-opinst.scm \
 	cgen-asm.in cgen-dis.in cgen-ibld.in
 
-CGEN_CPUS = epiphany fr30 frv ip2k iq2000 lm32 m32c m32r mep mt openrisc xc16x xstormy16
+CGEN_CPUS = cris epiphany fr30 frv ip2k iq2000 lm32 m32c m32r mep mt or1k xstormy16
 
 if CGEN_MAINT
+BPF_DEPS = stamp-bpf
+CRIS_DEPS = stamp-cris
 EPIPHANY_DEPS = stamp-epiphany
 FR30_DEPS = stamp-fr30
 FRV_DEPS = stamp-frv
@@ -382,23 +364,23 @@ M32C_DEPS = stamp-m32c
 M32R_DEPS = stamp-m32r
 MEP_DEPS = stamp-mep
 MT_DEPS = stamp-mt
-OPENRISC_DEPS = stamp-openrisc
-XC16X_DEPS = stamp-xc16x
+OR1K_DEPS = stamp-or1k
 XSTORMY16_DEPS = stamp-xstormy16
 else
+BPF_DEPS =
+CRIS_DEPS =
 EPIPHANY_DEPS =
 FR30_DEPS =
 FRV_DEPS =
 IP2K_DEPS =
-IQ2000_DEPS = 
-LM32_DEPS = 
+IQ2000_DEPS =
+LM32_DEPS =
 M32C_DEPS =
 M32R_DEPS =
 MEP_DEPS =
 MT_DEPS =
-OPENRISC_DEPS = 
-XC16X_DEPS = 
-XSTORMY16_DEPS = 
+OR1K_DEPS =
+XSTORMY16_DEPS =
 endif
 
 run-cgen:
@@ -417,6 +399,24 @@ run-cgen-all:
 .PHONY: run-cgen-all
 
 # For now, require developers to configure with --enable-cgen-maint.
+
+$(srcdir)/bpf-desc.h $(srcdir)/bpf-desc.c $(srcdir)/bpf-opc.h \
+		$(srcdir)/bpf-opc.c $(srcdir)/bpf-ibld.c \
+		$(srcdir)/bpf-asm.c $(srcdir)/bpf-dis.c: $(BPF_DEPS)
+	@true
+
+stamp-bpf: $(CGENDEPS) $(CPUDIR)/bpf.cpu $(CPUDIR)/bpf.opc
+	$(MAKE) run-cgen arch=bpf prefix=bpf \
+		archfile=$(CPUDIR)/bpf.cpu opcfile=$(CPUDIR)/bpf.opc
+
+$(srcdir)/cris-desc.h $(srcdir)/cris-desc.c $(srcdir)/cris-opc.h: $(CRIS_DEPS)
+	@true
+
+stamp-cris: $(CGENDEPS) $(CPUDIR)/cris.cpu
+	$(SHELL) $(srcdir)/cgen.sh desc $(srcdir) $(CGEN) \
+	  $(CGENDIR) "$(CGENFLAGS)" cris cris $(CPUDIR)/cris.cpu /dev/null \
+	  "$(options)" "$(extrafiles)"
+	touch $@
 
 $(srcdir)/epiphany-desc.h $(srcdir)/epiphany-desc.c $(srcdir)/epiphany-opc.h \
 		$(srcdir)/epiphany-opc.c $(srcdir)/epiphany-ibld.c \
@@ -464,7 +464,7 @@ stamp-lm32: $(CGENDEPS) $(CPUDIR)/lm32.cpu $(CPUDIR)/lm32.opc
 		extrafiles=opinst
 
 $(srcdir)/m32c-desc.h $(srcdir)/m32c-desc.c $(srcdir)/m32c-opc.h $(srcdir)/m32c-opc.c $(srcdir)/m32c-ibld.c $(srcdir)/m32c-asm.c $(srcdir)/m32c-dis.c: $(M32C_DEPS)
-#	@true
+	@true
 stamp-m32c: $(CGENDEPS) $(CPUDIR)/m32c.cpu $(CPUDIR)/m32c.opc
 	$(MAKE) run-cgen arch=m32c prefix=m32c options= \
 		archfile=$(CPUDIR)/m32c.cpu \
@@ -490,19 +490,11 @@ stamp-mt: $(CGENDEPS) $(CPUDIR)/mt.cpu $(CPUDIR)/mt.opc
 		archfile=$(CPUDIR)/mt.cpu \
 		opcfile=$(CPUDIR)/mt.opc extrafiles=
 
-$(srcdir)/openrisc-desc.h $(srcdir)/openrisc-desc.c $(srcdir)/openrisc-opc.h $(srcdir)/openrisc-opc.c $(srcdir)/openrisc-ibld.c $(srcdir)/openrisc-asm.c $(srcdir)/openrisc-dis.c: $(OPENRISC_DEPS)
+$(srcdir)/or1k-desc.h $(srcdir)/or1k-desc.c $(srcdir)/or1k-opc.h $(srcdir)/or1k-opc.c $(srcdir)/or1k-ibld.c $(srcdir)/or1k-opinst.c $(srcdir)/or1k-asm.c $(srcdir)/or1k-dis.c: $(OR1K_DEPS)
 	@true
-stamp-openrisc: $(CGENDEPS) $(CPUDIR)/openrisc.cpu $(CPUDIR)/openrisc.opc
-	$(MAKE) run-cgen arch=openrisc prefix=openrisc options= \
-		archfile=$(CPUDIR)/openrisc.cpu opcfile=$(CPUDIR)/openrisc.opc extrafiles=
-
-$(srcdir)/xc16x-desc.h $(srcdir)/xc16x-desc.c $(srcdir)/xc16x-opc.h $(srcdir)/xc16x-opc.c $(srcdir)/xc16x-ibld.c $(srcdir)/xc16x-asm.c $(srcdir)/xc16x-dis.c: $(XC16X_DEPS)
-	@true
-stamp-xc16x: $(CGENDEPS) $(CPUDIR)/xc16x.cpu $(CPUDIR)/xc16x.opc
-	$(MAKE) run-cgen arch=xc16x prefix=xc16x options= \
-		archfile=$(CPUDIR)/xc16x.cpu \
-		opcfile=$(CPUDIR)/xc16x.opc \
-		extrafiles=
+stamp-or1k: $(CGENDEPS) $(CPUDIR)/or1k.cpu $(CPUDIR)/or1k.opc $(CPUDIR)/or1kcommon.cpu $(CPUDIR)/or1korbis.cpu $(CPUDIR)/or1korfpx.cpu
+	$(MAKE) run-cgen arch=or1k prefix=or1k options=opinst \
+		archfile=$(CPUDIR)/or1k.cpu opcfile=$(CPUDIR)/or1k.opc extrafiles=opinst
 
 $(srcdir)/xstormy16-desc.h $(srcdir)/xstormy16-desc.c $(srcdir)/xstormy16-opc.h $(srcdir)/xstormy16-opc.c $(srcdir)/xstormy16-ibld.c $(srcdir)/xstormy16-asm.c $(srcdir)/xstormy16-dis.c: $(XSTORMY16_DEPS)
 	@true
@@ -515,7 +507,8 @@ MOSTLYCLEANFILES = aarch64-gen$(EXEEXT_FOR_BUILD) i386-gen$(EXEEXT_FOR_BUILD) \
 	z8kgen$(EXEEXT_FOR_BUILD) opc2c$(EXEEXT_FOR_BUILD)
 
 MAINTAINERCLEANFILES = $(srcdir)/aarch64-asm-2.c $(srcdir)/aarch64-dis-2.c \
-	$(srcdir)/aarch64-opc-2.c $(srcdir)/i386-tbl.h $(srcdir)/i386-init.h \
+	$(srcdir)/aarch64-opc-2.c \
+	$(srcdir)/i386-tbl.h $(srcdir)/i386-init.h $(srcdir)/i386-mnem.h \
 	$(srcdir)/ia64-asmtab.c $(srcdir)/z8k-opc.h \
 	$(srcdir)/msp430-decode.c \
 	$(srcdir)/rl78-decode.c \
@@ -526,34 +519,38 @@ aarch64-gen$(EXEEXT_FOR_BUILD): aarch64-gen.o $(BUILD_LIB_DEPS)
 
 aarch64-gen.o: aarch64-gen.c $(BFD_H) $(INCDIR)/getopt.h $(INCDIR)/libiberty.h\
 	$(INCDIR)/opcode/aarch64.h config.h aarch64-opc.h aarch64-tbl.h
-	$(COMPILE_FOR_BUILD) -c $(srcdir)/aarch64-gen.c
+	$(AM_V_CC)$(COMPILE_FOR_BUILD) -c $(srcdir)/aarch64-gen.c
 
 $(srcdir)/aarch64-asm-2.c: @MAINT@ aarch64-gen$(exeext_for_build)
-	./aarch64-gen$(exeext_for_build) --gen-asm > $@
+	$(AM_V_GEN)./aarch64-gen$(exeext_for_build) --gen-asm > $@
 $(srcdir)/aarch64-dis-2.c: @MAINT@ aarch64-gen$(exeext_for_build)
-	./aarch64-gen$(exeext_for_build) --gen-dis > $@
+	$(AM_V_GEN)./aarch64-gen$(exeext_for_build) --gen-dis > $@
 $(srcdir)/aarch64-opc-2.c: @MAINT@ aarch64-gen$(exeext_for_build)
-	./aarch64-gen$(exeext_for_build) --gen-opc > $@
+	$(AM_V_GEN)./aarch64-gen$(exeext_for_build) --gen-opc > $@
 
 i386-gen$(EXEEXT_FOR_BUILD): i386-gen.o $(BUILD_LIB_DEPS)
-	$(LINK_FOR_BUILD) i386-gen.o $(BUILD_LIBS)
+	$(AM_V_CCLD)$(LINK_FOR_BUILD) i386-gen.o $(BUILD_LIBS)
 
 i386-gen.o: i386-gen.c i386-opc.h $(srcdir)/../include/opcode/i386.h \
 	$(INCDIR)/ansidecl.h $(INCDIR)/getopt.h $(INCDIR)/hashtab.h \
 	$(INCDIR)/libiberty.h $(INCDIR)/opcode/i386.h $(INCDIR)/safe-ctype.h \
-	config.h i386-opc.h sysdep.h
+	config.h sysdep.h
 	$(COMPILE_FOR_BUILD) -c $(srcdir)/i386-gen.c
 
-$(srcdir)/i386-tbl.h: $(srcdir)/i386-init.h 
-	@echo $@
+# i386-gen will generate all headers in one go.  Use a pattern rule to properly
+# express this, with the inner dash ('-') arbitrarily chosen to be the stem.
+$(srcdir)/i386%tbl.h $(srcdir)/i386%init.h $(srcdir)/i386%mnem.h: \
+		@MAINT@ i386-gen$(EXEEXT_FOR_BUILD) i386-opc.tbl i386-reg.tbl i386-opc.h
+	$(AM_V_GEN)$(CPP) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) - \
+		< $(srcdir)/i386-opc.tbl \
+		| ./i386-gen$(EXEEXT_FOR_BUILD) --srcdir $(srcdir)
 
-$(srcdir)/i386-init.h: @MAINT@ i386-gen$(EXEEXT_FOR_BUILD) i386-opc.tbl i386-reg.tbl
-	./i386-gen$(EXEEXT_FOR_BUILD) --srcdir $(srcdir)
-
-i386-opc.lo: $(srcdir)/i386-tbl.h
+# While not really dependencies, specify other generated i386-*.h here as well
+# to make sure they are re-generated as necessary.
+i386-dis.lo: $(srcdir)/i386-tbl.h $(srcdir)/i386-init.h $(srcdir)/i386-mnem.h
 
 ia64-gen$(EXEEXT_FOR_BUILD): ia64-gen.o $(BUILD_LIB_DEPS)
-	$(LINK_FOR_BUILD) ia64-gen.o $(BUILD_LIBS)
+	$(AM_V_CCLD)$(LINK_FOR_BUILD) ia64-gen.o $(BUILD_LIBS)
 
 ia64-gen.o: ia64-gen.c $(BFD_H) $(INCDIR)/ansidecl.h $(INCDIR)/getopt.h \
 	$(INCDIR)/libiberty.h $(INCDIR)/opcode/ia64.h $(INCDIR)/safe-ctype.h \
@@ -567,52 +564,65 @@ ia64-gen.o: ia64-gen.c $(BFD_H) $(INCDIR)/ansidecl.h $(INCDIR)/getopt.h \
 ia64_asmtab_deps = ia64-gen$(EXEEXT_FOR_BUILD) ia64-ic.tbl \
 	ia64-raw.tbl ia64-waw.tbl ia64-war.tbl
 $(srcdir)/ia64-asmtab.c: @MAINT@ $(ia64_asmtab_deps)
-	./ia64-gen$(EXEEXT_FOR_BUILD) --srcdir $(srcdir) > $@
+	$(AM_V_GEN)./ia64-gen$(EXEEXT_FOR_BUILD) --srcdir $(srcdir) > $@
 
 ia64-opc.lo: $(srcdir)/ia64-asmtab.c
 
 $(srcdir)/msp430-decode.c: @MAINT@ $(srcdir)/msp430-decode.opc opc2c$(EXEEXT_FOR_BUILD)
-	./opc2c$(EXEEXT_FOR_BUILD) $(srcdir)/msp430-decode.opc > $(srcdir)/msp430-decode.c
+	$(AM_V_GEN)./opc2c$(EXEEXT_FOR_BUILD) $(srcdir)/msp430-decode.opc > $(srcdir)/msp430-decode.c
 
 $(srcdir)/rl78-decode.c: @MAINT@ $(srcdir)/rl78-decode.opc opc2c$(EXEEXT_FOR_BUILD)
-	./opc2c$(EXEEXT_FOR_BUILD) $(srcdir)/rl78-decode.opc > $(srcdir)/rl78-decode.c
+	$(AM_V_GEN)./opc2c$(EXEEXT_FOR_BUILD) $(srcdir)/rl78-decode.opc > $(srcdir)/rl78-decode.c
 
 $(srcdir)/rx-decode.c: @MAINT@ $(srcdir)/rx-decode.opc opc2c$(EXEEXT_FOR_BUILD)
-	./opc2c$(EXEEXT_FOR_BUILD) $(srcdir)/rx-decode.opc > $(srcdir)/rx-decode.c
+	$(AM_V_GEN)./opc2c$(EXEEXT_FOR_BUILD) $(srcdir)/rx-decode.opc > $(srcdir)/rx-decode.c
 
 opc2c$(EXEEXT_FOR_BUILD): opc2c.o $(BUILD_LIBS_DEPS)
-	$(LINK_FOR_BUILD) opc2c.o $(BUILD_LIBS)
+	$(AM_V_CCLD)$(LINK_FOR_BUILD) opc2c.o $(BUILD_LIBS)
 
 opc2c.o: opc2c.c $(INCDIR)/libiberty.h
-	$(COMPILE_FOR_BUILD) -c $(srcdir)/opc2c.c
+	$(AM_V_CC)$(COMPILE_FOR_BUILD) -c $(srcdir)/opc2c.c
 
 s390-mkopc$(EXEEXT_FOR_BUILD): s390-mkopc.c
-	$(COMPILE_FOR_BUILD) -o s390-mkopc $(srcdir)/s390-mkopc.c
+	$(AM_V_CCLD)$(COMPILE_FOR_BUILD) -o s390-mkopc $(srcdir)/s390-mkopc.c
 
 s390-opc.tab: s390-mkopc$(EXEEXT_FOR_BUILD) s390-opc.txt
-	./s390-mkopc$(EXEEXT_FOR_BUILD) < $(srcdir)/s390-opc.txt > s390-opc.tab
+	$(AM_V_GEN)./s390-mkopc$(EXEEXT_FOR_BUILD) < $(srcdir)/s390-opc.txt > s390-opc.tab
 
 s390-opc.lo: s390-opc.tab
 
 z8kgen$(EXEEXT_FOR_BUILD): z8kgen.o $(BUILD_LIB_DEPS)
-	$(LINK_FOR_BUILD) z8kgen.o $(BUILD_LIBS)
+	$(AM_V_CCLD)$(LINK_FOR_BUILD) z8kgen.o $(BUILD_LIBS)
 
 z8kgen.o: z8kgen.c
-	$(COMPILE_FOR_BUILD) -c $(srcdir)/z8kgen.c
+	$(AM_V_CC)$(COMPILE_FOR_BUILD) -c $(srcdir)/z8kgen.c
 
 $(srcdir)/z8k-opc.h: @MAINT@ z8kgen$(EXEEXT_FOR_BUILD)
-	./z8kgen$(EXEEXT_FOR_BUILD) -a > $@
+	$(AM_V_GEN)./z8kgen$(EXEEXT_FOR_BUILD) -a > $@
 
 z8k-dis.lo: $(srcdir)/z8k-opc.h
 
+MIPS_DEFS=`case \`cat ../bfd/ofiles\` in *elfxx-mips*) echo "-DHAVE_BFD_MIPS_ELF_GET_ABIFLAGS=1";; esac`
+mips-dis.lo: mips-dis.c
+if am__fastdepCC
+	$(AM_V_CC)$(LTCOMPILE) -MT $@ -MD -MP -MF $(DEPDIR)/$*.Tpo -c -o $@ $(MIPS_DEFS) $<
+	$(AM_V_at)$(am__mv) $(DEPDIR)/$*.Tpo $(DEPDIR)/$*.Plo
+else
+if AMDEP
+	source='$<' object='$@' libtool=yes @AMDEPBACKSLASH@
+	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+endif
+	$(AM_V_CC)$(LTCOMPILE) -c -o $@ $(MIPS_DEFS) $<
+endif
+
 sh-dis.lo: sh-dis.c
 if am__fastdepCC
-	$(LTCOMPILE) -MT $@ -MD -MP -MF $(DEPDIR)/$*.Tpo -c -o $@ @archdefs@ $(srcdir)/sh-dis.c
-	mv -f $(DEPDIR)/$*.Tpo $(DEPDIR)/$*.Plo
+	$(AM_V_CC)$(LTCOMPILE) -MT $@ -MD -MP -MF $(DEPDIR)/$*.Tpo -c -o $@ @archdefs@ $(srcdir)/sh-dis.c
+	$(AM_V_at)mv -f $(DEPDIR)/$*.Tpo $(DEPDIR)/$*.Plo
 else
 if AMDEP
 	source='sh-dis.c' object='$@' libtool=yes @AMDEPBACKSLASH@
 	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
 endif
-	$(LTCOMPILE) -c -o $@ @archdefs@ $(srcdir)/sh-dis.c
+	$(AM_V_CC)$(LTCOMPILE) -c -o $@ @archdefs@ $(srcdir)/sh-dis.c
 endif

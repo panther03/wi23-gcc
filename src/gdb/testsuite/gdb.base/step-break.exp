@@ -1,6 +1,6 @@
 # This testcase is part of GDB, the GNU debugger.
 
-# Copyright 2008-2013 Free Software Foundation, Inc.
+# Copyright 2008-2023 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -17,13 +17,11 @@
 
 standard_testfile
 
-if {[prepare_for_testing $testfile.exp $testfile $srcfile debug]} {
-     untested step-break.exp
+if {[prepare_for_testing "failed to prepare" $testfile $srcfile debug]} {
      return -1
 }
 
-if ![runto_main] then {
-   fail "Can't run to main"
+if {![runto_main]} {
    return 0
 }
 
@@ -42,5 +40,3 @@ gdb_test "next 2" ".*place2.*" "next 2 (3)"
 gdb_test "next 2" ".*place3.*" "next 2 (4)"
 gdb_test "next 2" ".*place2.*" "next 2 (5)"
 gdb_test "next 2" ".*place3.*" "next 2 (6)"
-
-return 0

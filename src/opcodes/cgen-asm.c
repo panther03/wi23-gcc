@@ -1,6 +1,5 @@
 /* CGEN generic assembler support code.
-   Copyright 1996, 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2005, 2007,
-   2011  Free Software Foundation, Inc.
+   Copyright (C) 1996-2023 Free Software Foundation, Inc.
 
    This file is part of libopcodes.
 
@@ -61,7 +60,7 @@ cgen_init_parse_operand (CGEN_CPU_DESC cd)
    The result is a pointer to the next entry to use.
 
    The table is scanned backwards as additions are made to the front of the
-   list and we want earlier ones to be prefered.  */
+   list and we want earlier ones to be preferred.  */
 
 static CGEN_INSN_LIST *
 hash_insn_array (CGEN_CPU_DESC cd,
@@ -157,7 +156,7 @@ build_asm_hash_table (CGEN_CPU_DESC cd)
 				    asm_hash_table, hash_entry_buf);
 
   /* Add runtime added insns.
-     Later added insns will be prefered over earlier ones.  */
+     Later added insns will be preferred over earlier ones.  */
 
   hash_entry_buf = hash_insn_list (cd, insn_table->new_entries,
 				   asm_hash_table, hash_entry_buf);
@@ -213,7 +212,7 @@ cgen_parse_keyword (CGEN_CPU_DESC cd ATTRIBUTE_UNUSED,
      character of the suffix ('.') is special.  */
   if (*p)
     ++p;
-  
+
   /* Allow letters, digits, and any special characters.  */
   while (((p - start) < (int) sizeof (buf))
 	 && *p
@@ -281,7 +280,7 @@ cgen_parse_signed_integer (CGEN_CPU_DESC cd,
 	  && value > 0
 	  && (value & 0x80000000)
 	  && ((value >> 31) == 1))
-	value |= -1 << 31;
+	value |= ((bfd_vma) -1) << 31;
 
       *valuep = value;
     }

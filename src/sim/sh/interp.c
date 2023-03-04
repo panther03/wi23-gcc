@@ -18,14 +18,14 @@
 
 */
 
-#include "config.h"
+/* This must come before any other includes.  */
+#include "defs.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <errno.h>
 #include <signal.h>
-#ifdef HAVE_UNISTD_H
 #include <unistd.h>
-#endif
 #ifdef HAVE_MMAP
 #include <sys/mman.h>
 # ifndef MAP_FAILED
@@ -36,35 +36,38 @@
 # endif
 #endif
 
-#ifdef HAVE_STRING_H
 #include <string.h>
-#else
-#ifdef HAVE_STRINGS_H
-#include <strings.h>
-#endif
-#endif
-
-#ifdef HAVE_STDLIB_H
 #include <stdlib.h>
-#endif
-
-#ifdef HAVE_SYS_STAT_H
 #include <sys/stat.h>
+#include <time.h>
+#include <sys/time.h>
+#ifdef HAVE_UTIME_H
+#include <utime.h>
+#endif
+#ifndef _WIN32
+#include <sys/wait.h>
 #endif
 
 #include "bfd.h"
-#include "gdb/callback.h"
-#include "gdb/remote-sim.h"
-#include "gdb/sim-sh.h"
+#include "sim/callback.h"
+#include "sim/sim.h"
+#include "sim/sim-sh.h"
 
-/* This file is local - if newlib changes, then so should this.  */
-#include "syscall.h"
+#include "sim-main.h"
+#include "sim-base.h"
+#include "sim-options.h"
+
+#include "target-newlib-syscall.h"
+
+#include "sh-sim.h"
 
 #include <math.h>
 
 #ifdef _WIN32
 #include <float.h>		/* Needed for _isnan() */
+#ifndef isnan
 #define isnan _isnan
+#endif
 #endif
 
 #ifndef SIGBUS
@@ -79,9 +82,11 @@
 #define SIGTRAP 5
 #endif
 
-extern unsigned short sh_jump_table[], sh_dsp_table[0x1000], ppi_table[];
+/* TODO: Stop using these names.  */
+#undef SEXT
+#undef SEXT32
 
-int sim_write (SIM_DESC sd, SIM_ADDR addr, const unsigned char *buffer, int size);
+extern unsigned short sh_jump_table[], sh_dsp_table[0x1000], ppi_table[];
 
 #define O_RECOMPILE 85
 #define DEFINE_TABLE
@@ -91,108 +96,7 @@ int sim_write (SIM_DESC sd, SIM_ADDR addr, const unsigned char *buffer, int size
    for a quit. */
 #define POLL_QUIT_INTERVAL 0x60000
 
-typedef struct
-{
-  int regs[20];
-} regstacktype;
-
-typedef union
-{
-
-  struct
-  {
-    int regs[16];
-    int pc;
-
-    /* System registers.  For sh-dsp this also includes A0 / X0 / X1 / Y0 / Y1
-       which are located in fregs, i.e. strictly speaking, these are
-       out-of-bounds accesses of sregs.i .  This wart of the code could be
-       fixed by making fregs part of sregs, and including pc too - to avoid
-       alignment repercussions - but this would cause very onerous union /
-       structure nesting, which would only be managable with anonymous
-       unions and structs.  */
-    union
-      {
-	struct
-	  {
-	    int mach;
-	    int macl;
-	    int pr;
-	    int dummy3, dummy4;
-	    int fpul; /* A1 for sh-dsp -  but only for movs etc.  */
-	    int fpscr; /* dsr for sh-dsp */
-	  } named;
-	int i[7];
-      } sregs;
-
-    /* sh3e / sh-dsp */
-    union fregs_u
-      {
-	float f[16];
-	double d[8];
-	int i[16];
-      }
-    fregs[2];
-
-    /* Control registers; on the SH4, ldc / stc is privileged, except when
-       accessing gbr.  */
-    union
-      {
-	struct
-	  {
-	    int sr;
-	    int gbr;
-	    int vbr;
-	    int ssr;
-	    int spc;
-	    int mod;
-	    /* sh-dsp */
-	    int rs;
-	    int re;
-	    /* sh3 */
-	    int bank[8];
-	    int dbr;		/* debug base register */
-	    int sgr;		/* saved gr15 */
-	    int ldst;		/* load/store flag (boolean) */
-	    int tbr;
-	    int ibcr;		/* sh2a bank control register */
-	    int ibnr;		/* sh2a bank number register */
-	  } named;
-	int i[16];
-      } cregs;
-
-    unsigned char *insn_end;
-
-    int ticks;
-    int stalls;
-    int memstalls;
-    int cycles;
-    int insts;
-
-    int prevlock;
-    int thislock;
-    int exception;
-
-    int end_of_registers;
-
-    int msize;
-#define PROFILE_FREQ 1
-#define PROFILE_SHIFT 2
-    int profile;
-    unsigned short *profile_hist;
-    unsigned char *memory;
-    int xyram_select, xram_start, yram_start;
-    unsigned char *xmem;
-    unsigned char *ymem;
-    unsigned char *xmem_offset;
-    unsigned char *ymem_offset;
-    unsigned long bfd_mach;
-    regstacktype *regstack;
-  }
-  asregs;
-  int asints[40];
-} saved_state_type;
-
+/* TODO: Move into sim_cpu.  */
 saved_state_type saved_state;
 
 struct loop_bounds { unsigned char *start, *end; };
@@ -200,19 +104,13 @@ struct loop_bounds { unsigned char *start, *end; };
 /* These variables are at file scope so that functions other than
    sim_resume can use the fetch/store macros */
 
-static int target_little_endian;
+#define target_little_endian (CURRENT_TARGET_BYTE_ORDER == BFD_ENDIAN_LITTLE)
 static int global_endianw, endianb;
 static int target_dsp;
-static int host_little_endian;
-static char **prog_argv;
+#define host_little_endian (HOST_BYTE_ORDER == BFD_ENDIAN_LITTLE)
 
 static int maskw = 0;
 static int maskl = 0;
-
-static SIM_OPEN_KIND sim_kind;
-static char *myname;
-static int   tracing = 0;
-
 
 /* Short hand definitions of the registers */
 
@@ -224,23 +122,23 @@ static int   tracing = 0;
 #define UR 	(unsigned int) R
 #define UR 	(unsigned int) R
 #define SR0 	saved_state.asregs.regs[0]
-#define CREG(n)	(saved_state.asregs.cregs.i[(n)])
-#define GBR 	saved_state.asregs.cregs.named.gbr
-#define VBR 	saved_state.asregs.cregs.named.vbr
-#define DBR 	saved_state.asregs.cregs.named.dbr
-#define TBR 	saved_state.asregs.cregs.named.tbr
-#define IBCR	saved_state.asregs.cregs.named.ibcr
-#define IBNR	saved_state.asregs.cregs.named.ibnr
-#define BANKN	(saved_state.asregs.cregs.named.ibnr & 0x1ff)
-#define ME	((saved_state.asregs.cregs.named.ibnr >> 14) & 0x3)
-#define SSR	saved_state.asregs.cregs.named.ssr
-#define SPC	saved_state.asregs.cregs.named.spc
-#define SGR 	saved_state.asregs.cregs.named.sgr
-#define SREG(n)	(saved_state.asregs.sregs.i[(n)])
-#define MACH 	saved_state.asregs.sregs.named.mach
-#define MACL 	saved_state.asregs.sregs.named.macl
-#define PR	saved_state.asregs.sregs.named.pr
-#define FPUL	saved_state.asregs.sregs.named.fpul
+#define CREG(n)	(saved_state.asregs.cregs[(n)])
+#define GBR 	saved_state.asregs.gbr
+#define VBR 	saved_state.asregs.vbr
+#define DBR 	saved_state.asregs.dbr
+#define TBR 	saved_state.asregs.tbr
+#define IBCR	saved_state.asregs.ibcr
+#define IBNR	saved_state.asregs.ibnr
+#define BANKN	(saved_state.asregs.ibnr & 0x1ff)
+#define ME	((saved_state.asregs.ibnr >> 14) & 0x3)
+#define SSR	saved_state.asregs.ssr
+#define SPC	saved_state.asregs.spc
+#define SGR 	saved_state.asregs.sgr
+#define SREG(n)	(saved_state.asregs.sregs[(n)])
+#define MACH 	saved_state.asregs.mach
+#define MACL 	saved_state.asregs.macl
+#define PR	saved_state.asregs.pr
+#define FPUL	saved_state.asregs.fpul
 
 #define PC insn_ptr
 
@@ -249,8 +147,8 @@ static int   tracing = 0;
 /* Alternate bank of registers r0-r7 */
 
 /* Note: code controling SR handles flips between BANK0 and BANK1 */
-#define Rn_BANK(n) (saved_state.asregs.cregs.named.bank[(n)])
-#define SET_Rn_BANK(n, EXP) do { saved_state.asregs.cregs.named.bank[(n)] = (EXP); } while (0)
+#define Rn_BANK(n) (saved_state.asregs.bank[(n)])
+#define SET_Rn_BANK(n, EXP) do { saved_state.asregs.bank[(n)] = (EXP); } while (0)
 
 
 /* Manipulate SR */
@@ -271,54 +169,54 @@ static int   tracing = 0;
 #define SR_MASK_RC 0x0fff0000
 #define SR_RC_INCREMENT -0x00010000
 
-#define BO	((saved_state.asregs.cregs.named.sr & SR_MASK_BO) != 0)
-#define CS	((saved_state.asregs.cregs.named.sr & SR_MASK_CS) != 0)
-#define M 	((saved_state.asregs.cregs.named.sr & SR_MASK_M) != 0)
-#define Q 	((saved_state.asregs.cregs.named.sr & SR_MASK_Q) != 0)
-#define S 	((saved_state.asregs.cregs.named.sr & SR_MASK_S) != 0)
-#define T 	((saved_state.asregs.cregs.named.sr & SR_MASK_T) != 0)
-#define LDST	((saved_state.asregs.cregs.named.ldst) != 0)
+#define BO	((saved_state.asregs.sr & SR_MASK_BO) != 0)
+#define CS	((saved_state.asregs.sr & SR_MASK_CS) != 0)
+#define M 	((saved_state.asregs.sr & SR_MASK_M) != 0)
+#define Q 	((saved_state.asregs.sr & SR_MASK_Q) != 0)
+#define S 	((saved_state.asregs.sr & SR_MASK_S) != 0)
+#define T 	((saved_state.asregs.sr & SR_MASK_T) != 0)
+#define LDST	((saved_state.asregs.ldst) != 0)
 
-#define SR_BL ((saved_state.asregs.cregs.named.sr & SR_MASK_BL) != 0)
-#define SR_RB ((saved_state.asregs.cregs.named.sr & SR_MASK_RB) != 0)
-#define SR_MD ((saved_state.asregs.cregs.named.sr & SR_MASK_MD) != 0)
-#define SR_DMY ((saved_state.asregs.cregs.named.sr & SR_MASK_DMY) != 0)
-#define SR_DMX ((saved_state.asregs.cregs.named.sr & SR_MASK_DMX) != 0)
-#define SR_RC ((saved_state.asregs.cregs.named.sr & SR_MASK_RC))
+#define SR_BL ((saved_state.asregs.sr & SR_MASK_BL) != 0)
+#define SR_RB ((saved_state.asregs.sr & SR_MASK_RB) != 0)
+#define SR_MD ((saved_state.asregs.sr & SR_MASK_MD) != 0)
+#define SR_DMY ((saved_state.asregs.sr & SR_MASK_DMY) != 0)
+#define SR_DMX ((saved_state.asregs.sr & SR_MASK_DMX) != 0)
+#define SR_RC ((saved_state.asregs.sr & SR_MASK_RC))
 
 /* Note: don't use this for privileged bits */
 #define SET_SR_BIT(EXP, BIT) \
 do { \
   if ((EXP) & 1) \
-    saved_state.asregs.cregs.named.sr |= (BIT); \
+    saved_state.asregs.sr |= (BIT); \
   else \
-    saved_state.asregs.cregs.named.sr &= ~(BIT); \
+    saved_state.asregs.sr &= ~(BIT); \
 } while (0)
 
 #define SET_SR_BO(EXP) SET_SR_BIT ((EXP), SR_MASK_BO)
 #define SET_SR_CS(EXP) SET_SR_BIT ((EXP), SR_MASK_CS)
 #define SET_BANKN(EXP) \
 do { \
-  IBNR = (IBNR & 0xfe00) | (EXP & 0x1f); \
+  IBNR = (IBNR & 0xfe00) | ((EXP) & 0x1f); \
 } while (0)
 #define SET_ME(EXP) \
 do { \
-  IBNR = (IBNR & 0x3fff) | ((EXP & 0x3) << 14); \
+  IBNR = (IBNR & 0x3fff) | (((EXP) & 0x3) << 14); \
 } while (0)
 #define SET_SR_M(EXP) SET_SR_BIT ((EXP), SR_MASK_M)
 #define SET_SR_Q(EXP) SET_SR_BIT ((EXP), SR_MASK_Q)
 #define SET_SR_S(EXP) SET_SR_BIT ((EXP), SR_MASK_S)
 #define SET_SR_T(EXP) SET_SR_BIT ((EXP), SR_MASK_T)
-#define SET_LDST(EXP) (saved_state.asregs.cregs.named.ldst = ((EXP) != 0))
+#define SET_LDST(EXP) (saved_state.asregs.ldst = ((EXP) != 0))
 
 /* stc currently relies on being able to read SR without modifications.  */
-#define GET_SR() (saved_state.asregs.cregs.named.sr - 0)
+#define GET_SR() (saved_state.asregs.sr - 0)
 
 #define SET_SR(x) set_sr (x)
 
 #define SET_RC(x) \
-  (saved_state.asregs.cregs.named.sr \
-   = saved_state.asregs.cregs.named.sr & 0xf000ffff | ((x) & 0xfff) << 16)
+  (saved_state.asregs.sr \
+   = (saved_state.asregs.sr & 0xf000ffff) | ((x) & 0xfff) << 16)
 
 /* Manipulate FPSCR */
 
@@ -330,28 +228,13 @@ do { \
 #define FPSCR_SZ  ((GET_FPSCR () & FPSCR_MASK_SZ) != 0)
 #define FPSCR_PR  ((GET_FPSCR () & FPSCR_MASK_PR) != 0)
 
-/* Count the number of arguments in an argv.  */
-static int
-count_argc (char **argv)
-{
-  int i;
-
-  if (! argv)
-    return -1;
-
-  for (i = 0; argv[i] != NULL; ++i)
-    continue;
-  return i;
-}
-
 static void
-set_fpscr1 (x)
-	int x;
+set_fpscr1 (int x)
 {
-  int old = saved_state.asregs.sregs.named.fpscr;
-  saved_state.asregs.sregs.named.fpscr = (x);
+  int old = saved_state.asregs.fpscr;
+  saved_state.asregs.fpscr = (x);
   /* swap the floating point register banks */
-  if ((saved_state.asregs.sregs.named.fpscr ^ old) & FPSCR_MASK_FR
+  if ((saved_state.asregs.fpscr ^ old) & FPSCR_MASK_FR
       /* Ignore bit change if simulating sh-dsp.  */
       && ! target_dsp)
     {
@@ -362,19 +245,13 @@ set_fpscr1 (x)
 }
 
 /* sts relies on being able to read fpscr directly.  */
-#define GET_FPSCR()  (saved_state.asregs.sregs.named.fpscr)
+#define GET_FPSCR()  (saved_state.asregs.fpscr)
 #define SET_FPSCR(x) \
 do { \
   set_fpscr1 (x); \
 } while (0)
 
-#define DSR  (saved_state.asregs.sregs.named.fpscr)
-
-int 
-fail ()
-{
-  abort ();
-}
+#define DSR  (saved_state.asregs.fpscr)
 
 #define RAISE_EXCEPTION(x) \
   (saved_state.asregs.exception = x, saved_state.asregs.insn_end = 0)
@@ -385,15 +262,14 @@ fail ()
 /* This function exists mainly for the purpose of setting a breakpoint to
    catch simulated bus errors when running the simulator under GDB.  */
 
-void
-raise_exception (x)
-     int x;
+static void
+raise_exception (int x)
 {
   RAISE_EXCEPTION (x);
 }
 
-void
-raise_buserror ()
+static void
+raise_buserror (void)
 {
   raise_exception (SIGBUS);
 }
@@ -473,33 +349,22 @@ int valid[16];
 #define UNDEF(x)
 #endif
 
-static void parse_and_set_memory_size PARAMS ((char *str));
-static int IOMEM PARAMS ((int addr, int write, int value));
-static struct loop_bounds get_loop_bounds PARAMS ((int, int, unsigned char *,
-						   unsigned char *, int, int));
-static void process_wlat_addr PARAMS ((int, int));
-static void process_wwat_addr PARAMS ((int, int));
-static void process_wbat_addr PARAMS ((int, int));
-static int process_rlat_addr PARAMS ((int));
-static int process_rwat_addr PARAMS ((int));
-static int process_rbat_addr PARAMS ((int));
-static void INLINE wlat_fast PARAMS ((unsigned char *, int, int, int));
-static void INLINE wwat_fast PARAMS ((unsigned char *, int, int, int, int));
-static void INLINE wbat_fast PARAMS ((unsigned char *, int, int, int));
-static int INLINE rlat_fast PARAMS ((unsigned char *, int, int));
-static int INLINE rwat_fast PARAMS ((unsigned char *, int, int, int));
-static int INLINE rbat_fast PARAMS ((unsigned char *, int, int));
-
-static host_callback *callback;
-
-
+static void parse_and_set_memory_size (SIM_DESC sd, const char *str);
+static int IOMEM (int addr, int write, int value);
+static struct loop_bounds get_loop_bounds (int, int, unsigned char *,
+					   unsigned char *, int, int);
+static void process_wlat_addr (int, int);
+static void process_wwat_addr (int, int);
+static void process_wbat_addr (int, int);
+static int process_rlat_addr (int);
+static int process_rwat_addr (int);
+static int process_rbat_addr (int);
 
 /* Floating point registers */
 
 #define DR(n) (get_dr (n))
 static double
-get_dr (n)
-     int n;
+get_dr (int n)
 {
   n = (n & ~1);
   if (host_little_endian)
@@ -519,9 +384,7 @@ get_dr (n)
 
 #define SET_DR(n, EXP) set_dr ((n), (EXP))
 static void
-set_dr (n, exp)
-     int n;
-     double exp;
+set_dr (int n, double exp)
 {
   n = (n & ~1);
   if (host_little_endian)
@@ -549,15 +412,15 @@ set_dr (n, exp)
 #define XF(n) (saved_state.asregs.fregs[(n) >> 5].i[(n) & 0x1f])
 #define SET_XF(n,EXP) (saved_state.asregs.fregs[(n) >> 5].i[(n) & 0x1f] = (EXP))
 
-#define RS saved_state.asregs.cregs.named.rs
-#define RE saved_state.asregs.cregs.named.re
-#define MOD (saved_state.asregs.cregs.named.mod)
+#define RS saved_state.asregs.rs
+#define RE saved_state.asregs.re
+#define MOD (saved_state.asregs.mod)
 #define SET_MOD(i) \
 (MOD = (i), \
  MOD_ME = (unsigned) MOD >> 16 | (SR_DMY ? ~0xffff : (SR_DMX ? 0 : 0x10000)), \
  MOD_DELTA = (MOD & 0xffff) - ((unsigned) MOD >> 16))
 
-#define DSP_R(n) saved_state.asregs.sregs.i[(n)]
+#define DSP_R(n) saved_state.asregs.sregs[(n)]
 #define DSP_GRD(n) DSP_R ((n) + 8)
 #define GET_DSP_GRD(n) ((n | 2) == 7 ? SEXT (DSP_GRD (n)) : SIGN32 (DSP_R (n)))
 #define A1 DSP_R (5)
@@ -614,8 +477,7 @@ set_dr (n, exp)
 } while (0)
 
 static void
-set_sr (new_sr)
-     int new_sr;
+set_sr (int new_sr)
 {
   /* do we need to swap banks */
   int old_gpr = SR_MD && SR_RB;
@@ -625,18 +487,17 @@ set_sr (new_sr)
       int i, tmp;
       for (i = 0; i < 8; i++)
 	{
-	  tmp = saved_state.asregs.cregs.named.bank[i];
-	  saved_state.asregs.cregs.named.bank[i] = saved_state.asregs.regs[i];
+	  tmp = saved_state.asregs.bank[i];
+	  saved_state.asregs.bank[i] = saved_state.asregs.regs[i];
 	  saved_state.asregs.regs[i] = tmp;
 	}
     }
-  saved_state.asregs.cregs.named.sr = new_sr;
+  saved_state.asregs.sr = new_sr;
   SET_MOD (MOD);
 }
 
-static void INLINE 
-wlat_fast (memory, x, value, maskl)
-     unsigned char *memory;
+static INLINE void
+wlat_fast (unsigned char *memory, int x, int value, int maskl)
 {
   int v = value;
   unsigned int *p = (unsigned int *) (memory + x);
@@ -644,9 +505,8 @@ wlat_fast (memory, x, value, maskl)
   *p = v;
 }
 
-static void INLINE 
-wwat_fast (memory, x, value, maskw, endianw)
-     unsigned char *memory;
+static INLINE void
+wwat_fast (unsigned char *memory, int x, int value, int maskw, int endianw)
 {
   int v = value;
   unsigned short *p = (unsigned short *) (memory + (x ^ endianw));
@@ -654,9 +514,8 @@ wwat_fast (memory, x, value, maskw, endianw)
   *p = v;
 }
 
-static void INLINE 
-wbat_fast (memory, x, value, maskb)
-     unsigned char *memory;
+static INLINE void
+wbat_fast (unsigned char *memory, int x, int value, int maskb)
 {
   unsigned char *p = memory + (x ^ endianb);
   WRITE_BUSERROR (x, maskb, value, process_wbat_addr);
@@ -666,9 +525,8 @@ wbat_fast (memory, x, value, maskb)
 
 /* Read functions */
 
-static int INLINE 
-rlat_fast (memory, x, maskl)
-     unsigned char *memory;
+static INLINE int
+rlat_fast (unsigned char *memory, int x, int maskl)
 {
   unsigned int *p = (unsigned int *) (memory + x);
   READ_BUSERROR (x, maskl, process_rlat_addr);
@@ -676,10 +534,8 @@ rlat_fast (memory, x, maskl)
   return *p;
 }
 
-static int INLINE 
-rwat_fast (memory, x, maskw, endianw)
-     unsigned char *memory;
-     int x, maskw, endianw;
+static INLINE int
+rwat_fast (unsigned char *memory, int x, int maskw, int endianw)
 {
   unsigned short *p = (unsigned short *) (memory + (x ^ endianw));
   READ_BUSERROR (x, maskw, process_rwat_addr);
@@ -687,18 +543,16 @@ rwat_fast (memory, x, maskw, endianw)
   return *p;
 }
 
-static int INLINE 
-riat_fast (insn_ptr, endianw)
-     unsigned char *insn_ptr;
+static INLINE int
+riat_fast (unsigned char *insn_ptr, int endianw)
 {
-  unsigned short *p = (unsigned short *) ((size_t) insn_ptr ^ endianw);
+  unsigned short *p = (unsigned short *) ((uintptr_t) insn_ptr ^ endianw);
 
   return *p;
 }
 
-static int INLINE 
-rbat_fast (memory, x, maskb)
-     unsigned char *memory;
+static INLINE int
+rbat_fast (unsigned char *memory, int x, int maskb)
 {
   unsigned char *p = memory + (x ^ endianb);
   READ_BUSERROR (x, maskb, process_rbat_addr);
@@ -721,11 +575,7 @@ rbat_fast (memory, x, maskb)
 
 #define RDAT(x, n) (do_rdat (memory, (x), (n), (maskl)))
 static int
-do_rdat (memory, x, n, maskl)
-     char *memory;
-     int x;
-     int n;
-     int maskl;
+do_rdat (unsigned char *memory, int x, int n, int maskl)
 {
   int f0;
   int f1;
@@ -740,11 +590,7 @@ do_rdat (memory, x, n, maskl)
 
 #define WDAT(x, n) (do_wdat (memory, (x), (n), (maskl)))
 static int
-do_wdat (memory, x, n, maskl)
-     char *memory;
-     int x;
-     int n;
-     int maskl;
+do_wdat (unsigned char *memory, int x, int n, int maskl)
 {
   int f0;
   int f1;
@@ -758,9 +604,7 @@ do_wdat (memory, x, n, maskl)
 }
 
 static void
-process_wlat_addr (addr, value)
-     int addr;
-     int value;
+process_wlat_addr (int addr, int value)
 {
   unsigned int *ptr;
 
@@ -769,9 +613,7 @@ process_wlat_addr (addr, value)
 }
 
 static void
-process_wwat_addr (addr, value)
-     int addr;
-     int value;
+process_wwat_addr (int addr, int value)
 {
   unsigned short *ptr;
 
@@ -780,9 +622,7 @@ process_wwat_addr (addr, value)
 }
 
 static void
-process_wbat_addr (addr, value)
-     int addr;
-     int value;
+process_wbat_addr (int addr, int value)
 {
   unsigned char *ptr;
 
@@ -791,8 +631,7 @@ process_wbat_addr (addr, value)
 }
 
 static int
-process_rlat_addr (addr)
-     int addr;
+process_rlat_addr (int addr)
 {
   unsigned char *ptr;
 
@@ -801,8 +640,7 @@ process_rlat_addr (addr)
 }
 
 static int
-process_rwat_addr (addr)
-     int addr;
+process_rwat_addr (int addr)
 {
   unsigned char *ptr;
 
@@ -811,8 +649,7 @@ process_rwat_addr (addr)
 }
 
 static int
-process_rbat_addr (addr)
-     int addr;
+process_rbat_addr (int addr)
 {
   unsigned char *ptr;
 
@@ -862,7 +699,7 @@ do { \
 #else
 
 #define MA(n) \
-  do { memstalls += ((((long) PC & 3) != 0) ? (n) : ((n) - 1)); } while (0)
+  do { memstalls += ((((uintptr_t) PC & 3) != 0) ? (n) : ((n) - 1)); } while (0)
 
 #define L(x)   thislock = x;
 #define TL(x)  if ((x) == prevlock) stalls++;
@@ -873,7 +710,7 @@ do { \
 #if defined(__GO32__)
 int sim_memory_size = 19;
 #else
-int sim_memory_size = 24;
+int sim_memory_size = 30;
 #endif
 
 static int sim_profile_size = 17;
@@ -893,10 +730,7 @@ static int nsamples;
 #define SCI_TDRE	0x80	/* Transmit data register empty */
 
 static int
-IOMEM (addr, write, value)
-     int addr;
-     int write;
-     int value;
+IOMEM (int addr, int write, int value)
 {
   if (write)
     {
@@ -923,22 +757,21 @@ IOMEM (addr, write, value)
 }
 
 static int
-get_now ()
+get_now (void)
 {
-  return time ((long *) 0);
+  return time (NULL);
 }
 
 static int
-now_persec ()
+now_persec (void)
 {
   return 1;
 }
 
 static FILE *profile_file;
 
-static unsigned INLINE
-swap (n)
-     unsigned n;
+static INLINE unsigned
+swap (unsigned n)
 {
   if (endianb)
     n = (n << 24 | (n & 0xff00) << 8
@@ -946,9 +779,8 @@ swap (n)
   return n;
 }
 
-static unsigned short INLINE
-swap16 (n)
-     unsigned short n;
+static INLINE unsigned short
+swap16 (unsigned short n)
 {
   if (endianb)
     n = n << 8 | (n & 0xff00) >> 8;
@@ -956,8 +788,7 @@ swap16 (n)
 }
 
 static void
-swapout (n)
-     int n;
+swapout (int n)
 {
   if (profile_file)
     {
@@ -968,8 +799,7 @@ swapout (n)
 }
 
 static void
-swapout16 (n)
-     int n;
+swapout16 (int n)
 {
   union { char b[4]; int n; } u;
   u.n = swap16 (n);
@@ -979,8 +809,7 @@ swapout16 (n)
 /* Turn a pointer in a register into a pointer into real memory. */
 
 static char *
-ptr (x)
-     int x;
+ptr (int x)
 {
   return (char *) (x + saved_state.asregs.memory);
 }
@@ -990,8 +819,7 @@ ptr (x)
    to use this string as a zero-terminated string on the host.
    (Not counting the rounding up needed to operate on entire words.)  */
 static int
-strswaplen (str)
-     int str;
+strswaplen (int str)
 {
   unsigned char *memory = saved_state.asregs.memory;
   int start, end;
@@ -1005,9 +833,7 @@ strswaplen (str)
 }
 
 static void
-strnswap (str, len)
-     int str;
-     int len;
+strnswap (int str, int len)
 {
   int *start, *end;
 
@@ -1029,12 +855,12 @@ strnswap (str, len)
    return offset by which to adjust pc.  */
 
 static int
-trap (i, regs, insn_ptr, memory, maskl, maskw, endianw)
-     int i;
-     int *regs;
-     unsigned char *insn_ptr;
-     unsigned char *memory;
+trap (SIM_DESC sd, int i, int *regs, unsigned char *insn_ptr,
+      unsigned char *memory, int maskl, int maskw, int endianw)
 {
+  host_callback *callback = STATE_CALLBACK (sd);
+  char **prog_argv = STATE_PROG_ARGV (sd);
+
   switch (i)
     {
     case 1:
@@ -1053,7 +879,6 @@ trap (i, regs, insn_ptr, memory, maskl, maskw, endianw)
       }
     case 34:
       {
-	extern int errno;
 	int perrno = errno;
 	errno = 0;
 
@@ -1061,21 +886,21 @@ trap (i, regs, insn_ptr, memory, maskl, maskw, endianw)
 	  {
 
 #if !defined(__GO32__) && !defined(_WIN32)
-	  case SYS_fork:
+	  case TARGET_NEWLIB_SH_SYS_fork:
 	    regs[0] = fork ();
 	    break;
 /* This would work only if endianness matched between host and target.
    Besides, it's quite dangerous.  */
 #if 0
-	  case SYS_execve:
+	  case TARGET_NEWLIB_SH_SYS_execve:
 	    regs[0] = execve (ptr (regs[5]), (char **) ptr (regs[6]), 
 			      (char **) ptr (regs[7]));
 	    break;
-	  case SYS_execv:
+	  case TARGET_NEWLIB_SH_SYS_execv:
 	    regs[0] = execve (ptr (regs[5]), (char **) ptr (regs[6]), 0);
 	    break;
 #endif
-	  case SYS_pipe:
+	  case TARGET_NEWLIB_SH_SYS_pipe:
 	    {
 	      regs[0] = (BUSERROR (regs[5], maskl)
 			 ? -EINVAL
@@ -1083,18 +908,18 @@ trap (i, regs, insn_ptr, memory, maskl, maskw, endianw)
 	    }
 	    break;
 
-	  case SYS_wait:
-	    regs[0] = wait (ptr (regs[5]));
+	  case TARGET_NEWLIB_SH_SYS_wait:
+	    regs[0] = wait ((int *) ptr (regs[5]));
 	    break;
 #endif /* !defined(__GO32__) && !defined(_WIN32) */
 
-	  case SYS_read:
+	  case TARGET_NEWLIB_SH_SYS_read:
 	    strnswap (regs[6], regs[7]);
 	    regs[0]
 	      = callback->read (callback, regs[5], ptr (regs[6]), regs[7]);
 	    strnswap (regs[6], regs[7]);
 	    break;
-	  case SYS_write:
+	  case TARGET_NEWLIB_SH_SYS_write:
 	    strnswap (regs[6], regs[7]);
 	    if (regs[5] == 1)
 	      regs[0] = (int) callback->write_stdout (callback, 
@@ -1104,13 +929,13 @@ trap (i, regs, insn_ptr, memory, maskl, maskw, endianw)
 					       ptr (regs[6]), regs[7]);
 	    strnswap (regs[6], regs[7]);
 	    break;
-	  case SYS_lseek:
+	  case TARGET_NEWLIB_SH_SYS_lseek:
 	    regs[0] = callback->lseek (callback,regs[5], regs[6], regs[7]);
 	    break;
-	  case SYS_close:
+	  case TARGET_NEWLIB_SH_SYS_close:
 	    regs[0] = callback->close (callback,regs[5]);
 	    break;
-	  case SYS_open:
+	  case TARGET_NEWLIB_SH_SYS_open:
 	    {
 	      int len = strswaplen (regs[5]);
 	      strnswap (regs[5], len);
@@ -1118,13 +943,13 @@ trap (i, regs, insn_ptr, memory, maskl, maskw, endianw)
 	      strnswap (regs[5], len);
 	      break;
 	    }
-	  case SYS_exit:
+	  case TARGET_NEWLIB_SH_SYS_exit:
 	    /* EXIT - caller can look in r5 to work out the reason */
 	    raise_exception (SIGQUIT);
 	    regs[0] = regs[5];
 	    break;
 
-	  case SYS_stat:	/* added at hmsi */
+	  case TARGET_NEWLIB_SH_SYS_stat:	/* added at hmsi */
 	    /* stat system call */
 	    {
 	      struct stat host_stat;
@@ -1173,7 +998,7 @@ trap (i, regs, insn_ptr, memory, maskl, maskw, endianw)
 	    break;
 
 #ifndef _WIN32
-	  case SYS_chown:
+	  case TARGET_NEWLIB_SH_SYS_chown:
 	    {
 	      int len = strswaplen (regs[5]);
 
@@ -1183,7 +1008,7 @@ trap (i, regs, insn_ptr, memory, maskl, maskw, endianw)
 	      break;
 	    }
 #endif /* _WIN32 */
-	  case SYS_chmod:
+	  case TARGET_NEWLIB_SH_SYS_chmod:
 	    {
 	      int len = strswaplen (regs[5]);
 
@@ -1192,28 +1017,33 @@ trap (i, regs, insn_ptr, memory, maskl, maskw, endianw)
 	      strnswap (regs[5], len);
 	      break;
 	    }
-	  case SYS_utime:
+	  case TARGET_NEWLIB_SH_SYS_utime:
 	    {
 	      /* Cast the second argument to void *, to avoid type mismatch
 		 if a prototype is present.  */
 	      int len = strswaplen (regs[5]);
 
 	      strnswap (regs[5], len);
+#ifdef HAVE_UTIME_H
 	      regs[0] = utime (ptr (regs[5]), (void *) ptr (regs[6]));
+#else
+	      errno = ENOSYS;
+	      regs[0] = -1;
+#endif
 	      strnswap (regs[5], len);
 	      break;
 	    }
-	  case SYS_argc:
-	    regs[0] = count_argc (prog_argv);
+	  case TARGET_NEWLIB_SH_SYS_argc:
+	    regs[0] = countargv (prog_argv);
 	    break;
-	  case SYS_argnlen:
-	    if (regs[5] < count_argc (prog_argv))
+	  case TARGET_NEWLIB_SH_SYS_argnlen:
+	    if (regs[5] < countargv (prog_argv))
 	      regs[0] = strlen (prog_argv[regs[5]]);
 	    else
 	      regs[0] = -1;
 	    break;
-	  case SYS_argn:
-	    if (regs[5] < count_argc (prog_argv))
+	  case TARGET_NEWLIB_SH_SYS_argn:
+	    if (regs[5] < countargv (prog_argv))
 	      {
 		/* Include the termination byte.  */
 		int i = strlen (prog_argv[regs[5]]) + 1;
@@ -1222,13 +1052,13 @@ trap (i, regs, insn_ptr, memory, maskl, maskw, endianw)
 	    else
 	      regs[0] = -1;
 	    break;
-	  case SYS_time:
+	  case TARGET_NEWLIB_SH_SYS_time:
 	    regs[0] = get_now ();
 	    break;
-	  case SYS_ftruncate:
+	  case TARGET_NEWLIB_SH_SYS_ftruncate:
 	    regs[0] = callback->ftruncate (callback, regs[5], regs[6]);
 	    break;
-	  case SYS_truncate:
+	  case TARGET_NEWLIB_SH_SYS_truncate:
 	    {
 	      int len = strswaplen (regs[5]);
 	      strnswap (regs[5], len);
@@ -1261,22 +1091,8 @@ trap (i, regs, insn_ptr, memory, maskl, maskw, endianw)
   return 0;
 }
 
-void
-control_c (sig, code, scp, addr)
-     int sig;
-     int code;
-     char *scp;
-     char *addr;
-{
-  raise_exception (SIGINT);
-}
-
-static int
-div1 (R, iRn2, iRn1/*, T*/)
-     int *R;
-     int iRn1;
-     int iRn2;
-     /* int T;*/
+static void
+div1 (int *R, int iRn2, int iRn1/*, int T*/)
 {
   unsigned long tmp0;
   unsigned char old_q, tmp1;
@@ -1286,74 +1102,51 @@ div1 (R, iRn2, iRn1/*, T*/)
   R[iRn1] <<= 1;
   R[iRn1] |= (unsigned long) T;
 
-  switch (old_q)
+  if (!old_q)
     {
-    case 0:
-      switch (M)
+      if (!M)
 	{
-	case 0:
 	  tmp0 = R[iRn1];
 	  R[iRn1] -= R[iRn2];
 	  tmp1 = (R[iRn1] > tmp0);
-	  switch (Q)
-	    {
-	    case 0:
-	      SET_SR_Q (tmp1);
-	      break;
-	    case 1:
-	      SET_SR_Q ((unsigned char) (tmp1 == 0));
-	      break;
-	    }
-	  break;
-	case 1:
-	  tmp0 = R[iRn1];
-	  R[iRn1] += R[iRn2];
-	  tmp1 = (R[iRn1] < tmp0);
-	  switch (Q)
-	    {
-	    case 0:
-	      SET_SR_Q ((unsigned char) (tmp1 == 0));
-	      break;
-	    case 1:
-	      SET_SR_Q (tmp1);
-	      break;
-	    }
-	  break;
+	  if (!Q)
+	    SET_SR_Q (tmp1);
+	  else
+	    SET_SR_Q ((unsigned char) (tmp1 == 0));
 	}
-      break;
-    case 1:
-      switch (M)
+      else
 	{
-	case 0:
 	  tmp0 = R[iRn1];
 	  R[iRn1] += R[iRn2];
 	  tmp1 = (R[iRn1] < tmp0);
-	  switch (Q)
-	    {
-	    case 0:
-	      SET_SR_Q (tmp1);
-	      break;
-	    case 1:
-	      SET_SR_Q ((unsigned char) (tmp1 == 0));
-	      break;
-	    }
-	  break;
-	case 1:
+	  if (!Q)
+	    SET_SR_Q ((unsigned char) (tmp1 == 0));
+	  else
+	    SET_SR_Q (tmp1);
+	}
+    }
+  else
+    {
+      if (!M)
+	{
+	  tmp0 = R[iRn1];
+	  R[iRn1] += R[iRn2];
+	  tmp1 = (R[iRn1] < tmp0);
+	  if (!Q)
+	    SET_SR_Q (tmp1);
+	  else
+	    SET_SR_Q ((unsigned char) (tmp1 == 0));
+	}
+      else
+	{
 	  tmp0 = R[iRn1];
 	  R[iRn1] -= R[iRn2];
 	  tmp1 = (R[iRn1] > tmp0);
-	  switch (Q)
-	    {
-	    case 0:
-	      SET_SR_Q ((unsigned char) (tmp1 == 0));
-	      break;
-	    case 1:
-	      SET_SR_Q (tmp1);
-	      break;
-	    }
-	  break;
+	  if (!Q)
+	    SET_SR_Q ((unsigned char) (tmp1 == 0));
+	  else
+	    SET_SR_Q (tmp1);
 	}
-      break;
     }
   /*T = (Q == M);*/
   SET_SR_T (Q == M);
@@ -1361,52 +1154,23 @@ div1 (R, iRn2, iRn1/*, T*/)
 }
 
 static void
-dmul (sign, rm, rn)
-     int sign;
-     unsigned int rm;
-     unsigned int rn;
+dmul_s (uint32_t rm, uint32_t rn)
 {
-  unsigned long RnL, RnH;
-  unsigned long RmL, RmH;
-  unsigned long temp0, temp1, temp2, temp3;
-  unsigned long Res2, Res1, Res0;
-
-  RnL = rn & 0xffff;
-  RnH = (rn >> 16) & 0xffff;
-  RmL = rm & 0xffff;
-  RmH = (rm >> 16) & 0xffff;
-  temp0 = RmL * RnL;
-  temp1 = RmH * RnL;
-  temp2 = RmL * RnH;
-  temp3 = RmH * RnH;
-  Res2 = 0;
-  Res1 = temp1 + temp2;
-  if (Res1 < temp1)
-    Res2 += 0x00010000;
-  temp1 = (Res1 << 16) & 0xffff0000;
-  Res0 = temp0 + temp1;
-  if (Res0 < temp0)
-    Res2 += 1;
-  Res2 += ((Res1 >> 16) & 0xffff) + temp3;
-  
-  if (sign)
-    {
-      if (rn & 0x80000000)
-	Res2 -= rm;
-      if (rm & 0x80000000)
-	Res2 -= rn;
-    }
-
-  MACH = Res2;
-  MACL = Res0;
+  int64_t res = (int64_t)(int32_t)rm * (int64_t)(int32_t)rn;
+  MACH = (uint32_t)((uint64_t)res >> 32);
+  MACL = (uint32_t)res;
 }
 
 static void
-macw (regs, memory, n, m, endianw)
-     int *regs;
-     unsigned char *memory;
-     int m, n;
-     int endianw;
+dmul_u (uint32_t rm, uint32_t rn)
+{
+  uint64_t res = (uint64_t)(uint32_t)rm * (uint64_t)(uint32_t)rn;
+  MACH = (uint32_t)(res >> 32);
+  MACL = (uint32_t)res;
+}
+
+static void
+macw (int *regs, unsigned char *memory, int n, int m, int endianw)
 {
   long tempm, tempn;
   long prod, macl, sum;
@@ -1440,10 +1204,7 @@ macw (regs, memory, n, m, endianw)
 }
 
 static void
-macl (regs, memory, n, m)
-     int *regs;
-     unsigned char *memory;
-     int m, n;
+macl (int *regs, unsigned char *memory, int n, int m)
 {
   long tempm, tempn;
   long macl, mach;
@@ -1509,7 +1270,7 @@ enum {
 };
 
 /* Do extended displacement move instructions.  */
-void
+static void
 do_long_move_insn (int op, int disp12, int m, int n, int *thatlock)
 {
   int memstalls = 0;
@@ -1576,7 +1337,7 @@ do_long_move_insn (int op, int disp12, int m, int n, int *thatlock)
 }
 
 /* Do binary logical bit-manipulation insns.  */
-void
+static void
 do_blog_insn (int imm, int addr, int binop, 
 	      unsigned char *memory, int maskb)
 {
@@ -1618,7 +1379,8 @@ do_blog_insn (int imm, int addr, int binop,
     break;
   }
 }
-float
+
+static float
 fsca_s (int in, double (*f) (double))
 {
   double rad = ldexp ((in & 0xffff), -15) * 3.141592653589793238462643383;
@@ -1637,10 +1399,10 @@ fsca_s (int in, double (*f) (double))
   lower = result - error;
   frac = frexp (lower, &exp);
   lower = ldexp (ceil (ldexp (frac, 24)), exp - 24);
-  return abs (upper - result) >= abs (lower - result) ? upper : lower;
+  return fabs (upper - result) >= fabs (lower - result) ? upper : lower;
 }
 
-float
+static float
 fsrra_s (float in)
 {
   double result = 1. / sqrt (in);
@@ -1677,10 +1439,8 @@ fsrra_s (float in)
    pointed to by RS and RE -- for SETRC, they're not (see docs).  */
 
 static struct loop_bounds
-get_loop_bounds_ext (rs, re, memory, mem_end, maskw, endianw)
-     int rs, re;
-     unsigned char *memory, *mem_end;
-     int maskw, endianw;
+get_loop_bounds_ext (int rs, int re, unsigned char *memory,
+		     unsigned char *mem_end, int maskw, int endianw)
 {
   struct loop_bounds loop;
 
@@ -1694,10 +1454,8 @@ get_loop_bounds_ext (rs, re, memory, mem_end, maskw, endianw)
 }
 
 static struct loop_bounds
-get_loop_bounds (rs, re, memory, mem_end, maskw, endianw)
-     int rs, re;
-     unsigned char *memory, *mem_end;
-     int maskw, endianw;
+get_loop_bounds (int rs, int re, unsigned char *memory, unsigned char *mem_end,
+		 int maskw, int endianw)
 {
   struct loop_bounds loop;
 
@@ -1732,15 +1490,13 @@ get_loop_bounds (rs, re, memory, mem_end, maskw, endianw)
   return loop;
 }
 
-static void ppi_insn ();
-
 #include "ppi.c"
 
 /* Provide calloc / free versions that use an anonymous mmap.  This can
    significantly cut the start-up time when a large simulator memory is
    required, because pages are only zeroed on demand.  */
 #ifdef MAP_ANONYMOUS
-void *
+static void *
 mcalloc (size_t nmemb, size_t size)
 {
   void *page;
@@ -1759,10 +1515,8 @@ mcalloc (size_t nmemb, size_t size)
 
 /* Set the memory size to the power of two provided. */
 
-void
-sim_size (power)
-     int power;
-
+static void
+sim_size (int power)
 {
   sim_memory_size = power;
 
@@ -1788,8 +1542,7 @@ sim_size (power)
 }
 
 static void
-init_dsp (abfd)
-     struct bfd *abfd;
+init_dsp (struct bfd *abfd)
 {
   int was_dsp = target_dsp;
   unsigned long mach = bfd_get_mach (abfd);
@@ -1872,7 +1625,7 @@ init_dsp (abfd)
     {
       int i, tmp;
 
-      for (i = (sizeof sh_dsp_table / sizeof sh_dsp_table[0]) - 1; i >= 0; i--)
+      for (i = ARRAY_SIZE (sh_dsp_table) - 1; i >= 0; i--)
 	{
 	  tmp = sh_jump_table[0xf000 + i];
 	  sh_jump_table[0xf000 + i] = sh_dsp_table[i];
@@ -1882,12 +1635,8 @@ init_dsp (abfd)
 }
 
 static void
-init_pointers ()
+init_pointers (void)
 {
-  host_little_endian = 0;
-  * (char*) &host_little_endian = 1;
-  host_little_endian &= 1;
-
   if (saved_state.asregs.msize != 1 << sim_memory_size)
     {
       sim_size (sim_memory_size);
@@ -1914,7 +1663,7 @@ init_pointers ()
 }
 
 static void
-dump_profile ()
+dump_profile (void)
 {
   unsigned int minpc;
   unsigned int maxpc;
@@ -1935,9 +1684,7 @@ dump_profile ()
 }
 
 static void
-gotcall (from, to)
-     int from;
-     int to;
+gotcall (int from, int to)
 {
   swapout (from);
   swapout (to);
@@ -1946,18 +1693,8 @@ gotcall (from, to)
 
 #define MMASKB ((saved_state.asregs.msize -1) & ~0)
 
-int
-sim_stop (sd)
-     SIM_DESC sd;
-{
-  raise_exception (SIGINT);
-  return 1;
-}
-
 void
-sim_resume (sd, step, siggnal)
-     SIM_DESC sd;
-     int step, siggnal;
+sim_resume (SIM_DESC sd, int step, int siggnal)
 {
   register unsigned char *insn_ptr;
   unsigned char *mem_end;
@@ -1979,7 +1716,6 @@ sim_resume (sd, step, siggnal)
   register int endianw = global_endianw;
 
   int tick_start = get_now ();
-  void (*prev) ();
   void (*prev_fpe) ();
 
   register unsigned short *jump_table = sh_jump_table;
@@ -1996,7 +1732,6 @@ sim_resume (sd, step, siggnal)
   register unsigned char *memory;
   register unsigned int sbit = ((unsigned int) 1 << 31);
 
-  prev = signal (SIGINT, control_c);
   prev_fpe = signal (SIGFPE, SIG_IGN);
 
   init_pointers ();
@@ -2014,7 +1749,7 @@ sim_resume (sd, step, siggnal)
   CHECK_INSN_PTR (insn_ptr);
 
 #ifndef PR
-  PR = saved_state.asregs.sregs.named.pr;
+  PR = saved_state.asregs.pr;
 #endif
   /*T = GET_SR () & SR_MASK_T;*/
   prevlock = saved_state.asregs.prevlock;
@@ -2050,8 +1785,6 @@ sim_resume (sd, step, siggnal)
       insts++;
 #endif
     top:
-      if (tracing)
-	fprintf (stderr, "PC: %08x, insn: %04x\n", PH2T (insn_ptr), iword);
 
 #include "code.c"
 
@@ -2061,6 +1794,8 @@ sim_resume (sd, step, siggnal)
 
       if (--pollcount < 0)
 	{
+	  host_callback *callback = STATE_CALLBACK (sd);
+
 	  pollcount = POLL_QUIT_INTERVAL;
 	  if ((*callback->poll_quit) != NULL
 	      && (*callback->poll_quit) (callback))
@@ -2095,7 +1830,7 @@ sim_resume (sd, step, siggnal)
     }
   if (saved_state.asregs.insn_end == loop.end)
     {
-      saved_state.asregs.cregs.named.sr += SR_RC_INCREMENT;
+      saved_state.asregs.sr += SR_RC_INCREMENT;
       if (SR_RC)
 	insn_ptr = loop.start;
       else
@@ -2122,7 +1857,7 @@ sim_resume (sd, step, siggnal)
   saved_state.asregs.insts += insts;
   saved_state.asregs.pc = PH2T (insn_ptr);
 #ifndef PR
-  saved_state.asregs.sregs.named.pr = PR;
+  saved_state.asregs.pr = PR;
 #endif
 
   saved_state.asregs.prevlock = prevlock;
@@ -2134,41 +1869,34 @@ sim_resume (sd, step, siggnal)
     }
 
   signal (SIGFPE, prev_fpe);
-  signal (SIGINT, prev);
 }
 
-int
-sim_write (sd, addr, buffer, size)
-     SIM_DESC sd;
-     SIM_ADDR addr;
-     const unsigned char *buffer;
-     int size;
+uint64_t
+sim_write (SIM_DESC sd, uint64_t addr, const void *buffer, uint64_t size)
 {
   int i;
+  const unsigned char *data = buffer;
 
   init_pointers ();
 
   for (i = 0; i < size; i++)
     {
-      saved_state.asregs.memory[(MMASKB & (addr + i)) ^ endianb] = buffer[i];
+      saved_state.asregs.memory[(MMASKB & (addr + i)) ^ endianb] = data[i];
     }
   return size;
 }
 
-int
-sim_read (sd, addr, buffer, size)
-     SIM_DESC sd;
-     SIM_ADDR addr;
-     unsigned char *buffer;
-     int size;
+uint64_t
+sim_read (SIM_DESC sd, uint64_t addr, void *buffer, uint64_t size)
 {
   int i;
+  unsigned char *data = buffer;
 
   init_pointers ();
 
   for (i = 0; i < size; i++)
     {
-      buffer[i] = saved_state.asregs.memory[(MMASKB & (addr + i)) ^ endianb];
+      data[i] = saved_state.asregs.memory[(MMASKB & (addr + i)) ^ endianb];
     }
   return size;
 }
@@ -2182,12 +1910,8 @@ enum {
   REGBANK_MACL = 19
 };
 
-int
-sim_store_register (sd, rn, memory, length)
-     SIM_DESC sd;
-     int rn;
-     unsigned char *memory;
-     int length;
+static int
+sh_reg_store (SIM_CPU *cpu, int rn, const void *memory, int length)
 {
   unsigned val;
 
@@ -2359,12 +2083,8 @@ sim_store_register (sd, rn, memory, length)
   return length;
 }
 
-int
-sim_fetch_register (sd, rn, memory, length)
-     SIM_DESC sd;
-     int rn;
-     unsigned char *memory;
-     int length;
+static int
+sh_reg_fetch (SIM_CPU *cpu, int rn, void *memory, int length)
 {
   int val;
 
@@ -2534,21 +2254,8 @@ sim_fetch_register (sd, rn, memory, length)
   return length;
 }
 
-int
-sim_trace (sd)
-     SIM_DESC sd;
-{
-  tracing = 1;
-  sim_resume (sd, 0, 0);
-  tracing = 0;
-  return 1;
-}
-
 void
-sim_stop_reason (sd, reason, sigrc)
-     SIM_DESC sd;
-     enum sim_stop *reason;
-     int *sigrc;
+sim_stop_reason (SIM_DESC sd, enum sim_stop *reason, int *sigrc)
 {
   /* The SH simulator uses SIGQUIT to indicate that the program has
      exited, so we must check for it here and translate it to exit.  */
@@ -2565,65 +2272,63 @@ sim_stop_reason (sd, reason, sigrc)
 }
 
 void
-sim_info (sd, verbose)
-     SIM_DESC sd;
-     int verbose;
+sim_info (SIM_DESC sd, bool verbose)
 {
   double timetaken = 
     (double) saved_state.asregs.ticks / (double) now_persec ();
   double virttime = saved_state.asregs.cycles / 36.0e6;
 
-  callback->printf_filtered (callback, "\n\n# instructions executed  %10d\n", 
-			     saved_state.asregs.insts);
-  callback->printf_filtered (callback, "# cycles                 %10d\n",
-			     saved_state.asregs.cycles);
-  callback->printf_filtered (callback, "# pipeline stalls        %10d\n",
-			     saved_state.asregs.stalls);
-  callback->printf_filtered (callback, "# misaligned load/store  %10d\n",
-			     saved_state.asregs.memstalls);
-  callback->printf_filtered (callback, "# real time taken        %10.4f\n",
-			     timetaken);
-  callback->printf_filtered (callback, "# virtual time taken     %10.4f\n",
-			     virttime);
-  callback->printf_filtered (callback, "# profiling size         %10d\n",
-			     sim_profile_size);
-  callback->printf_filtered (callback, "# profiling frequency    %10d\n",
-			     saved_state.asregs.profile);
-  callback->printf_filtered (callback, "# profile maxpc          %10x\n",
-			     (1 << sim_profile_size) << PROFILE_SHIFT);
+  sim_io_printf (sd, "\n\n# instructions executed  %10d\n",
+		 saved_state.asregs.insts);
+  sim_io_printf (sd, "# cycles                 %10d\n",
+		 saved_state.asregs.cycles);
+  sim_io_printf (sd, "# pipeline stalls        %10d\n",
+		 saved_state.asregs.stalls);
+  sim_io_printf (sd, "# misaligned load/store  %10d\n",
+		 saved_state.asregs.memstalls);
+  sim_io_printf (sd, "# real time taken        %10.4f\n", timetaken);
+  sim_io_printf (sd, "# virtual time taken     %10.4f\n", virttime);
+  sim_io_printf (sd, "# profiling size         %10d\n", sim_profile_size);
+  sim_io_printf (sd, "# profiling frequency    %10d\n",
+		 saved_state.asregs.profile);
+  sim_io_printf (sd, "# profile maxpc          %10x\n",
+		 (1 << sim_profile_size) << PROFILE_SHIFT);
 
   if (timetaken != 0)
     {
-      callback->printf_filtered (callback, "# cycles/second          %10d\n", 
-				 (int) (saved_state.asregs.cycles / timetaken));
-      callback->printf_filtered (callback, "# simulation ratio       %10.4f\n", 
-				 virttime / timetaken);
+      sim_io_printf (sd, "# cycles/second          %10d\n",
+		     (int) (saved_state.asregs.cycles / timetaken));
+      sim_io_printf (sd, "# simulation ratio       %10.4f\n",
+		     virttime / timetaken);
     }
 }
 
-void
-sim_set_profile (n)
-     int n;
+static sim_cia
+sh_pc_get (sim_cpu *cpu)
 {
-  saved_state.asregs.profile = n;
+  return saved_state.asregs.pc;
 }
 
-void
-sim_set_profile_size (n)
-     int n;
+static void
+sh_pc_set (sim_cpu *cpu, sim_cia pc)
 {
-  sim_profile_size = n;
+  saved_state.asregs.pc = pc;
+}
+
+static void
+free_state (SIM_DESC sd)
+{
+  if (STATE_MODULES (sd) != NULL)
+    sim_module_uninstall (sd);
+  sim_cpu_free_all (sd);
+  sim_state_free (sd);
 }
 
 SIM_DESC
-sim_open (kind, cb, abfd, argv)
-     SIM_OPEN_KIND kind;
-     host_callback *cb;
-     struct bfd *abfd;
-     char **argv;
+sim_open (SIM_OPEN_KIND kind, host_callback *cb,
+	  struct bfd *abfd, char * const *argv)
 {
-  char **p;
-  int endian_set = 0;
+  char * const *p;
   int i;
   union
     {
@@ -2633,31 +2338,72 @@ sim_open (kind, cb, abfd, argv)
     }
   mem_word;
 
-  sim_kind = kind;
-  myname = argv[0];
-  callback = cb;
+  SIM_DESC sd = sim_state_alloc (kind, cb);
+  SIM_ASSERT (STATE_MAGIC (sd) == SIM_MAGIC_NUMBER);
+
+  /* Set default options before parsing user options.  */
+  current_alignment = STRICT_ALIGNMENT;
+  cb->syscall_map = cb_sh_syscall_map;
+
+  /* The cpu data is kept in a separately allocated chunk of memory.  */
+  if (sim_cpu_alloc_all (sd, 0) != SIM_RC_OK)
+    {
+      free_state (sd);
+      return 0;
+    }
+
+  if (sim_pre_argv_init (sd, argv[0]) != SIM_RC_OK)
+    {
+      free_state (sd);
+      return 0;
+    }
+
+  /* The parser will print an error message for us, so we silently return.  */
+  if (sim_parse_args (sd, argv) != SIM_RC_OK)
+    {
+      free_state (sd);
+      return 0;
+    }
+
+  /* Check for/establish the a reference program image.  */
+  if (sim_analyze_program (sd, STATE_PROG_FILE (sd), abfd) != SIM_RC_OK)
+    {
+      free_state (sd);
+      return 0;
+    }
+
+  /* Configure/verify the target byte order and other runtime
+     configuration options.  */
+  if (sim_config (sd) != SIM_RC_OK)
+    {
+      sim_module_uninstall (sd);
+      return 0;
+    }
+
+  if (sim_post_argv_init (sd) != SIM_RC_OK)
+    {
+      /* Uninstall the modules to avoid memory leaks,
+	 file descriptor leaks, etc.  */
+      sim_module_uninstall (sd);
+      return 0;
+    }
+
+  /* CPU specific initialization.  */
+  for (i = 0; i < MAX_NR_PROCESSORS; ++i)
+    {
+      SIM_CPU *cpu = STATE_CPU (sd, i);
+
+      CPU_REG_FETCH (cpu) = sh_reg_fetch;
+      CPU_REG_STORE (cpu) = sh_reg_store;
+      CPU_PC_FETCH (cpu) = sh_pc_get;
+      CPU_PC_STORE (cpu) = sh_pc_set;
+    }
 
   for (p = argv + 1; *p != NULL; ++p)
     {
-      if (strcmp (*p, "-E") == 0)
-	{
-	  ++p;
-	  if (*p == NULL)
-	    {
-	      /* FIXME: This doesn't use stderr, but then the rest of the
-		 file doesn't either.  */
-	      callback->printf_filtered (callback, "Missing argument to `-E'.\n");
-	      return 0;
-	    }
-	  target_little_endian = strcmp (*p, "big") != 0;
-          endian_set = 1;
-	}
-      else if (isdigit (**p))
-	parse_and_set_memory_size (*p);
+      if (isdigit (**p))
+	parse_and_set_memory_size (sd, *p);
     }
-
-  if (abfd != NULL && ! endian_set)
-      target_little_endian = ! bfd_big_endian (abfd);
 
   if (abfd)
     init_dsp (abfd);
@@ -2670,66 +2416,24 @@ sim_open (kind, cb, abfd, argv)
     mem_word.c[i] = i;
   endianb = mem_word.i >> (target_little_endian ? 0 : 24) & 0xff;
 
-  /* fudge our descriptor for now */
-  return (SIM_DESC) 1;
+  return sd;
 }
 
 static void
-parse_and_set_memory_size (str)
-     char *str;
+parse_and_set_memory_size (SIM_DESC sd, const char *str)
 {
   int n;
 
   n = strtol (str, NULL, 10);
-  if (n > 0 && n <= 24)
+  if (n > 0 && n <= 31)
     sim_memory_size = n;
   else
-    callback->printf_filtered (callback, "Bad memory size %d; must be 1 to 24, inclusive\n", n);
-}
-
-void
-sim_close (sd, quitting)
-     SIM_DESC sd;
-     int quitting;
-{
-  /* nothing to do */
+    sim_io_printf (sd, "Bad memory size %d; must be 1 to 31, inclusive\n", n);
 }
 
 SIM_RC
-sim_load (sd, prog, abfd, from_tty)
-     SIM_DESC sd;
-     char *prog;
-     bfd *abfd;
-     int from_tty;
-{
-  extern bfd *sim_load_file (); /* ??? Don't know where this should live.  */
-  bfd *prog_bfd;
-
-  prog_bfd = sim_load_file (sd, myname, callback, prog, abfd,
-			    sim_kind == SIM_OPEN_DEBUG,
-			    0, sim_write);
-
-  /* Set the bfd machine type.  */
-  if (prog_bfd)
-    saved_state.asregs.bfd_mach = bfd_get_mach (prog_bfd);
-  else if (abfd)
-    saved_state.asregs.bfd_mach = bfd_get_mach (abfd);
-  else
-    saved_state.asregs.bfd_mach = 0;
-
-  if (prog_bfd == NULL)
-    return SIM_RC_FAIL;
-  if (abfd == NULL)
-    bfd_close (prog_bfd);
-  return SIM_RC_OK;
-}
-
-SIM_RC
-sim_create_inferior (sd, prog_bfd, argv, env)
-     SIM_DESC sd;
-     struct bfd *prog_bfd;
-     char **argv;
-     char **env;
+sim_create_inferior (SIM_DESC sd, struct bfd *prog_bfd,
+		     char * const *argv, char * const *env)
 {
   /* Clear the registers. */
   memset (&saved_state, 0,
@@ -2743,18 +2447,16 @@ sim_create_inferior (sd, prog_bfd, argv, env)
   if (prog_bfd != NULL)
     saved_state.asregs.bfd_mach = bfd_get_mach (prog_bfd);
 
-  /* Record the program's arguments. */
-  prog_argv = argv;
+  if (prog_bfd != NULL)
+    init_dsp (prog_bfd);
 
   return SIM_RC_OK;
 }
 
 void
-sim_do_command (sd, cmd)
-     SIM_DESC sd;
-     char *cmd;
+sim_do_command (SIM_DESC sd, const char *cmd)
 {
-  char *sms_cmd = "set-memory-size";
+  const char *sms_cmd = "set-memory-size";
   int cmdsize;
 
   if (cmd == NULL || *cmd == '\0')
@@ -2766,30 +2468,16 @@ sim_do_command (sd, cmd)
   if (strncmp (cmd, sms_cmd, cmdsize) == 0 
       && strchr (" \t", cmd[cmdsize]) != NULL)
     {
-      parse_and_set_memory_size (cmd + cmdsize + 1);
+      parse_and_set_memory_size (sd, cmd + cmdsize + 1);
     }
   else if (strcmp (cmd, "help") == 0)
     {
-      (callback->printf_filtered) (callback, 
-				   "List of SH simulator commands:\n\n");
-      (callback->printf_filtered) (callback, "set-memory-size <n> -- Set the number of address bits to use\n");
-      (callback->printf_filtered) (callback, "\n");
+      sim_io_printf (sd, "List of SH simulator commands:\n\n");
+      sim_io_printf (sd, "set-memory-size <n> -- Set the number of address bits to use\n");
+      sim_io_printf (sd, "\n");
     }
   else
     {
-      (callback->printf_filtered) (callback, "Error: \"%s\" is not a valid SH simulator command.\n", cmd);
+      sim_io_printf (sd, "Error: \"%s\" is not a valid SH simulator command.\n", cmd);
     }
-}
-
-void
-sim_set_callbacks (p)
-     host_callback *p;
-{
-  callback = p;
-}
-
-char **
-sim_complete_command (SIM_DESC sd, const char *text, const char *word)
-{
-  return NULL;
 }

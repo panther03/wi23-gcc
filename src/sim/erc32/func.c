@@ -1,39 +1,37 @@
-/*
- * func.c, misc simulator functions. This file is part of SIS.
- * 
- * SIS, SPARC instruction simulator V1.8 Copyright (C) 1995 Jiri Gaisler,
- * European Space Agency
- * 
- * This program is free software; you can redistribute it and/or modify it under
- * the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 3 of the License, or (at your option)
- * any later version.
- * 
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- * 
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, see <http://www.gnu.org/licenses/>.
- * 
- */
+/* This file is part of SIS (SPARC instruction simulator)
 
-#include "config.h"
+   Copyright (C) 1995-2023 Free Software Foundation, Inc.
+   Contributed by Jiri Gaisler, European Space Agency
+
+   This program is free software; you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation; either version 3 of the License, or
+   (at your option) any later version.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
+
+   You should have received a copy of the GNU General Public License
+   along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
+
+/* This must come before any other includes.  */
+#include "defs.h"
+
 #include <signal.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <ctype.h>
 #include "sis.h"
-#include "end.h"
 #include <dis-asm.h>
 #include "sim-config.h"
-
+#include <inttypes.h>
+#include <sys/time.h>
 
 #define	VAL(x)	strtoul(x,(char **)NULL,0)
 
-extern int	current_target_byte_order;
 struct disassemble_info dinfo;
 struct pstate   sregs;
 extern struct estate ebase;
@@ -51,60 +49,58 @@ int             sparclite_board = 0;	/* emulating SPARClite board RAM? */
 char            uart_dev1[128] = "";
 char            uart_dev2[128] = "";
 extern	int	ext_irl;
-uint32		last_load_addr = 0;
+uint32_t		last_load_addr = 0;
 
 #ifdef ERRINJ
-uint32		errcnt = 0;
-uint32		errper = 0;
-uint32		errtt = 0;
-uint32		errftt = 0;
-uint32		errmec = 0;
+uint32_t		errcnt = 0;
+uint32_t		errper = 0;
+uint32_t		errtt = 0;
+uint32_t		errftt = 0;
+uint32_t		errmec = 0;
 #endif
 
 /* Forward declarations */
 
-static int	batch PARAMS ((struct pstate *sregs, char *fname));
-static void	set_rega PARAMS ((struct pstate *sregs, char *reg, uint32 rval));
-static void	disp_reg PARAMS ((struct pstate *sregs, char *reg));
-static uint32	limcalc PARAMS ((float32 freq));
-static void	int_handler PARAMS ((int32 sig));
-static void	init_event PARAMS ((void));
-static int	disp_fpu PARAMS ((struct pstate  *sregs));
-static void	disp_regs PARAMS ((struct pstate  *sregs, int cwp));
-static void	disp_ctrl PARAMS ((struct pstate *sregs));
-static void	disp_mem PARAMS ((uint32 addr, uint32 len));
+static int	batch (struct pstate *sregs, char *fname);
+static void	set_rega (struct pstate *sregs, char *reg, uint32_t rval);
+static void	disp_reg (struct pstate *sregs, char *reg);
+static uint32_t	limcalc (float32 freq);
+static void	int_handler (int32_t sig);
+static void	init_event (void);
+static int	disp_fpu (struct pstate  *sregs);
+static void	disp_regs (struct pstate  *sregs, int cwp);
+static void	disp_ctrl (struct pstate *sregs);
+static void	disp_mem (uint32_t addr, uint32_t len);
 
 static int 
-batch(sregs, fname)
-    struct pstate  *sregs;
-    char           *fname;
+batch(struct pstate *sregs, char *fname)
 {
     FILE           *fp;
-    char            lbuf[1024];
+    char           *lbuf = NULL;
+    size_t         len = 0;
+    size_t         slen;
 
     if ((fp = fopen(fname, "r")) == NULL) {
 	fprintf(stderr, "couldn't open batch file %s\n", fname);
-	return (0);
+	return 0;
     }
-    while (!feof(fp)) {
-	lbuf[0] = 0;
-	fgets(lbuf, 1023, fp);
-	if ((strlen(lbuf) > 0) && (lbuf[strlen(lbuf) - 1] == '\n'))
-	    lbuf[strlen(lbuf) - 1] = 0;
-	printf("sis> %s\n", lbuf);
-	exec_cmd(sregs, lbuf);
+    while (getline(&lbuf, &len, fp) > -1) {
+	slen = strlen(lbuf);
+	if (slen && (lbuf[slen - 1] == '\n')) {
+	    lbuf[slen - 1] = 0;
+	    printf("sis> %s\n", lbuf);
+	    exec_cmd(sregs, lbuf);
+	}
     }
+    free(lbuf);
     fclose(fp);
-    return (1);
+    return 1;
 }
 
 void
-set_regi(sregs, reg, rval)
-    struct pstate  *sregs;
-    int32           reg;
-    uint32          rval;
+set_regi(struct pstate *sregs, int32_t reg, uint32_t rval)
 {
-    uint32          cwp;
+    uint32_t          cwp;
 
     cwp = ((sregs->psr & 0x7) << 4);
     if ((reg > 0) && (reg < 8)) {
@@ -143,10 +139,10 @@ set_regi(sregs, reg, rval)
 }
 
 void
-get_regi(struct pstate * sregs, int32 reg, char *buf)
+get_regi(struct pstate * sregs, int32_t reg, unsigned char *buf)
 {
-    uint32          cwp;
-    uint32          rval = 0;
+    uint32_t          cwp;
+    uint32_t          rval = 0;
 
     cwp = ((sregs->psr & 0x7) << 4);
     if ((reg >= 0) && (reg < 8)) {
@@ -181,29 +177,18 @@ get_regi(struct pstate * sregs, int32 reg, char *buf)
     default:break;
 	}
     }
-    if (current_target_byte_order == BIG_ENDIAN) {
-	buf[0] = (rval >> 24) & 0x0ff;
-	buf[1] = (rval >> 16) & 0x0ff;
-	buf[2] = (rval >> 8) & 0x0ff;
-	buf[3] = rval & 0x0ff;
-    }
-    else {
-	buf[3] = (rval >> 24) & 0x0ff;
-	buf[2] = (rval >> 16) & 0x0ff;
-	buf[1] = (rval >> 8) & 0x0ff;
-	buf[0] = rval & 0x0ff;
-    }
+    buf[0] = (rval >> 24) & 0x0ff;
+    buf[1] = (rval >> 16) & 0x0ff;
+    buf[2] = (rval >> 8) & 0x0ff;
+    buf[3] = rval & 0x0ff;
 }
 
 
 static void
-set_rega(sregs, reg, rval)
-    struct pstate  *sregs;
-    char           *reg;
-    uint32          rval;
+set_rega(struct pstate *sregs, char *reg, uint32_t rval)
 {
-    uint32          cwp;
-    int32           err = 0;
+    uint32_t          cwp;
+    int32_t           err = 0;
 
     cwp = ((sregs->psr & 0x7) << 4);
     if (strcmp(reg, "psr") == 0)
@@ -304,9 +289,7 @@ set_rega(sregs, reg, rval)
 }
 
 static void
-disp_reg(sregs, reg)
-    struct pstate  *sregs;
-    char           *reg;
+disp_reg(struct pstate *sregs, char *reg)
 {
     if (strncmp(reg, "w",1) == 0)
 	disp_regs(sregs, VAL(&reg[1]));
@@ -315,7 +298,7 @@ disp_reg(sregs, reg)
 #ifdef ERRINJ
 
 void
-errinj()
+errinj (int32_t arg ATTRIBUTE_UNUSED)
 {
     int	err;
 
@@ -339,18 +322,17 @@ errinj()
 }
 
 void
-errinjstart()
+errinjstart (void)
 {
     if (errper) event(errinj, 0, (random()%errper));
 }
 
 #endif
 
-static uint32
-limcalc (freq)
-    float32		freq;
+static uint32_t
+limcalc (float32 freq)
 {
-    uint32          unit, lim;
+    uint32_t          unit, lim;
     double	    flim;
     char           *cmd1, *cmd2;
 
@@ -366,29 +348,28 @@ limcalc (freq)
         flim = (double) lim * (double) unit * (double) freq + 
 	   (double) ebase.simtime;
         if ((flim > ebase.simtime) && (flim < 4294967296.0)) {
-            lim = (uint32) flim;
+            lim = (uint32_t) flim;
         } else  {
             printf("error in expression\n");
             lim = -1;
         }
     }
-    return (lim);
+    return lim;
 }
-    
+
 int
-exec_cmd(sregs, cmd)
-    char           *cmd;
-    struct pstate  *sregs;
+exec_cmd(struct pstate *sregs, const char *cmd)
 {
     char           *cmd1, *cmd2;
-    int32           stat;
-    uint32          len, i, clen, j;
-    static uint32   daddr = 0;
-    char           *cmdsave;
+    int32_t           stat;
+    uint32_t          len, i, clen, j;
+    static uint32_t   daddr = 0;
+    char           *cmdsave, *cmdsave2 = NULL;
 
     stat = OK;
     cmdsave = strdup(cmd);
-    if ((cmd1 = strtok(cmd, " \t")) != NULL) {
+    cmdsave2 = strdup (cmd);
+    if ((cmd1 = strtok (cmdsave2, " \t")) != NULL) {
 	clen = strlen(cmd1);
 	if (strncmp(cmd1, "bp", clen) == 0) {
 	    for (i = 0; i < sregs->bptnum; i++) {
@@ -468,6 +449,8 @@ exec_cmd(sregs, cmd)
 	    }
 	    sregs->pc = len & ~3;
 	    sregs->npc = sregs->pc + 4;
+	    if ((sregs->pc != 0) && (ebase.simtime == 0))
+	        boot_init();
 	    printf("resuming at 0x%08x\n",sregs->pc);
 	    if ((cmd2 = strtok(NULL, " \t\n\r")) != NULL) {
 		stat = run_sim(sregs, VAL(cmd2), 0);
@@ -552,7 +535,9 @@ exec_cmd(sregs, cmd)
 	    sim_halt();
 	} else if (strncmp(cmd1, "shell", clen) == 0) {
 	    if ((cmd1 = strtok(NULL, " \t\n\r")) != NULL) {
-		system(&cmdsave[clen]);
+		if (system(&cmdsave[clen])) {
+		    /* Silence unused return value warning.  */
+		}
 	    }
 	} else if (strncmp(cmd1, "step", clen) == 0) {
 	    stat = run_sim(sregs, 1, 1);
@@ -578,8 +563,8 @@ exec_cmd(sregs, cmd)
 	    sim_halt();
 	} else if (strncmp(cmd1, "tlimit", clen) == 0) {
 	   sregs->tlimit = limcalc(sregs->freq);
-	   if (sregs->tlimit != (uint32) -1)
-              printf("simulation limit = %u (%.3f ms)\n",(uint32) sregs->tlimit,
+	   if (sregs->tlimit != (uint32_t) -1)
+              printf("simulation limit = %u (%.3f ms)\n",(uint32_t) sregs->tlimit,
 		sregs->tlimit / sregs->freq / 1000);
 	} else if (strncmp(cmd1, "tra", clen) == 0) {
 	    if ((cmd1 = strtok(NULL, " \t\n\r")) == NULL) {
@@ -601,17 +586,18 @@ exec_cmd(sregs, cmd)
 	} else
 	    printf("syntax error\n");
     }
+    if (cmdsave2 != NULL)
+	free(cmdsave2);
     if (cmdsave != NULL)
 	free(cmdsave);
-    return (stat);
+    return stat;
 }
 
 
 void
-reset_stat(sregs)
-    struct pstate  *sregs;
+reset_stat(struct pstate *sregs)
 {
-    sregs->tottime = 0;
+    sregs->tottime = 0.0;
     sregs->pwdtime = 0;
     sregs->ninst = 0;
     sregs->fholdt = 0;
@@ -626,13 +612,13 @@ reset_stat(sregs)
 }
 
 void
-show_stat(sregs)
-    struct pstate  *sregs;
+show_stat(struct pstate *sregs)
 {
-    uint32          iinst;
-    uint32          stime, tottime;
+    uint32_t          iinst;
+    uint32_t          stime;
 
-    if (sregs->tottime == 0) tottime = 1; else tottime = sregs->tottime;
+    if (sregs->tottime == 0.0)
+        sregs->tottime += 1E-6;
     stime = ebase.simtime - sregs->simstart;	/* Total simulated time */
 #ifdef STAT
 
@@ -640,8 +626,8 @@ show_stat(sregs)
 	sregs->nbranch;
 #endif
 
-    printf("\n Cycles       : %9d\n\r", ebase.simtime - sregs->simstart);
-    printf(" Instructions : %9d\n", sregs->ninst);
+    printf("\n Cycles       : %9" PRIu64 "\n\r", ebase.simtime - sregs->simstart);
+    printf(" Instructions : %9" PRIu64 "\n", sregs->ninst);
 
 #ifdef STAT
     printf("   integer    : %9.2f %%\n", 100.0 * (float) iinst / (float) sregs->ninst);
@@ -667,19 +653,21 @@ show_stat(sregs)
 	   sregs->freq * (float) (sregs->ninst - sregs->finst) /
 	   (float) (stime - sregs->pwdtime),
      sregs->freq * (float) sregs->finst / (float) (stime - sregs->pwdtime));
-    printf(" Simulated ERC32 time        : %5.2f ms\n", (float) (ebase.simtime - sregs->simstart) / 1000.0 / sregs->freq);
-    printf(" Processor utilisation       : %5.2f %%\n", 100.0 * (1.0 - ((float) sregs->pwdtime / (float) stime)));
-    printf(" Real-time / simulator-time  : 1/%.2f \n",
-      ((float) sregs->tottime) / ((float) (stime) / (sregs->freq * 1.0E6)));
-    printf(" Simulator performance       : %d KIPS\n",sregs->ninst/tottime/1000);
-    printf(" Used time (sys + user)      : %3d s\n\n", sregs->tottime);
+    printf(" Simulated ERC32 time        : %.2f s\n",
+        (float) (ebase.simtime - sregs->simstart) / 1000000.0 / sregs->freq);
+    printf(" Processor utilisation       : %.2f %%\n",
+        100.0 * (1.0 - ((float) sregs->pwdtime / (float) stime)));
+    printf(" Real-time performance       : %.2f %%\n",
+        100.0 / (sregs->tottime / ((double) (stime) / (sregs->freq * 1.0E6))));
+    printf(" Simulator performance       : %.2f MIPS\n",
+        (double)(sregs->ninst) / sregs->tottime / 1E6);
+    printf(" Used time (sys + user)      : %.2f s\n\n", sregs->tottime);
 }
 
 
 
 void
-init_bpt(sregs)
-    struct pstate  *sregs;
+init_bpt(struct pstate *sregs)
 {
     sregs->bptnum = 0;
     sregs->histlen = 0;
@@ -689,8 +677,7 @@ init_bpt(sregs)
 }
 
 static void
-int_handler(sig)
-    int32           sig;
+int_handler(int32_t sig)
 {
     if (sig != 2)
 	printf("\n\n Signal handler error  (%d)\n\n", sig);
@@ -698,7 +685,7 @@ int_handler(sig)
 }
 
 void
-init_signals()
+init_signals(void)
 {
     typedef void    (*PFI) ();
     static PFI      int_tab[2];
@@ -715,8 +702,7 @@ struct evcell   evbuf[EVENT_MAX];
 struct irqcell  irqarr[16];
 
 static int
-disp_fpu(sregs)
-    struct pstate  *sregs;
+disp_fpu(struct pstate *sregs)
 {
 
     int         i;
@@ -724,7 +710,7 @@ disp_fpu(sregs)
 
     printf("\n fsr: %08X\n\n", sregs->fsr);
 
-#ifdef HOST_LITTLE_ENDIAN_FLOAT
+#ifdef HOST_LITTLE_ENDIAN
     for (i = 0; i < 32; i++)
       sregs->fdp[i ^ 1] = sregs->fs[i];
 #endif
@@ -738,13 +724,11 @@ disp_fpu(sregs)
 	    printf("\n");
     }
     printf("\n");
-    return (OK);
+    return OK;
 }
 
 static void
-disp_regs(sregs,cwp)
-    struct pstate  *sregs;
-    int cwp;
+disp_regs(struct pstate *sregs, int cwp)
 {
 
     int           i;
@@ -759,49 +743,60 @@ disp_regs(sregs,cwp)
     }
 }
 
+static void print_insn_sparc_sis(uint32_t addr, struct disassemble_info *info)
+{
+    unsigned char           i[4];
+
+    sis_memory_read(addr, i, 4);
+    dinfo.buffer_vma = addr;
+    dinfo.buffer_length = 4;
+    dinfo.buffer = i;
+    print_insn_sparc(addr, info);
+}
+
 static void
-disp_ctrl(sregs)
-    struct pstate  *sregs;
+disp_ctrl(struct pstate *sregs)
 {
 
-    unsigned char           i[4];
+    uint32_t           i;
 
     printf("\n psr: %08X   wim: %08X   tbr: %08X   y: %08X\n",
 	   sregs->psr, sregs->wim, sregs->tbr, sregs->y);
-    sis_memory_read(sregs->pc, i, 4);
-    printf("\n  pc: %08X = %02X%02X%02X%02X    ", sregs->pc,i[0],i[1],i[2],i[3]);
-    print_insn_sparc(sregs->pc, &dinfo);
-    sis_memory_read(sregs->npc, i, 4);
-    printf("\n npc: %08X = %02X%02X%02X%02X    ",sregs->npc,i[0],i[1],i[2],i[3]);
-    print_insn_sparc(sregs->npc, &dinfo);
+    sis_memory_read (sregs->pc, (char *) &i, 4);
+    printf ("\n  pc: %08X = %08X    ", sregs->pc, i);
+    print_insn_sparc_sis(sregs->pc, &dinfo);
+    sis_memory_read (sregs->npc, (char *) &i, 4);
+    printf ("\n npc: %08X = %08X    ", sregs->npc, i);
+    print_insn_sparc_sis(sregs->npc, &dinfo);
     if (sregs->err_mode)
 	printf("\n IU in error mode");
     printf("\n\n");
 }
 
 static void
-disp_mem(addr, len)
-    uint32          addr;
-    uint32          len;
+disp_mem(uint32_t addr, uint32_t len)
 {
 
-    uint32          i;
-    unsigned char   data[4];
-    uint32          mem[4], j;
+    uint32_t          i;
+    union {
+	    unsigned char u8[4];
+	    uint32_t u32;
+    } data;
+    uint32_t          mem[4], j;
     char           *p;
 
     for (i = addr & ~3; i < ((addr + len) & ~3); i += 16) {
 	printf("\n %8X  ", i);
 	for (j = 0; j < 4; j++) {
-	    sis_memory_read((i + (j * 4)), data, 4);
-	    printf("%02x%02x%02x%02x  ", data[0],data[1],data[2],data[3]);
-	    mem[j] = *((int *) &data);
+	    sis_memory_read ((i + (j * 4)), data.u8, 4);
+	    printf ("%08x  ", data.u32);
+	    mem[j] = data.u32;
 	}
 	printf("  ");
 	p = (char *) mem;
 	for (j = 0; j < 16; j++) {
-	    if (isprint(p[j]))
-		putchar(p[j]);
+	    if (isprint (p[j ^ EBT]))
+		putchar (p[j ^ EBT]);
 	    else
 		putchar('.');
 	}
@@ -810,18 +805,18 @@ disp_mem(addr, len)
 }
 
 void
-dis_mem(addr, len, info)
-    uint32          addr;
-    uint32          len;
-    struct disassemble_info *info;
+dis_mem(uint32_t addr, uint32_t len, struct disassemble_info *info)
 {
-    uint32          i;
-    unsigned char   data[4];
+    uint32_t          i;
+    union {
+	    unsigned char u8[4];
+	    uint32_t u32;
+    } data;
 
     for (i = addr & -3; i < ((addr & -3) + (len << 2)); i += 4) {
-	sis_memory_read(i, data, 4);
-	printf(" %08x  %02x%02x%02x%02x  ", i, data[0],data[1],data[2],data[3]);
-	print_insn_sparc(i, info);
+	sis_memory_read (i, data.u8, 4);
+	printf (" %08x  %08x  ", i, data.u32);
+	print_insn_sparc_sis(i, info);
         if (i >= 0xfffffffc) break;
 	printf("\n");
     }
@@ -830,10 +825,7 @@ dis_mem(addr, len, info)
 /* Add event to event queue */
 
 void
-event(cfunc, arg, delta)
-    void            (*cfunc) ();
-    int32           arg;
-    uint64          delta;
+event(void (*cfunc) (int32_t), int32_t arg, uint64_t delta)
 {
     struct evcell  *ev1, *evins;
 
@@ -863,15 +855,15 @@ event(cfunc, arg, delta)
 
 #if 0	/* apparently not used */
 void
-stop_event()
+stop_event(void)
 {
 }
 #endif
 
 void
-init_event()
+init_event(void)
 {
-    int32           i;
+    int32_t           i;
 
     ebase.eq.nxt = NULL;
     ebase.freeq = evbuf;
@@ -882,10 +874,7 @@ init_event()
 }
 
 void
-set_int(level, callback, arg)
-    int32           level;
-    void            (*callback) ();
-    int32           arg;
+set_int(int32_t level, void (*callback) (int32_t), int32_t arg)
 {
     irqarr[level & 0x0f].callback = callback;
     irqarr[level & 0x0f].arg = arg;
@@ -894,14 +883,13 @@ set_int(level, callback, arg)
 /* Advance simulator time */
 
 void
-advance_time(sregs)
-    struct pstate  *sregs;
+advance_time(struct pstate *sregs)
 {
 
     struct evcell  *evrem;
-    void            (*cfunc) ();
-    uint32          arg;
-    uint64          endtime;
+    void            (*cfunc) (int32_t);
+    int32_t           arg;
+    uint64_t          endtime;
 
 #ifdef STAT
     sregs->fholdt += sregs->fhold;
@@ -925,22 +913,22 @@ advance_time(sregs)
 
 }
 
-uint32
-now()
+uint32_t
+now(void)
 {
-    return(ebase.simtime);
+    return ebase.simtime;
 }
 
 
 /* Advance time until an external interrupt is seen */
 
 int
-wait_for_irq()
+wait_for_irq(void)
 {
     struct evcell  *evrem;
-    void            (*cfunc) ();
-    int32           arg;
-    uint64          endtime;
+    void            (*cfunc) (int32_t);
+    int32_t           arg;
+    uint64_t          endtime;
 
     if (ebase.eq.nxt == NULL)
 	printf("Warning: event queue empty - power-down mode not entered\n");
@@ -960,26 +948,25 @@ wait_for_irq()
 	}
     }
     sregs.pwdtime += ebase.simtime - endtime;
-    return (ebase.simtime - endtime);
+    return ebase.simtime - endtime;
 }
 
 int
-check_bpt(sregs)
-    struct pstate  *sregs;
+check_bpt(struct pstate *sregs)
 {
-    int32           i;
+    int32_t           i;
 
     if ((sregs->bphit) || (sregs->annul))
-	return (0);
-    for (i = 0; i < (int32) sregs->bptnum; i++) {
+	return 0;
+    for (i = 0; i < (int32_t) sregs->bptnum; i++) {
 	if (sregs->pc == sregs->bpts[i])
-	    return (BPT_HIT);
+	    return BPT_HIT;
     }
-    return (0);
+    return 0;
 }
 
 void
-reset_all()
+reset_all(void)
 {
     init_event();		/* Clear event queue */
     init_regs(&sregs);
@@ -990,14 +977,14 @@ reset_all()
 }
 
 void
-sys_reset()
+sys_reset(void)
 {
     reset_all();
     sregs.trap = 256;		/* Force fake reset trap */
 }
 
 void
-sys_halt()
+sys_halt(void)
 {
     sregs.trap = 257;           /* Force fake halt trap */
 }
@@ -1009,48 +996,42 @@ sys_halt()
 #include "libiberty.h"
 #include "bfd.h"
 
+#ifndef min
 #define min(A, B) (((A) < (B)) ? (A) : (B))
+#endif
 #define LOAD_ADDRESS 0
 
 int
-bfd_load(fname)
-    char           *fname;
+bfd_load (const char *fname)
 {
     asection       *section;
     bfd            *pbfd;
     const bfd_arch_info_type *arch;
+    int            i;
 
     pbfd = bfd_openr(fname, 0);
 
     if (pbfd == NULL) {
 	printf("open of %s failed\n", fname);
-	return (-1);
+	return -1;
     }
     if (!bfd_check_format(pbfd, bfd_object)) {
 	printf("file %s  doesn't seem to be an object file\n", fname);
-	return (-1);
+	return -1;
     }
 
     arch = bfd_get_arch_info (pbfd);
-    if (bfd_little_endian (pbfd) || arch->mach == bfd_mach_sparc_sparclite_le)
-        current_target_byte_order = LITTLE_ENDIAN;
-    else
-	current_target_byte_order = BIG_ENDIAN;
-    if (sis_verbose)
-	printf("file %s is %s-endian.\n", fname,
-	       current_target_byte_order == BIG_ENDIAN ? "big" : "little");
-
     if (sis_verbose)
 	printf("loading %s:", fname);
     for (section = pbfd->sections; section; section = section->next) {
-	if (bfd_get_section_flags(pbfd, section) & SEC_ALLOC) {
+	if (bfd_section_flags (section) & SEC_ALLOC) {
 	    bfd_vma         section_address;
 	    unsigned long   section_size;
 	    const char     *section_name;
 
-	    section_name = bfd_get_section_name(pbfd, section);
+	    section_name = bfd_section_name (section);
 
-	    section_address = bfd_get_section_vma(pbfd, section);
+	    section_address = bfd_section_vma (section);
 	    /*
 	     * Adjust sections from a.out files, since they don't carry their
 	     * addresses with.
@@ -1071,22 +1052,19 @@ bfd_load(fname)
 					      sizeof (marker));
 		    if (strncmp (marker.signature, "DaTa", 4) == 0)
 		      {
-			if (current_target_byte_order == BIG_ENDIAN)
-			  section_address = bfd_getb32 (marker.sdata);
-			else
-			  section_address = bfd_getl32 (marker.sdata);
+			section_address = bfd_getb32 (marker.sdata);
 		      }
 		}
 	    }
 
-	    section_size = bfd_section_size(pbfd, section);
+	    section_size = bfd_section_size (section);
 
 	    if (sis_verbose)
-		printf("\nsection %s at 0x%08lx (0x%lx bytes)",
-		       section_name, section_address, section_size);
+		printf("\nsection %s at 0x%08" PRIx64 " (0x%lx bytes)",
+		       section_name, (uint64_t) section_address, section_size);
 
 	    /* Text, data or lit */
-	    if (bfd_get_section_flags(pbfd, section) & SEC_LOAD) {
+	    if (bfd_section_flags (section) & SEC_LOAD) {
 		file_ptr        fptr;
 
 		fptr = 0;
@@ -1099,7 +1077,8 @@ bfd_load(fname)
 
 		    bfd_get_section_contents(pbfd, section, buffer, fptr, count);
 
-		    sis_memory_write(section_address, buffer, count);
+		    for (i = 0; i < count; i++)
+			sis_memory_write ((section_address + i) ^ EBT, &buffer[i], 1);
 
 		    section_address += count;
 		    fptr += count;
@@ -1113,5 +1092,16 @@ bfd_load(fname)
     if (sis_verbose)
 	printf("\n");
 
-    return(bfd_get_start_address (pbfd));
+    return bfd_get_start_address (pbfd);
+}
+
+double get_time (void)
+{
+    double usec;
+
+    struct timeval tm;
+
+    gettimeofday (&tm, NULL);
+    usec = ((double) tm.tv_sec) * 1E6 + ((double) tm.tv_usec);
+    return usec / 1E6;
 }

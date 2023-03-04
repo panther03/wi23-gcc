@@ -1,6 +1,6 @@
 /* Wrapper implementation for waitpid for GNU/Linux (LWP layer).
 
-   Copyright (C) 2001-2013 Free Software Foundation, Inc.
+   Copyright (C) 2001-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,104 +17,40 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifdef GDBSERVER
-#include "server.h"
-#else
-#include "defs.h"
-#include "signal.h"
-#endif
+#include "gdbsupport/common-defs.h"
 
-#include "nat/linux-nat.h"
-#include "nat/linux-waitpid.h"
-#include "gdb_wait.h"
+#include "linux-nat.h"
+#include "linux-waitpid.h"
+#include "gdbsupport/gdb_wait.h"
+#include "gdbsupport/eintr.h"
 
-/* Print debugging output based on the format string FORMAT and
-   its parameters.  */
+/* See linux-waitpid.h.  */
 
-static inline void
-linux_debug (const char *format, ...)
+std::string
+status_to_str (int status)
 {
-#ifdef GDBSERVER
-  if (debug_threads)
+  if (WIFSTOPPED (status))
     {
-      va_list args;
-      va_start (args, format);
-      vfprintf (stderr, format, args);
-      fprintf (stderr, "\n");
-      va_end (args);
+      if (WSTOPSIG (status) == SYSCALL_SIGTRAP)
+	return string_printf ("%s - %s (stopped at syscall)",
+			      strsigno (SIGTRAP), strsignal (SIGTRAP));
+      else
+	return string_printf ("%s - %s (stopped)",
+			      strsigno (WSTOPSIG (status)),
+			      strsignal (WSTOPSIG (status)));
     }
-#else
-  /* GDB-specific debugging output.  */
-#endif
+  else if (WIFSIGNALED (status))
+    return string_printf ("%s - %s (terminated)",
+			  strsigno (WTERMSIG (status)),
+			  strsignal (WTERMSIG (status)));
+  else
+    return string_printf ("%d (exited)", WEXITSTATUS (status));
 }
 
-/* Wrapper function for waitpid which handles EINTR, and emulates
-   __WALL for systems where that is not available.  */
+/* See linux-waitpid.h.  */
 
 int
 my_waitpid (int pid, int *status, int flags)
 {
-  int ret, out_errno;
-
-  linux_debug ("my_waitpid (%d, 0x%x)\n", pid, flags);
-
-  if (flags & __WALL)
-    {
-      sigset_t block_mask, org_mask, wake_mask;
-      int wnohang;
-
-      wnohang = (flags & WNOHANG) != 0;
-      flags &= ~(__WALL | __WCLONE);
-      flags |= WNOHANG;
-
-      /* Block all signals while here.  This avoids knowing about
-	 LinuxThread's signals.  */
-      sigfillset (&block_mask);
-      sigprocmask (SIG_BLOCK, &block_mask, &org_mask);
-
-      /* ... except during the sigsuspend below.  */
-      sigemptyset (&wake_mask);
-
-      while (1)
-	{
-	  /* Since all signals are blocked, there's no need to check
-	     for EINTR here.  */
-	  ret = waitpid (pid, status, flags);
-	  out_errno = errno;
-
-	  if (ret == -1 && out_errno != ECHILD)
-	    break;
-	  else if (ret > 0)
-	    break;
-
-	  if (flags & __WCLONE)
-	    {
-	      /* We've tried both flavors now.  If WNOHANG is set,
-		 there's nothing else to do, just bail out.  */
-	      if (wnohang)
-		break;
-
-	      linux_debug ("blocking\n");
-
-	      /* Block waiting for signals.  */
-	      sigsuspend (&wake_mask);
-	    }
-	  flags ^= __WCLONE;
-	}
-
-      sigprocmask (SIG_SETMASK, &org_mask, NULL);
-    }
-  else
-    {
-      do
-	ret = waitpid (pid, status, flags);
-      while (ret == -1 && errno == EINTR);
-      out_errno = errno;
-    }
-
-  linux_debug ("my_waitpid (%d, 0x%x): status(%x), %d\n",
-	       pid, flags, status ? *status : -1, ret);
-
-  errno = out_errno;
-  return ret;
+  return gdb::handle_eintr (-1, ::waitpid, pid, status, flags);
 }

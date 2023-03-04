@@ -1,6 +1,5 @@
 /* BFD back-end for Zilog Z800n COFF binaries.
-   Copyright 1992, 1993, 1994, 1995, 1997, 1999, 2000, 2001, 2002, 2003,
-   2004, 2005, 2007, 2008  Free Software Foundation, Inc.
+   Copyright (C) 1992-2023 Free Software Foundation, Inc.
    Contributed by Cygnus Support.
    Written by Steve Chamberlain, <sac@cygnus.com>.
 
@@ -32,40 +31,40 @@
 #define COFF_DEFAULT_SECTION_ALIGNMENT_POWER (1)
 
 static reloc_howto_type r_imm32 =
-HOWTO (R_IMM32, 0, 2, 32, FALSE, 0,
-       complain_overflow_bitfield, 0, "r_imm32", TRUE, 0xffffffff,
-       0xffffffff, FALSE);
+HOWTO (R_IMM32, 0, 4, 32, false, 0,
+       complain_overflow_bitfield, 0, "r_imm32", true, 0xffffffff,
+       0xffffffff, false);
 
 static reloc_howto_type r_imm4l =
-HOWTO (R_IMM4L, 0, 0, 4, FALSE, 0,
-       complain_overflow_bitfield, 0, "r_imm4l", TRUE, 0xf, 0xf, FALSE);
+HOWTO (R_IMM4L, 0, 1, 4, false, 0,
+       complain_overflow_bitfield, 0, "r_imm4l", true, 0xf, 0xf, false);
 
 static reloc_howto_type r_da =
-HOWTO (R_IMM16, 0, 1, 16, FALSE, 0,
-       complain_overflow_bitfield, 0, "r_da", TRUE, 0x0000ffff, 0x0000ffff,
-       FALSE);
+HOWTO (R_IMM16, 0, 2, 16, false, 0,
+       complain_overflow_bitfield, 0, "r_da", true, 0x0000ffff, 0x0000ffff,
+       false);
 
 static reloc_howto_type r_imm8 =
-HOWTO (R_IMM8, 0, 0, 8, FALSE, 0,
-       complain_overflow_bitfield, 0, "r_imm8", TRUE, 0x000000ff, 0x000000ff,
-       FALSE);
+HOWTO (R_IMM8, 0, 1, 8, false, 0,
+       complain_overflow_bitfield, 0, "r_imm8", true, 0x000000ff, 0x000000ff,
+       false);
 
 static reloc_howto_type r_rel16 =
-HOWTO (R_REL16, 0, 1, 16, FALSE, 0,
-       complain_overflow_bitfield, 0, "r_rel16", TRUE, 0x0000ffff, 0x0000ffff,
-       TRUE);
+HOWTO (R_REL16, 0, 2, 16, false, 0,
+       complain_overflow_bitfield, 0, "r_rel16", true, 0x0000ffff, 0x0000ffff,
+       true);
 
 static reloc_howto_type r_jr =
-HOWTO (R_JR, 1, 0, 8, TRUE, 0, complain_overflow_signed, 0,
-       "r_jr", TRUE, 0xff, 0xff, TRUE);
+HOWTO (R_JR, 1, 1, 8, true, 0, complain_overflow_signed, 0,
+       "r_jr", true, 0xff, 0xff, true);
 
 static reloc_howto_type r_disp7 =
-HOWTO (R_DISP7, 0, 0, 7, TRUE, 0, complain_overflow_bitfield, 0,
-       "r_disp7", TRUE, 0x7f, 0x7f, TRUE);
+HOWTO (R_DISP7, 0, 1, 7, true, 0, complain_overflow_bitfield, 0,
+       "r_disp7", true, 0x7f, 0x7f, true);
 
 static reloc_howto_type r_callr =
-HOWTO (R_CALLR, 1, 1, 12, TRUE, 0, complain_overflow_signed, 0,
-       "r_callr", TRUE, 0xfff, 0xfff, TRUE);
+HOWTO (R_CALLR, 1, 2, 12, true, 0, complain_overflow_signed, 0,
+       "r_callr", true, 0xfff, 0xfff, true);
 
 #define BADMAG(x) Z8KBADMAG(x)
 #define Z8K 1			/* Customize coffcode.h.  */
@@ -86,7 +85,7 @@ rtype2howto (arelent *internal, struct internal_reloc *dst)
   switch (dst->r_type)
     {
     default:
-      abort ();
+      internal->howto = NULL;
       break;
     case R_IMM8:
       internal->howto = &r_imm8;
@@ -119,18 +118,18 @@ rtype2howto (arelent *internal, struct internal_reloc *dst)
 
 static reloc_howto_type *
 coff_z8k_reloc_type_lookup (bfd *abfd ATTRIBUTE_UNUSED,
-                            bfd_reloc_code_real_type code)
+			    bfd_reloc_code_real_type code)
 {
   switch (code)
     {
-    case BFD_RELOC_8:      	return & r_imm8;
-    case BFD_RELOC_16:      	return & r_da;
-    case BFD_RELOC_32:      	return & r_imm32;
-    case BFD_RELOC_8_PCREL:     return & r_jr;
-    case BFD_RELOC_16_PCREL:    return & r_rel16;
-    case BFD_RELOC_Z8K_DISP7:   return & r_disp7;
-    case BFD_RELOC_Z8K_CALLR:   return & r_callr;
-    case BFD_RELOC_Z8K_IMM4L:   return & r_imm4l;
+    case BFD_RELOC_8:		return & r_imm8;
+    case BFD_RELOC_16:		return & r_da;
+    case BFD_RELOC_32:		return & r_imm32;
+    case BFD_RELOC_8_PCREL:	return & r_jr;
+    case BFD_RELOC_16_PCREL:	return & r_rel16;
+    case BFD_RELOC_Z8K_DISP7:	return & r_disp7;
+    case BFD_RELOC_Z8K_CALLR:	return & r_callr;
+    case BFD_RELOC_Z8K_IMM4L:	return & r_imm4l;
     default:			BFD_FAIL ();
       return 0;
     }
@@ -170,31 +169,38 @@ coff_z8k_reloc_name_lookup (bfd *abfd ATTRIBUTE_UNUSED,
 
 static void
 reloc_processing (arelent *relent,
-                  struct internal_reloc *reloc,
-                  asymbol **symbols,
-                  bfd *abfd,
-                  asection *section)
+		  struct internal_reloc *reloc,
+		  asymbol **symbols,
+		  bfd *abfd,
+		  asection *section)
 {
   relent->address = reloc->r_vaddr;
   rtype2howto (relent, reloc);
 
-  if (reloc->r_symndx > 0)
+  if (reloc->r_symndx == -1 || symbols == NULL)
+    relent->sym_ptr_ptr = bfd_abs_section_ptr->symbol_ptr_ptr;
+  else if (reloc->r_symndx >= 0 && reloc->r_symndx < obj_conv_table_size (abfd))
     relent->sym_ptr_ptr = symbols + obj_convert (abfd)[reloc->r_symndx];
   else
-    relent->sym_ptr_ptr = bfd_abs_section_ptr->symbol_ptr_ptr;
-
+    {
+      _bfd_error_handler
+	/* xgettext:c-format */
+	(_("%pB: warning: illegal symbol index %ld in relocs"),
+	 abfd, reloc->r_symndx);
+      relent->sym_ptr_ptr = bfd_abs_section_ptr->symbol_ptr_ptr;
+    }
   relent->addend = reloc->r_offset;
   relent->address -= section->vma;
 }
 
 static void
 extra_case (bfd *in_abfd,
-            struct bfd_link_info *link_info,
-            struct bfd_link_order *link_order,
-            arelent *reloc,
-            bfd_byte *data,
-            unsigned int *src_ptr,
-            unsigned int *dst_ptr)
+	    struct bfd_link_info *link_info,
+	    struct bfd_link_order *link_order,
+	    arelent *reloc,
+	    bfd_byte *data,
+	    unsigned int *src_ptr,
+	    unsigned int *dst_ptr)
 {
   asection * input_section = link_order->u.indirect.section;
 
@@ -259,20 +265,17 @@ extra_case (bfd *in_abfd,
 		       + input_section->output_offset
 		       + input_section->output_section->vma);
 	int gap = dst - dot - 1;  /* -1, since we're in the odd byte of the
-                                     word and the pc's been incremented.  */
+				     word and the pc's been incremented.  */
 
 	if (gap & 1)
 	  abort ();
 	gap /= 2;
-	if (gap > 128 || gap < -128)
-	  {
-	    if (! ((*link_info->callbacks->reloc_overflow)
-		   (link_info, NULL,
-		    bfd_asymbol_name (*reloc->sym_ptr_ptr),
-		    reloc->howto->name, reloc->addend, input_section->owner,
-		    input_section, reloc->address)))
-	      abort ();
-	  }
+	if (gap > 127 || gap < -128)
+	  (*link_info->callbacks->reloc_overflow)
+	    (link_info, NULL, bfd_asymbol_name (*reloc->sym_ptr_ptr),
+	     reloc->howto->name, reloc->addend, input_section->owner,
+	     input_section, reloc->address);
+
 	bfd_put_8 (in_abfd, gap, data + *dst_ptr);
 	(*dst_ptr)++;
 	(*src_ptr)++;
@@ -287,24 +290,21 @@ extra_case (bfd *in_abfd,
 		       + input_section->output_offset
 		       + input_section->output_section->vma);
 	int gap = dst - dot - 1;  /* -1, since we're in the odd byte of the
-                                     word and the pc's been incremented.  */
+				     word and the pc's been incremented.  */
 
 	if (gap & 1)
 	  abort ();
 	gap /= 2;
 
 	if (gap > 0 || gap < -127)
-	  {
-	    if (! ((*link_info->callbacks->reloc_overflow)
-		   (link_info, NULL,
-		    bfd_asymbol_name (*reloc->sym_ptr_ptr),
-		    reloc->howto->name, reloc->addend, input_section->owner,
-		    input_section, reloc->address)))
-	      abort ();
-	  }
+	  (*link_info->callbacks->reloc_overflow)
+	    (link_info, NULL, bfd_asymbol_name (*reloc->sym_ptr_ptr),
+	     reloc->howto->name, reloc->addend, input_section->owner,
+	     input_section, reloc->address);
+
 	bfd_put_8 (in_abfd,
-                   (bfd_get_8 ( in_abfd, data + *dst_ptr) & 0x80) + (-gap & 0x7f),
-                   data + *dst_ptr);
+		   (bfd_get_8 ( in_abfd, data + *dst_ptr) & 0x80) + (-gap & 0x7f),
+		   data + *dst_ptr);
 	(*dst_ptr)++;
 	(*src_ptr)++;
 	break;
@@ -322,18 +322,15 @@ extra_case (bfd *in_abfd,
 	if (gap & 1)
 	  abort ();
 	if (gap > 4096 || gap < -4095)
-	  {
-	    if (! ((*link_info->callbacks->reloc_overflow)
-		   (link_info, NULL,
-		    bfd_asymbol_name (*reloc->sym_ptr_ptr),
-		    reloc->howto->name, reloc->addend, input_section->owner,
-		    input_section, reloc->address)))
-	      abort ();
-	  }
+	  (*link_info->callbacks->reloc_overflow)
+	    (link_info, NULL, bfd_asymbol_name (*reloc->sym_ptr_ptr),
+	     reloc->howto->name, reloc->addend, input_section->owner,
+	     input_section, reloc->address);
+
 	gap /= 2;
 	bfd_put_16 (in_abfd,
-                    (bfd_get_16 ( in_abfd, data + *dst_ptr) & 0xf000) | (-gap & 0x0fff),
-                    data + *dst_ptr);
+		    (bfd_get_16 ( in_abfd, data + *dst_ptr) & 0xf000) | (-gap & 0x0fff),
+		    data + *dst_ptr);
 	(*dst_ptr) += 2;
 	(*src_ptr) += 2;
 	break;
@@ -349,14 +346,11 @@ extra_case (bfd *in_abfd,
 	int gap = dst - dot - 2;
 
 	if (gap > 32767 || gap < -32768)
-	  {
-	    if (! ((*link_info->callbacks->reloc_overflow)
-		   (link_info, NULL,
-		    bfd_asymbol_name (*reloc->sym_ptr_ptr),
-		    reloc->howto->name, reloc->addend, input_section->owner,
-		    input_section, reloc->address)))
-	      abort ();
-	  }
+	  (*link_info->callbacks->reloc_overflow)
+	    (link_info, NULL, bfd_asymbol_name (*reloc->sym_ptr_ptr),
+	     reloc->howto->name, reloc->addend, input_section->owner,
+	     input_section, reloc->address);
+
 	bfd_put_16 (in_abfd, (bfd_vma) gap, data + *dst_ptr);
 	(*dst_ptr) += 2;
 	(*src_ptr) += 2;
@@ -385,4 +379,4 @@ extra_case (bfd *in_abfd,
 #undef  coff_bfd_relax_section
 #define coff_bfd_relax_section bfd_coff_reloc16_relax_section
 
-CREATE_BIG_COFF_TARGET_VEC (z8kcoff_vec, "coff-z8k", 0, 0, '_', NULL, COFF_SWAP_TABLE)
+CREATE_BIG_COFF_TARGET_VEC (z8k_coff_vec, "coff-z8k", 0, 0, '_', NULL, COFF_SWAP_TABLE)

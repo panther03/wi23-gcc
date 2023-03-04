@@ -1,6 +1,6 @@
 /* The IGEN simulator generator for GDB, the GNU Debugger.
 
-   Copyright 2002-2013 Free Software Foundation, Inc.
+   Copyright 2002-2023 Free Software Foundation, Inc.
 
    Contributed by Andrew Cagney.
 
@@ -30,7 +30,7 @@
 
    The table that follows determines how each field should be treated.
    Importantly it considers the case where the extracted field is to
-   be used immediatly or stored in an instruction cache.
+   be used immediately or stored in an instruction cache.
 
    <type>
 
@@ -63,4 +63,4 @@
    new name had better be the same. */
 
 
-extern cache_entry *load_cache_table (char *file_name);
+extern cache_entry *load_cache_table (const char *file_name);

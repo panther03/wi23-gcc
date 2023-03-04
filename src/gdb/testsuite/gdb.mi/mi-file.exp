@@ -1,4 +1,4 @@
-# Copyright 1999-2013 Free Software Foundation, Inc.
+# Copyright 1999-2023 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -18,20 +18,16 @@
 load_lib mi-support.exp
 set MIFLAGS "-i=mi"
 
-gdb_exit
-if [mi_gdb_start] {
-    continue
-}
-
 standard_testfile basics.c
 
 if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable {debug}] != "" } {
-     untested mi-file.exp
+     untested "failed to compile"
      return -1
 }
 
-mi_delete_breakpoints
-mi_gdb_reinitialize_dir $srcdir/$subdir
+if {[mi_clean_restart]} {
+    return
+}
 mi_gdb_file_cmd ${binfile}
 
 proc test_file_list_exec_source_file {} {
@@ -39,7 +35,11 @@ proc test_file_list_exec_source_file {} {
     global srcdir
     global subdir
     global fullname_syntax
-    set srcfilepath [string_to_regexp ${srcdir}/${subdir}/${srcfile}]
+    if { [is_remote host] } {
+	set srcfilepath ".*${srcfile}"
+    } else {
+	set srcfilepath [string_to_regexp ${srcdir}/${subdir}/${srcfile}]
+    }
 
     # get the path and absolute path to the current executable
     #
@@ -64,7 +64,7 @@ proc test_file_list_exec_source_files {} {
 
     # get the path and absolute path to the current executable
     mi_gdb_test "222-file-list-exec-source-files" \
-	    "222\\\^done,files=\\\[\{file=\".*/${srcfile}\",fullname=\"$fullname_syntax${srcfile}\"\}.*]" \
+	    "222\\\^done,files=\\\[\{file=\".*${srcfile}\",fullname=\"$fullname_syntax${srcfile}\",debug-fully-read=\"\[^\"\]+\"\}.*]" \
               "Getting a list of source files."
 }
 
@@ -72,4 +72,3 @@ test_file_list_exec_source_file
 test_file_list_exec_source_files
 
 mi_gdb_exit
-return 0

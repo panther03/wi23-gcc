@@ -1,5 +1,5 @@
 # This shell script emits a C file. -*- C -*-
-#   Copyright 2004, 2005, 2006, 2007, 2008 Free Software Foundation, Inc.
+#   Copyright (C) 2004-2023 Free Software Foundation, Inc.
 #
 # This file is part of the GNU Binutils.
 #
@@ -19,11 +19,10 @@
 # MA 02110-1301, USA.
 #
 
-fragment <<EOF
+# This file is sourced from elf.em, and defines extra irix specific
+# functions.
 
-#include "ld.h"
-#include "ldmain.h"
-#include "libiberty.h"
+fragment <<EOF
 
 /* The native IRIX linker will always create a DT_SONAME for shared objects.
    While this shouldn't really be necessary for ABI conformance, some versions
@@ -32,7 +31,7 @@ fragment <<EOF
 static void
 irix_after_open (void)
 {
-  if (link_info.shared && command_line.soname == 0)
+  if (bfd_link_dll (&link_info) && command_line.soname == 0)
     command_line.soname
       = (char *) lbasename (bfd_get_filename (link_info.output_bfd));
 

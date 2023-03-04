@@ -1,9 +1,21 @@
 # Linker script for Alpha VMS systems.
 # Tristan Gingold <gingold@adacore.com>.
+#
+# Copyright (C) 2014-2023 Free Software Foundation, Inc.
+#
+# Copying and distribution of this file, with or without modification,
+# are permitted in any medium without royalty provided the copyright
+# notice and this notice are preserved.
 
 PAGESIZE=0x10000
 
 cat <<EOF
+/* Copyright (C) 2014-2023 Free Software Foundation, Inc.
+
+   Copying and distribution of this script, with or without modification,
+   are permitted in any medium without royalty provided the copyright
+   notice and this notice are preserved.  */
+
 OUTPUT_FORMAT("${OUTPUT_FORMAT}")
 ${LIB_SEARCH_DIRS}
 
@@ -21,13 +33,13 @@ SECTIONS
   }
   /* RO, executable code.  */
   \$CODE\$ ALIGN (${PAGESIZE}) : {
-    *(\$CODE\$ *\$CODE*)
+    *(\$CODE\$${RELOCATING+ *\$CODE*})
   }
   /* RO initialized data.  */
   \$LITERAL\$ ALIGN (${PAGESIZE}) : {
-    *(\$LINK\$)
+    ${RELOCATING+*(\$LINK\$)}
     *(\$LITERAL\$)
-    *(\$READONLY\$)
+    ${RELOCATING+*(\$READONLY\$)
     *(\$READONLY_ADDR\$)
     *(eh_frame)
     *(jcr)
@@ -39,11 +51,11 @@ SECTIONS
     *(LIB\$INITIALIZDZ)	/* Start marker.  */
     *(LIB\$INITIALIZD_)	/* Hi priority.  */
     *(LIB\$INITIALIZE)	/* User.  */
-    *(LIB\$INITIALIZE$)	/* End marker.  */
+    *(LIB\$INITIALIZE$)	/* End marker.  */}
   }
 
   \$DWARF\$ ALIGN (${PAGESIZE}) : {
-    \$dwarf2.debug_pubtypes = .;
+    ${RELOCATING+\$dwarf2.debug_pubtypes = .;
     *(debug_pubtypes)
     \$dwarf2.debug_ranges = .;
     *(debug_ranges)
@@ -68,7 +80,7 @@ SECTIONS
     *(debug_pubnames)
     \$dwarf2.debug_str = .;
     *(debug_str)
-    \$dwarf2.debug_zzzzzz = .;
+    \$dwarf2.debug_zzzzzz = .;}
   }
 
   \$DST\$ 0 : {

@@ -27,15 +27,9 @@ FUNCTION
 INDEX
 	_unlink_r
 
-ANSI_SYNOPSIS
+SYNOPSIS
 	#include <reent.h>
 	int _unlink_r(struct _reent *<[ptr]>, const char *<[file]>);
-
-TRAD_SYNOPSIS
-	#include <reent.h>
-	int _unlink_r(<[ptr]>, <[file]>)
-	struct _reent *<[ptr]>;
-	char *<[file]>;
 
 DESCRIPTION
 	This is a reentrant version of <<unlink>>.  It
@@ -44,15 +38,14 @@ DESCRIPTION
 */
 
 int
-_DEFUN (_unlink_r, (ptr, file),
-     struct _reent *ptr _AND
-     _CONST char *file)
+_unlink_r (struct _reent *ptr,
+     const char *file)
 {
   int ret;
 
   errno = 0;
   if ((ret = _unlink (file)) == -1 && errno != 0)
-    ptr->_errno = errno;
+    _REENT_ERRNO(ptr) = errno;
   return ret;
 }
 

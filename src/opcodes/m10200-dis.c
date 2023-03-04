@@ -1,6 +1,5 @@
 /* Disassemble MN10200 instructions.
-   Copyright 1996, 1997, 1998, 2000, 2005, 2007, 2012
-   Free Software Foundation, Inc.
+   Copyright (C) 1996-2023 Free Software Foundation, Inc.
 
    This file is part of the GNU opcodes library.
 
@@ -21,8 +20,8 @@
 
 #include "sysdep.h"
 #include <stdio.h>
-#include "opcode/mn10200.h" 
-#include "dis-asm.h"
+#include "opcode/mn10200.h"
+#include "disassemble.h"
 #include "opintl.h"
 
 static void
@@ -55,7 +54,7 @@ disassemble (bfd_vma memaddr,
 	mysize = 5;
       else
 	abort ();
-	
+
       if (op->format == FMT_2 || op->format == FMT_5)
 	extra_shift = 8;
       else if (op->format == FMT_3
@@ -71,7 +70,7 @@ disassemble (bfd_vma memaddr,
 	  const unsigned char *opindex_ptr;
 	  unsigned int nocomma;
 	  int paren = 0;
-	  
+
 	  match = 1;
 	  (*info->fprintf_func) (info->stream, "%s\t", op->name);
 
@@ -84,16 +83,18 @@ disassemble (bfd_vma memaddr,
 
 	      operand = &mn10200_operands[*opindex_ptr];
 
-	      if ((operand->flags & MN10200_OPERAND_EXTENDED) != 0)
+	      if ((operand->flags & MN10200_OPERAND_DREG) != 0
+		  || (operand->flags & MN10200_OPERAND_AREG) != 0)
+		value = ((insn >> (operand->shift + extra_shift))
+			 & ((1 << operand->bits) - 1));
+	      else if ((operand->flags & MN10200_OPERAND_EXTENDED) != 0)
 		{
 		  value = (insn & 0xffff) << 8;
 		  value |= extension;
 		}
 	      else
-		{
-		  value = ((insn >> (operand->shift))
-			   & ((1L << operand->bits) - 1L));
-		}
+		value = ((insn >> (operand->shift))
+			 & ((1L << operand->bits) - 1L));
 
 	      if ((operand->flags & MN10200_OPERAND_SIGNED) != 0)
 		value = ((long)(value << (32 - operand->bits))
@@ -105,20 +106,12 @@ disassemble (bfd_vma memaddr,
 		(*info->fprintf_func) (info->stream, ",");
 
 	      nocomma = 0;
-		
+
 	      if ((operand->flags & MN10200_OPERAND_DREG) != 0)
-		{
-		  value = ((insn >> (operand->shift + extra_shift))
-			   & ((1 << operand->bits) - 1));
-		  (*info->fprintf_func) (info->stream, "d%ld", value);
-		}
+		(*info->fprintf_func) (info->stream, "d%ld", value);
 
 	      else if ((operand->flags & MN10200_OPERAND_AREG) != 0)
-		{
-		  value = ((insn >> (operand->shift + extra_shift))
-			   & ((1 << operand->bits) - 1));
-		  (*info->fprintf_func) (info->stream, "a%ld", value);
-		}
+		(*info->fprintf_func) (info->stream, "a%ld", value);
 
 	      else if ((operand->flags & MN10200_OPERAND_PSW) != 0)
 		(*info->fprintf_func) (info->stream, "psw");
@@ -145,7 +138,7 @@ disassemble (bfd_vma memaddr,
 	      else if ((operand->flags & MN10200_OPERAND_MEMADDR) != 0)
 		(*info->print_address_func) (value, info);
 
-	      else 
+	      else
 		(*info->fprintf_func) (info->stream, "%ld", value);
 	    }
 	  /* All done. */
@@ -158,7 +151,7 @@ disassemble (bfd_vma memaddr,
     (*info->fprintf_func) (info->stream, _("unknown\t0x%04lx"), insn);
 }
 
-int 
+int
 print_insn_mn10200 (bfd_vma memaddr, struct disassemble_info *info)
 {
   int status;

@@ -1,5 +1,5 @@
-/* UI_FILE - a generic STDIO like output stream.
-   Copyright (C) 1999-2013 Free Software Foundation, Inc.
+/* TUI_FILE - a STDIO-like output stream for the TUI.
+   Copyright (C) 1999-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -16,12 +16,29 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef TUI_FILE_H
-#define TUI_FILE_H
+#ifndef TUI_TUI_FILE_H
+#define TUI_TUI_FILE_H
 
-extern struct ui_file *tui_fileopen (FILE *);
-extern struct ui_file *tui_sfileopen (int);
-extern char *tui_file_get_strbuf (struct ui_file *);
-extern void tui_file_adjust_strbuf (int, struct ui_file *);
+#include "ui-file.h"
 
-#endif
+/* A STDIO-like output stream for the TUI.  */
+
+class tui_file : public stdio_file
+{
+public:
+  tui_file (FILE *stream, bool buffered)
+    : stdio_file (stream),
+      m_buffered (buffered)
+  {}
+
+  void write (const char *buf, long length_buf) override;
+  void puts (const char *) override;
+  void flush () override;
+
+private:
+
+  /* True if this stream is buffered.  */
+  bool m_buffered;
+};
+
+#endif /* TUI_TUI_FILE_H */

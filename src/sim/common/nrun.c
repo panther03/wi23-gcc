@@ -1,5 +1,5 @@
 /* New version of run front end support for simulators.
-   Copyright (C) 1997-2013 Free Software Foundation, Inc.
+   Copyright (C) 1997-2023 Free Software Foundation, Inc.
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -15,40 +15,32 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 /* Need to be before general includes, to pick up e.g. _GNU_SOURCE.  */
-#ifdef HAVE_CONFIG_H
-#include "cconfig.h"
-#include "tconfig.h"
-#endif
+#include "defs.h"
 
 #include <signal.h>
-
+#include <stdlib.h>
 /* For strsignal.  */
-#ifdef HAVE_STRING_H
 #include <string.h>
-#else
-#ifdef HAVE_STRINGS_H
-#include <strings.h>
-#endif
-#endif
-
-#include "sim-main.h"
-
-#include "bfd.h"
-
-#ifdef HAVE_ENVIRON
-extern char **environ;
-#endif
-
-#ifdef HAVE_UNISTD_H
 /* For chdir.  */
 #include <unistd.h>
+
+#include "bfd.h"
+#include "environ.h"
+
+#include "sim-main.h"
+#include "sim-signal.h"
+#include "sim/callback.h"
+
+#ifndef HAVE_STRSIGNAL
+/* While libiberty provides a fallback, it doesn't provide a prototype.  */
+extern const char *strsignal (int);
 #endif
 
 static void usage (void);
 
 extern host_callback default_callback;
 
-static char *myname;
+static const char *myname;
 
 static SIM_DESC sd;
 
@@ -65,17 +57,16 @@ cntrl_c (int sig)
 int
 main (int argc, char **argv)
 {
-  char *name;
+  const char *name;
   char **prog_argv = NULL;
+  char **prog_envp = NULL;
   struct bfd *prog_bfd;
   enum sim_stop reason;
   int sigrc = 0;
   int single_step = 0;
   RETSIGTYPE (*prev_sigint) ();
 
-  myname = argv[0] + strlen (argv[0]);
-  while (myname > argv[0] && myname[-1] != '/')
-    --myname;
+  myname = lbasename (argv[0]);
 
   /* INTERNAL: When MYNAME is `step', single step the simulator
      instead of allowing it to run free.  The sole purpose of this
@@ -97,19 +88,21 @@ main (int argc, char **argv)
       abort ();
     }
 
-  /* We can't set the endianness in the callback structure until
-     sim_config is called, which happens in sim_open.  */
-  default_callback.target_endian
-    = (CURRENT_TARGET_BYTE_ORDER == BIG_ENDIAN
-       ? BFD_ENDIAN_BIG : BFD_ENDIAN_LITTLE);
+  /* We can't set the endianness in the callback structure until sim_config is
+     called, which happens in sim_open.  If it's still the default, switch it.
+     Don't use CURRENT_TARGET_BYTE_ORDER as all its internal processing already
+     happened in sim_config.  */
+  if (default_callback.target_endian == BFD_ENDIAN_UNKNOWN)
+    default_callback.target_endian = current_target_byte_order;
 
   /* Was there a program to run?  */
   prog_argv = STATE_PROG_ARGV (sd);
+  prog_envp = STATE_PROG_ENVP (sd) ? : environ;
   prog_bfd = STATE_PROG_BFD (sd);
   if (prog_argv == NULL || *prog_argv == NULL)
     usage ();
 
-  name = *prog_argv;
+  name = STATE_PROG_FILE (sd);
 
   /* For simulators that don't open prog during sim_open() */
   if (prog_bfd == NULL)
@@ -137,11 +130,7 @@ main (int argc, char **argv)
     exit (1);
 
   /* Prepare the program for execution.  */
-#ifdef HAVE_ENVIRON
-  sim_create_inferior (sd, prog_bfd, prog_argv, environ);
-#else
-  sim_create_inferior (sd, prog_bfd, prog_argv, NULL);
-#endif
+  sim_create_inferior (sd, prog_bfd, prog_argv, prog_envp);
 
   /* To accommodate relative file paths, chdir to sysroot now.  We
      mustn't do this until BFD has opened the program, else we wouldn't
@@ -237,7 +226,8 @@ main (int argc, char **argv)
 static void
 usage (void)
 {
-  fprintf (stderr, "Usage: %s [options] program [program args]\n", myname);
+  fprintf (stderr, "Usage: %s [options] [VAR=VAL|--] program [program args]\n",
+	   myname);
   fprintf (stderr, "Run `%s --help' for full list of options.\n", myname);
   exit (1);
 }

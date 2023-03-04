@@ -1,6 +1,5 @@
 /* tc-m32c.h -- Header file for tc-m32c.c.
-   Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009
-   Free Software Foundation, Inc.
+   Copyright (C) 2004-2023 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -15,9 +14,9 @@
    GNU General Public License for more details.
 
    You should have received a copy of the GNU General Public License
-   along with GAS; see the file COPYING.  If not, write to
-   the Free Software Foundation, 59 Temple Place - Suite 330,
-   Boston, MA 02111-1307, USA. */
+   along with this program; if not, write to the Free Software
+   Foundation, Inc., 51 Franklin Street - Fifth Floor, Boston,
+   MA 02110-1301, USA.  */
 
 #define TC_M32C
 
@@ -30,15 +29,8 @@
 
 #define TARGET_BYTES_BIG_ENDIAN 0
 
-#define md_end  m32c_md_end
-extern void m32c_md_end (void);
-
 #define md_start_line_hook m32c_start_line_hook
 extern void m32c_start_line_hook (void);
-
-/* call md_pcrel_from_section, not md_pcrel_from */
-long md_pcrel_from_section (struct fix *, segT);
-#define MD_PCREL_FROM_SECTION(FIXP, SEC) md_pcrel_from_section (FIXP, SEC)
 
 /* Permit temporary numeric labels.  */
 #define LOCAL_LABELS_FB 1
@@ -52,15 +44,16 @@ long md_pcrel_from_section (struct fix *, segT);
 extern void m32c_apply_fix (struct fix *, valueT *, segT);
 
 #define tc_fix_adjustable(fixP) m32c_fix_adjustable (fixP)
-extern bfd_boolean m32c_fix_adjustable (struct fix *);
+extern bool m32c_fix_adjustable (struct fix *);
 
 /* When relaxing, we need to emit various relocs we otherwise wouldn't.  */
 #define TC_FORCE_RELOCATION(fix) m32c_force_relocation (fix)
 extern int m32c_force_relocation (struct fix *);
 
-#define TC_CONS_FIX_NEW(FRAG, WHERE, NBYTES, EXP) \
-  m32c_cons_fix_new (FRAG, WHERE, NBYTES, EXP)
-extern void m32c_cons_fix_new (fragS *, int, int, expressionS *);
+#define TC_CONS_FIX_NEW(FRAG, WHERE, NBYTES, EXP, RELOC)	\
+  m32c_cons_fix_new (FRAG, WHERE, NBYTES, EXP, RELOC)
+extern void m32c_cons_fix_new (fragS *, int, int, expressionS *,
+			       bfd_reloc_code_real_type);
 
 extern const struct relax_type md_relax_table[];
 #define TC_GENERIC_RELAX_TABLE md_relax_table
@@ -74,14 +67,17 @@ extern void m32c_prepare_relax_scan (fragS *, offsetT *, relax_substateT);
 
 /* Call md_pcrel_from_section(), not md_pcrel_from().  */
 #define MD_PCREL_FROM_SECTION(FIXP, SEC) md_pcrel_from_section (FIXP, SEC)
-extern long md_pcrel_from_section (struct fix *, segT);
 
 /* We need a special version of the TC_START_LABEL macro so that we
    allow the :Z, :S, :Q and :G suffixes to be
-   parsed as such. We need to be able to change the contents of
-   the local variable 'c' which is passed to this macro as 'character'.  */
-#define TC_START_LABEL(character, s, i_l_p)				\
-  ((character) != ':' ? 0 : (character = m32c_is_colon_insn (s)) ? 0 : ((character = ':'), 1))
-extern char m32c_is_colon_insn (char *);
+   parsed as such.  We need to be able to change the contents of the
+   var storing what was at the NUL delimiter.  */
+#define TC_START_LABEL(STR, NUL_CHAR, NEXT_CHAR)		\
+  (NEXT_CHAR == ':' && !m32c_is_colon_insn (STR, &NUL_CHAR))
+extern int m32c_is_colon_insn (char *, char *);
 
 #define H_TICK_HEX 1
+
+#define NOP_OPCODE (bfd_get_mach (stdoutput) == bfd_mach_m32c ? 0xde : 0x04)
+#define HANDLE_ALIGN(fragP)
+#define MAX_MEM_FOR_RS_ALIGN_CODE 1

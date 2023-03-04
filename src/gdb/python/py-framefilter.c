@@ -1,6 +1,6 @@
 /* Python frame filters
 
-   Copyright (C) 2013 Free Software Foundation, Inc.
+   Copyright (C) 2013-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -21,16 +21,19 @@
 #include "objfiles.h"
 #include "symtab.h"
 #include "language.h"
-#include "exceptions.h"
 #include "arch-utils.h"
 #include "python.h"
 #include "ui-out.h"
 #include "valprint.h"
+#include "stack.h"
+#include "source.h"
 #include "annotate.h"
 #include "hashtab.h"
 #include "demangle.h"
 #include "mi/mi-cmds.h"
 #include "python-internal.h"
+#include "gdbsupport/gdb_optional.h"
+#include "cli/cli-style.h"
 
 enum mi_print_types
 {
@@ -44,69 +47,74 @@ enum mi_print_types
    NAME is a  pass-through argument where the name of  the symbol will
    be written.  NAME is allocated in  this function, but the caller is
    responsible for clean up.  SYM is a pass-through argument where the
-   symbol will be written.  In the case of the API returning a string,
-   this will be set to NULL.  LANGUAGE is also a pass-through argument
-   denoting the language attributed to the Symbol.  In the case of SYM
-   being  NULL, this  will be  set to  the current  language.  Returns
-   PY_BT_ERROR on error with the appropriate Python exception set, and
-   PY_BT_OK on success.  */
+   symbol will be written and  SYM_BLOCK is a pass-through argument to
+   write  the block where the symbol lies in.  In the case of the  API
+   returning a  string,  this will be set to NULL.  LANGUAGE is also a
+   pass-through  argument  denoting  the  language  attributed  to the
+   Symbol.  In the case of SYM being  NULL, this  will be  set to  the
+   current  language.  Returns  EXT_LANG_BT_ERROR  on  error  with the
+   appropriate Python exception set, and EXT_LANG_BT_OK on success.  */
 
-static enum py_bt_status
-extract_sym (PyObject *obj, char **name, struct symbol **sym,
+static enum ext_lang_bt_status
+extract_sym (PyObject *obj, gdb::unique_xmalloc_ptr<char> *name,
+	     struct symbol **sym, const struct block **sym_block,
 	     const struct language_defn **language)
 {
-  PyObject *result = PyObject_CallMethod (obj, "symbol", NULL);
+  gdbpy_ref<> result (PyObject_CallMethod (obj, "symbol", NULL));
 
   if (result == NULL)
-    return PY_BT_ERROR;
+    return EXT_LANG_BT_ERROR;
 
   /* For 'symbol' callback, the function can return a symbol or a
      string.  */
-  if (gdbpy_is_string (result))
+  if (gdbpy_is_string (result.get ()))
     {
-      *name = python_string_to_host_string (result);
-      Py_DECREF (result);
+      *name = python_string_to_host_string (result.get ());
 
       if (*name == NULL)
-	return PY_BT_ERROR;
+	return EXT_LANG_BT_ERROR;
       /* If the API returns a string (and not a symbol), then there is
-	no symbol derived language available and the frame filter has
-	either overridden the symbol with a string, or supplied a
-	entirely synthetic symbol/value pairing.  In that case, use
-	python_language.  */
-      *language = python_language;
+	 no symbol derived language available and the frame filter has
+	 either overridden the symbol with a string, or supplied a
+	 entirely synthetic symbol/value pairing.  In that case, use
+	 the current language.  */
+      *language = current_language;
       *sym = NULL;
+      *sym_block = NULL;
     }
   else
     {
       /* This type checks 'result' during the conversion so we
 	 just call it unconditionally and check the return.  */
-      *sym = symbol_object_to_symbol (result);
-
-      Py_DECREF (result);
+      *sym = symbol_object_to_symbol (result.get ());
+      /* TODO: currently, we have no way to recover the block in which SYMBOL
+	 was found, so we have no block to return.  Trying to evaluate SYMBOL
+	 will yield an incorrect value when it's located in a FRAME and
+	 evaluated from another frame (as permitted in nested functions).  */
+      *sym_block = NULL;
 
       if (*sym == NULL)
 	{
 	  PyErr_SetString (PyExc_RuntimeError,
 			   _("Unexpected value.  Expecting a "
 			     "gdb.Symbol or a Python string."));
-	  return PY_BT_ERROR;
+	  return EXT_LANG_BT_ERROR;
 	}
 
       /* Duplicate the symbol name, so the caller has consistency
 	 in garbage collection.  */
-      *name = xstrdup (SYMBOL_PRINT_NAME (*sym));
+      name->reset (xstrdup ((*sym)->print_name ()));
 
       /* If a symbol is specified attempt to determine the language
 	 from the symbol.  If mode is not "auto", then the language
 	 has been explicitly set, use that.  */
       if (language_mode == language_mode_auto)
-	*language = language_def (SYMBOL_LANGUAGE (*sym));
+	*language = language_def ((*sym)->language ());
       else
 	*language = current_language;
     }
 
-  return PY_BT_OK;
+  return EXT_LANG_BT_OK;
 }
 
 /* Helper function to extract a value from an object that conforms to
@@ -114,44 +122,42 @@ extract_sym (PyObject *obj, char **name, struct symbol **sym,
    the value from.  VALUE is a pass-through argument where the value
    will be written.  If the object does not have the value attribute,
    or provides the Python None for a value, VALUE will be set to NULL
-   and this function will return as successful.  Returns PY_BT_ERROR
-   on error with the appropriate Python exception set, and PY_BT_OK on
+   and this function will return as successful.  Returns EXT_LANG_BT_ERROR
+   on error with the appropriate Python exception set, and EXT_LANG_BT_OK on
    success.  */
 
-static enum py_bt_status
+static enum ext_lang_bt_status
 extract_value (PyObject *obj, struct value **value)
 {
   if (PyObject_HasAttrString (obj, "value"))
     {
-      PyObject *vresult = PyObject_CallMethod (obj, "value", NULL);
+      gdbpy_ref<> vresult (PyObject_CallMethod (obj, "value", NULL));
 
       if (vresult == NULL)
-	return PY_BT_ERROR;
+	return EXT_LANG_BT_ERROR;
 
       /* The Python code has returned 'None' for a value, so we set
 	 value to NULL.  This flags that GDB should read the
 	 value.  */
       if (vresult == Py_None)
 	{
-	  Py_DECREF (vresult);
 	  *value = NULL;
-	  return PY_BT_OK;
+	  return EXT_LANG_BT_OK;
 	}
       else
 	{
-	  *value = convert_value_from_python (vresult);
-	  Py_DECREF (vresult);
+	  *value = convert_value_from_python (vresult.get ());
 
 	  if (*value == NULL)
-	    return PY_BT_ERROR;
+	    return EXT_LANG_BT_ERROR;
 
-	  return PY_BT_OK;
+	  return EXT_LANG_BT_OK;
 	}
     }
   else
     *value = NULL;
 
-  return PY_BT_OK;
+  return EXT_LANG_BT_OK;
 }
 
 /* MI prints only certain values according to the type of symbol and
@@ -163,7 +169,7 @@ mi_should_print (struct symbol *sym, enum mi_print_types type)
 {
   int print_me = 0;
 
-  switch (SYMBOL_CLASS (sym))
+  switch (sym->aclass ())
     {
     default:
     case LOC_UNDEF:	/* catches errors        */
@@ -185,9 +191,9 @@ mi_should_print (struct symbol *sym, enum mi_print_types type)
     case LOC_REGISTER:	/* register              */
     case LOC_COMPUTED:	/* computed location     */
       if (type == MI_PRINT_LOCALS)
-	print_me = ! SYMBOL_IS_ARGUMENT (sym);
+	print_me = ! sym->is_argument ();
       else
-	print_me = SYMBOL_IS_ARGUMENT (sym);
+	print_me = sym->is_argument ();
     }
   return print_me;
 }
@@ -195,35 +201,16 @@ mi_should_print (struct symbol *sym, enum mi_print_types type)
 /* Helper function which outputs a type name extracted from VAL to a
    "type" field in the output stream OUT.  OUT is the ui-out structure
    the type name will be output too, and VAL is the value that the
-   type will be extracted from.  Returns PY_BT_ERROR on error, with
-   any GDB exceptions converted to a Python exception, or PY_BT_OK on
-   success.  */
+   type will be extracted from.  */
 
-static enum py_bt_status
+static void
 py_print_type (struct ui_out *out, struct value *val)
 {
-  volatile struct gdb_exception except;
+  check_typedef (val->type ());
 
-  TRY_CATCH (except, RETURN_MASK_ALL)
-    {
-      struct type *type;
-      struct ui_file *stb;
-      struct cleanup *cleanup;
-
-      stb = mem_fileopen ();
-      cleanup = make_cleanup_ui_file_delete (stb);
-      type = check_typedef (value_type (val));
-      type_print (value_type (val), "", stb, -1);
-      ui_out_field_stream (out, "type", stb);
-      do_cleanups (cleanup);
-    }
-  if (except.reason < 0)
-    {
-      gdbpy_convert_exception (except);
-      return PY_BT_ERROR;
-    }
-
-  return PY_BT_OK;
+  string_file stb;
+  type_print (val->type (), "", &stb, -1);
+  out->field_stream ("type", stb);
 }
 
 /* Helper function which outputs a value to an output field in a
@@ -231,24 +218,16 @@ py_print_type (struct ui_out *out, struct value *val)
    VAL is the value that will be printed, OPTS contains the value
    printing options, ARGS_TYPE is an enumerator describing the
    argument format, and LANGUAGE is the language_defn that the value
-   will be printed with.  Returns PY_BT_ERROR on error, with any GDB
-   exceptions converted to a Python exception, or PY_BT_OK on
-   success. */
+   will be printed with.  */
 
-static enum py_bt_status
+static void
 py_print_value (struct ui_out *out, struct value *val,
 		const struct value_print_options *opts,
 		int indent,
-		enum py_frame_args args_type,
+		enum ext_lang_frame_args args_type,
 		const struct language_defn *language)
 {
   int should_print = 0;
-  volatile struct gdb_exception except;
-  int local_indent = (4 * indent);
-
-  /* Never set an indent level for common_val_print if MI.  */
-  if (ui_out_is_mi_like_p (out))
-    local_indent = 0;
 
   /* MI does not print certain values, differentiated by type,
      depending on what ARGS_TYPE indicates.  Test type against option.
@@ -256,24 +235,14 @@ py_print_value (struct ui_out *out, struct value *val,
   if (args_type == MI_PRINT_SIMPLE_VALUES
       || args_type == MI_PRINT_ALL_VALUES)
     {
-      struct type *type = NULL;
-
-      TRY_CATCH (except, RETURN_MASK_ALL)
-	{
-	  type = check_typedef (value_type (val));
-	}
-      if (except.reason < 0)
-	{
-	  gdbpy_convert_exception (except);
-	  return PY_BT_ERROR;
-	}
+      struct type *type = check_typedef (val->type ());
 
       if (args_type == MI_PRINT_ALL_VALUES)
 	should_print = 1;
       else if (args_type == MI_PRINT_SIMPLE_VALUES
-	       && TYPE_CODE (type) != TYPE_CODE_ARRAY
-	       && TYPE_CODE (type) != TYPE_CODE_STRUCT
-	       && TYPE_CODE (type) != TYPE_CODE_UNION)
+	       && type->code () != TYPE_CODE_ARRAY
+	       && type->code () != TYPE_CODE_STRUCT
+	       && type->code () != TYPE_CODE_UNION)
 	should_print = 1;
     }
   else if (args_type != NO_VALUES)
@@ -281,25 +250,11 @@ py_print_value (struct ui_out *out, struct value *val,
 
   if (should_print)
     {
-      TRY_CATCH (except, RETURN_MASK_ALL)
-	{
-	  struct ui_file *stb;
-	  struct cleanup *cleanup;
+      string_file stb;
 
-	  stb = mem_fileopen ();
-	  cleanup = make_cleanup_ui_file_delete (stb);
-	  common_val_print (val, stb, indent, opts, language);
-	  ui_out_field_stream (out, "value", stb);
-	  do_cleanups (cleanup);
-	}
-      if (except.reason < 0)
-	{
-	  gdbpy_convert_exception (except);
-	  return PY_BT_ERROR;
-	}
+      common_val_print (val, &stb, indent, opts, language);
+      out->field_stream ("value", stb);
     }
-
-  return PY_BT_OK;
 }
 
 /* Helper function to call a Python method and extract an iterator
@@ -310,24 +265,21 @@ py_print_value (struct ui_out *out, struct value *val,
    This function can return an iterator, or NULL.  */
 
 static PyObject *
-get_py_iter_from_func (PyObject *filter, char *func)
+get_py_iter_from_func (PyObject *filter, const char *func)
 {
   if (PyObject_HasAttrString (filter, func))
     {
-      PyObject *result = PyObject_CallMethod (filter, func, NULL);
+      gdbpy_ref<> result (PyObject_CallMethod (filter, func, NULL));
 
       if (result != NULL)
 	{
 	  if (result == Py_None)
 	    {
-	      return result;
+	      return result.release ();
 	    }
 	  else
 	    {
-	      PyObject *iterator = PyObject_GetIter (result);
-
-	      Py_DECREF (result);
-	      return iterator;
+	      return PyObject_GetIter (result.get ());
 	    }
 	}
     }
@@ -350,131 +302,105 @@ get_py_iter_from_func (PyObject *filter, char *func)
     ARGS_TYPE is an enumerator describing the argument format,
     PRINT_ARGS_FIELD is a flag which indicates if we output "ARGS=1"
     in MI output in commands where both arguments and locals are
-    printed.  Returns PY_BT_ERROR on error, with any GDB exceptions
-    converted to a Python exception, or PY_BT_OK on success.  */
+    printed.  */
 
-static enum py_bt_status
+static void
 py_print_single_arg (struct ui_out *out,
 		     const char *sym_name,
 		     struct frame_arg *fa,
 		     struct value *fv,
 		     const struct value_print_options *opts,
-		     enum py_frame_args args_type,
+		     enum ext_lang_frame_args args_type,
 		     int print_args_field,
 		     const struct language_defn *language)
 {
   struct value *val;
-  volatile struct gdb_exception except;
 
   if (fa != NULL)
     {
-      language = language_def (SYMBOL_LANGUAGE (fa->sym));
+      if (fa->val == NULL && fa->error == NULL)
+	return;
+      language = language_def (fa->sym->language ());
       val = fa->val;
     }
   else
     val = fv;
 
-  TRY_CATCH (except, RETURN_MASK_ALL)
-    {
-      struct cleanup *cleanups = make_cleanup (null_cleanup, NULL);
+  gdb::optional<ui_out_emit_tuple> maybe_tuple;
 
-      /*  MI has varying rules for tuples, but generally if there is only
+  /*  MI has varying rules for tuples, but generally if there is only
       one element in each item in the list, do not start a tuple.  The
       exception is -stack-list-variables which emits an ARGS="1" field
       if the value is a frame argument.  This is denoted in this
       function with PRINT_ARGS_FIELD which is flag from the caller to
       emit the ARGS field.  */
-      if (ui_out_is_mi_like_p (out))
-	{
-	  if (print_args_field || args_type != NO_VALUES)
-	    make_cleanup_ui_out_tuple_begin_end (out, NULL);
-	}
-
-      annotate_arg_begin ();
-
-      /* If frame argument is populated, check for entry-values and the
-	 entry value options.  */
-      if (fa != NULL)
-	{
-	  struct ui_file *stb;
-
-	  stb = mem_fileopen ();
-	  make_cleanup_ui_file_delete (stb);
-	  fprintf_symbol_filtered (stb, SYMBOL_PRINT_NAME (fa->sym),
-				   SYMBOL_LANGUAGE (fa->sym),
-				   DMGL_PARAMS | DMGL_ANSI);
-	  if (fa->entry_kind == print_entry_values_compact)
-	    {
-	      fputs_filtered ("=", stb);
-
-	      fprintf_symbol_filtered (stb, SYMBOL_PRINT_NAME (fa->sym),
-				       SYMBOL_LANGUAGE (fa->sym),
-				       DMGL_PARAMS | DMGL_ANSI);
-	    }
-	  if (fa->entry_kind == print_entry_values_only
-	      || fa->entry_kind == print_entry_values_compact)
-	    {
-	      fputs_filtered ("@entry", stb);
-	    }
-	  ui_out_field_stream (out, "name", stb);
-	}
-      else
-	/* Otherwise, just output the name.  */
-	ui_out_field_string (out, "name", sym_name);
-
-      annotate_arg_name_end ();
-
-      if (! ui_out_is_mi_like_p (out))
-	ui_out_text (out, "=");
-
-      if (print_args_field)
-	ui_out_field_int (out, "arg", 1);
-
-      /* For MI print the type, but only for simple values.  This seems
-	 weird, but this is how MI choose to format the various output
-	 types.  */
-      if (args_type == MI_PRINT_SIMPLE_VALUES)
-	{
-	  if (py_print_type (out, val) == PY_BT_ERROR)
-	    {
-	      do_cleanups (cleanups);
-	      goto error;
-	    }
-	}
-
-      annotate_arg_value (value_type (val));
-
-      /* If the output is to the CLI, and the user option "set print
-	 frame-arguments" is set to none, just output "...".  */
-      if (! ui_out_is_mi_like_p (out) && args_type == NO_VALUES)
-	ui_out_field_string (out, "value", "...");
-      else
-	{
-	  /* Otherwise, print the value for both MI and the CLI, except
-	     for the case of MI_PRINT_NO_VALUES.  */
-	  if (args_type != NO_VALUES)
-	    {
-	      if (py_print_value (out, val, opts, 0, args_type, language)
-		  == PY_BT_ERROR)
-		{
-		  do_cleanups (cleanups);
-		  goto error;
-		}
-	    }
-	}
-
-      do_cleanups (cleanups);
-    }
-  if (except.reason < 0)
+  if (out->is_mi_like_p ())
     {
-      gdbpy_convert_exception (except);
-      goto error;
+      if (print_args_field || args_type != NO_VALUES)
+	maybe_tuple.emplace (out, nullptr);
     }
 
-  return PY_BT_OK;
+  annotate_arg_begin ();
 
- error:
-  return PY_BT_ERROR;
+  /* If frame argument is populated, check for entry-values and the
+     entry value options.  */
+  if (fa != NULL)
+    {
+      string_file stb;
+
+      gdb_puts (fa->sym->print_name (), &stb);
+      if (fa->entry_kind == print_entry_values_compact)
+	{
+	  stb.puts ("=");
+
+	  gdb_puts (fa->sym->print_name (), &stb);
+	}
+      if (fa->entry_kind == print_entry_values_only
+	  || fa->entry_kind == print_entry_values_compact)
+	stb.puts ("@entry");
+      out->field_stream ("name", stb);
+    }
+  else
+    /* Otherwise, just output the name.  */
+    out->field_string ("name", sym_name);
+
+  annotate_arg_name_end ();
+
+  out->text ("=");
+
+  if (print_args_field)
+    out->field_signed ("arg", 1);
+
+  /* For MI print the type, but only for simple values.  This seems
+     weird, but this is how MI choose to format the various output
+     types.  */
+  if (args_type == MI_PRINT_SIMPLE_VALUES && val != NULL)
+    py_print_type (out, val);
+
+  if (val != NULL)
+    annotate_arg_value (val->type ());
+
+  /* If the output is to the CLI, and the user option "set print
+     frame-arguments" is set to none, just output "...".  */
+  if (! out->is_mi_like_p () && args_type == NO_VALUES)
+    out->field_string ("value", "...");
+  else
+    {
+      /* Otherwise, print the value for both MI and the CLI, except
+	 for the case of MI_PRINT_NO_VALUES.  */
+      if (args_type != NO_VALUES)
+	{
+	  if (val == NULL)
+	    {
+	      gdb_assert (fa != NULL && fa->error != NULL);
+	      out->field_fmt ("value", metadata_style.style (),
+			      _("<error reading variable: %s>"),
+			      fa->error.get ());
+	    }
+	  else
+	    py_print_value (out, val, opts, 0, args_type, language);
+	}
+    }
 }
 
 /* Helper function to loop over frame arguments provided by the
@@ -484,81 +410,60 @@ py_print_single_arg (struct ui_out *out,
    enumerator describing the argument format, PRINT_ARGS_FIELD is a
    flag which indicates if we output "ARGS=1" in MI output in commands
    where both arguments and locals are printed, and FRAME is the
-   backing frame.  Returns PY_BT_ERROR on error, with any GDB
-   exceptions converted to a Python exception, or PY_BT_OK on
+   backing frame.  Returns EXT_LANG_BT_ERROR on error, with any GDB
+   exceptions converted to a Python exception, or EXT_LANG_BT_OK on
    success.  */
 
-static enum py_bt_status
+static enum ext_lang_bt_status
 enumerate_args (PyObject *iter,
 		struct ui_out *out,
-		enum py_frame_args args_type,
+		enum ext_lang_frame_args args_type,
 		int print_args_field,
-		struct frame_info *frame)
+		frame_info_ptr frame)
 {
-  PyObject *item;
   struct value_print_options opts;
-  volatile struct gdb_exception except;
 
   get_user_print_options (&opts);
 
   if (args_type == CLI_SCALAR_VALUES)
     {
       /* True in "summary" mode, false otherwise.  */
-      opts.summary = 1;
+      opts.summary = true;
     }
 
-  opts.deref_ref = 1;
+  opts.deref_ref = true;
 
-  TRY_CATCH (except, RETURN_MASK_ALL)
-    {
-      annotate_frame_args ();
-    }
-  if (except.reason < 0)
-    {
-      gdbpy_convert_exception (except);
-      goto error;
-    }
+  annotate_frame_args ();
 
   /*  Collect the first argument outside of the loop, so output of
       commas in the argument output is correct.  At the end of the
       loop block collect another item from the iterator, and, if it is
       not null emit a comma.  */
-  item = PyIter_Next (iter);
+  gdbpy_ref<> item (PyIter_Next (iter));
   if (item == NULL && PyErr_Occurred ())
-    goto error;
+    return EXT_LANG_BT_ERROR;
 
-  while (item)
+  while (item != NULL)
     {
       const struct language_defn *language;
-      char *sym_name;
+      gdb::unique_xmalloc_ptr<char> sym_name;
       struct symbol *sym;
+      const struct block *sym_block;
       struct value *val;
-      enum py_bt_status success = PY_BT_ERROR;
+      enum ext_lang_bt_status success = EXT_LANG_BT_ERROR;
 
-      success = extract_sym (item, &sym_name, &sym, &language);
-      if (success == PY_BT_ERROR)
-	{
-	  Py_DECREF (item);
-	  goto error;
-	}
+      success = extract_sym (item.get (), &sym_name, &sym, &sym_block,
+			     &language);
+      if (success == EXT_LANG_BT_ERROR)
+	return EXT_LANG_BT_ERROR;
 
-      success = extract_value (item, &val);
-      if (success == PY_BT_ERROR)
-	{
-	  xfree (sym_name);
-	  Py_DECREF (item);
-	  goto error;
-	}
+      success = extract_value (item.get (), &val);
+      if (success == EXT_LANG_BT_ERROR)
+	return EXT_LANG_BT_ERROR;
 
-      Py_DECREF (item);
-      item = NULL;
-
-      if (sym && ui_out_is_mi_like_p (out)
+      if (sym && out->is_mi_like_p ()
 	  && ! mi_should_print (sym, MI_PRINT_ARGS))
-	{
-	  xfree (sym_name);
-	  continue;
-	}
+	continue;
 
       /* If the object did not provide a value, read it using
 	 read_frame_args and account for entry values, if any.  */
@@ -572,20 +477,11 @@ enumerate_args (PyObject *iter,
 	    {
 	      PyErr_SetString (PyExc_RuntimeError,
 			       _("No symbol or value provided."));
-	      xfree (sym_name);
-	      goto error;
+	      return EXT_LANG_BT_ERROR;
 	    }
 
-	  TRY_CATCH (except, RETURN_MASK_ALL)
-	    {
-	      read_frame_arg (sym, frame, &arg, &entryarg);
-	    }
-	  if (except.reason < 0)
-	    {
-	      xfree (sym_name);
-	      gdbpy_convert_exception (except);
-	      goto error;
-	    }
+	  read_frame_arg (user_frame_print_options,
+			  sym, frame, &arg, &entryarg);
 
 	  /* The object has not provided a value, so this is a frame
 	     argument to be read by GDB.  In this case we have to
@@ -593,105 +489,47 @@ enumerate_args (PyObject *iter,
 
 	  if (arg.entry_kind != print_entry_values_only)
 	    {
-	      if (py_print_single_arg (out, NULL, &arg,
-				       NULL, &opts,
-				       args_type,
-				       print_args_field,
-				       NULL) == PY_BT_ERROR)
-		{
-		  xfree (arg.error);
-		  xfree (entryarg.error);
-		  xfree (sym_name);
-		  goto error;
-		}
+	      py_print_single_arg (out, NULL, &arg,
+				   NULL, &opts,
+				   args_type,
+				   print_args_field,
+				   NULL);
 	    }
 
 	  if (entryarg.entry_kind != print_entry_values_no)
 	    {
 	      if (arg.entry_kind != print_entry_values_only)
 		{
-		  TRY_CATCH (except, RETURN_MASK_ALL)
-		    {
-		      ui_out_text (out, ", ");
-		      ui_out_wrap_hint (out, "    ");
-		    }
-		  if (except.reason < 0)
-		    {
-		      xfree (arg.error);
-		      xfree (entryarg.error);
-		      xfree (sym_name);
-		      gdbpy_convert_exception (except);
-		      goto error;
-		    }
+		  out->text (", ");
+		  out->wrap_hint (4);
 		}
 
-	      if (py_print_single_arg (out, NULL, &entryarg, NULL,
-				      &opts, args_type,
-				      print_args_field, NULL) == PY_BT_ERROR)
-		{
-		      xfree (arg.error);
-		      xfree (entryarg.error);
-		      xfree (sym_name);
-		      goto error;
-		}
+	      py_print_single_arg (out, NULL, &entryarg, NULL, &opts,
+				   args_type, print_args_field, NULL);
 	    }
-
-	  xfree (arg.error);
-	  xfree (entryarg.error);
 	}
       else
 	{
 	  /* If the object has provided a value, we just print that.  */
 	  if (val != NULL)
-	    {
-	      if (py_print_single_arg (out, sym_name, NULL, val, &opts,
-				       args_type, print_args_field,
-				       language) == PY_BT_ERROR)
-		{
-		  xfree (sym_name);
-		  goto error;
-		}
-	    }
+	    py_print_single_arg (out, sym_name.get (), NULL, val, &opts,
+				 args_type, print_args_field,
+				 language);
 	}
-
-      xfree (sym_name);
 
       /* Collect the next item from the iterator.  If
 	 this is the last item, do not print the
 	 comma.  */
-      item = PyIter_Next (iter);
+      item.reset (PyIter_Next (iter));
       if (item != NULL)
-	{
-	  TRY_CATCH (except, RETURN_MASK_ALL)
-	    {
-	      ui_out_text (out, ", ");
-	    }
-	  if (except.reason < 0)
-	    {
-	      Py_DECREF (item);
-	      gdbpy_convert_exception (except);
-	      goto error;
-	    }
-	}
+	out->text (", ");
       else if (PyErr_Occurred ())
-	goto error;
+	return EXT_LANG_BT_ERROR;
 
-      TRY_CATCH (except, RETURN_MASK_ALL)
-	{
-	  annotate_arg_end ();
-	}
-      if (except.reason < 0)
-	{
-	  Py_DECREF (item);
-	  gdbpy_convert_exception (except);
-	  goto error;
-	}
+      annotate_arg_end ();
     }
 
-  return PY_BT_OK;
-
- error:
-  return PY_BT_ERROR;
+  return EXT_LANG_BT_OK;
 }
 
 
@@ -703,287 +541,194 @@ enumerate_args (PyObject *iter,
    the argument format, PRINT_ARGS_FIELD is flag which indicates
    whether to output the ARGS field in the case of
    -stack-list-variables and FRAME is the backing frame.  Returns
-   PY_BT_ERROR on error, with any GDB exceptions converted to a Python
-   exception, or PY_BT_OK on success.  */
+   EXT_LANG_BT_ERROR on error, with any GDB exceptions converted to a Python
+   exception, or EXT_LANG_BT_OK on success.  */
 
-static enum py_bt_status
+static enum ext_lang_bt_status
 enumerate_locals (PyObject *iter,
 		  struct ui_out *out,
 		  int indent,
-		  enum py_frame_args args_type,
+		  enum ext_lang_frame_args args_type,
 		  int print_args_field,
-		  struct frame_info *frame)
+		  frame_info_ptr frame)
 {
-  PyObject *item;
   struct value_print_options opts;
 
   get_user_print_options (&opts);
-  opts.deref_ref = 1;
+  opts.deref_ref = true;
 
-  while ((item = PyIter_Next (iter)))
+  while (true)
     {
       const struct language_defn *language;
-      char *sym_name;
+      gdb::unique_xmalloc_ptr<char> sym_name;
       struct value *val;
-      enum py_bt_status  success = PY_BT_ERROR;
+      enum ext_lang_bt_status success = EXT_LANG_BT_ERROR;
       struct symbol *sym;
-      volatile struct gdb_exception except;
+      const struct block *sym_block;
       int local_indent = 8 + (8 * indent);
-      struct cleanup *locals_cleanups;
+      gdb::optional<ui_out_emit_tuple> tuple;
 
-      locals_cleanups = make_cleanup_py_decref (item);
+      gdbpy_ref<> item (PyIter_Next (iter));
+      if (item == NULL)
+	break;
 
-      success = extract_sym (item, &sym_name, &sym, &language);
-      if (success == PY_BT_ERROR)
-	{
-	  do_cleanups (locals_cleanups);
-	  goto error;
-	}
+      success = extract_sym (item.get (), &sym_name, &sym, &sym_block,
+			     &language);
+      if (success == EXT_LANG_BT_ERROR)
+	return EXT_LANG_BT_ERROR;
 
-      make_cleanup (xfree, sym_name);
+      success = extract_value (item.get (), &val);
+      if (success == EXT_LANG_BT_ERROR)
+	return EXT_LANG_BT_ERROR;
 
-      success = extract_value (item, &val);
-      if (success == PY_BT_ERROR)
-	{
-	  do_cleanups (locals_cleanups);
-	  goto error;
-	}
-
-      if (sym != NULL && ui_out_is_mi_like_p (out)
+      if (sym != NULL && out->is_mi_like_p ()
 	  && ! mi_should_print (sym, MI_PRINT_LOCALS))
-	{
-	  do_cleanups (locals_cleanups);
-	  continue;
-	}
+	continue;
 
       /* If the object did not provide a value, read it.  */
       if (val == NULL)
-	{
-	  TRY_CATCH (except, RETURN_MASK_ALL)
-	    {
-	      val = read_var_value (sym, frame);
-	    }
-	  if (except.reason < 0)
-	    {
-	      gdbpy_convert_exception (except);
-	      do_cleanups (locals_cleanups);
-	      goto error;
-	    }
-	}
+	val = read_var_value (sym, sym_block, frame);
 
       /* With PRINT_NO_VALUES, MI does not emit a tuple normally as
 	 each output contains only one field.  The exception is
 	 -stack-list-variables, which always provides a tuple.  */
-      if (ui_out_is_mi_like_p (out))
+      if (out->is_mi_like_p ())
 	{
 	  if (print_args_field || args_type != NO_VALUES)
-	    make_cleanup_ui_out_tuple_begin_end (out, NULL);
+	    tuple.emplace (out, nullptr);
 	}
-      TRY_CATCH (except, RETURN_MASK_ALL)
-	{
-	  if (! ui_out_is_mi_like_p (out))
-	    {
-	      /* If the output is not MI we indent locals.  */
-	      ui_out_spaces (out, local_indent);
-	    }
 
-	  ui_out_field_string (out, "name", sym_name);
-
-	  if (! ui_out_is_mi_like_p (out))
-	    ui_out_text (out, " = ");
-	}
-      if (except.reason < 0)
-	{
-	  gdbpy_convert_exception (except);
-	  do_cleanups (locals_cleanups);
-	  goto error;
-	}
+      /* If the output is not MI we indent locals.  */
+      out->spaces (local_indent);
+      out->field_string ("name", sym_name.get ());
+      out->text (" = ");
 
       if (args_type == MI_PRINT_SIMPLE_VALUES)
-	{
-	  if (py_print_type (out, val) == PY_BT_ERROR)
-	    {
-	      do_cleanups (locals_cleanups);
-	      goto error;
-	    }
-	}
+	py_print_type (out, val);
 
       /* CLI always prints values for locals.  MI uses the
 	 simple/no/all system.  */
-      if (! ui_out_is_mi_like_p (out))
+      if (! out->is_mi_like_p ())
 	{
 	  int val_indent = (indent + 1) * 4;
 
-	  if (py_print_value (out, val, &opts, val_indent, args_type,
-			      language) ==  PY_BT_ERROR)
-	    {
-	      do_cleanups (locals_cleanups);
-	      goto error;
-	    }
+	  py_print_value (out, val, &opts, val_indent, args_type,
+			  language);
 	}
       else
 	{
 	  if (args_type != NO_VALUES)
-	    {
-	      if (py_print_value (out, val, &opts, 0, args_type,
-				  language) ==  PY_BT_ERROR)
-		{
-		  do_cleanups (locals_cleanups);
-		  goto error;
-		}
-	    }
+	    py_print_value (out, val, &opts, 0, args_type,
+			    language);
 	}
 
-      do_cleanups (locals_cleanups);
-
-      TRY_CATCH (except, RETURN_MASK_ALL)
-	{
-	  ui_out_text (out, "\n");
-	}
-      if (except.reason < 0)
-	{
-	  gdbpy_convert_exception (except);
-	  goto error;
-	}
+      out->text ("\n");
     }
 
-  if (item == NULL && PyErr_Occurred ())
-    goto error;
+  if (!PyErr_Occurred ())
+    return EXT_LANG_BT_OK;
 
-  return PY_BT_OK;
-
- error:
-  return PY_BT_ERROR;
+  return EXT_LANG_BT_ERROR;
 }
 
-/*  Helper function for -stack-list-variables.  Returns PY_BT_ERROR on
-    error, or PY_BT_OK on success.  */
+/*  Helper function for -stack-list-variables.  Returns EXT_LANG_BT_ERROR on
+    error, or EXT_LANG_BT_OK on success.  */
 
-static enum py_bt_status
+static enum ext_lang_bt_status
 py_mi_print_variables (PyObject *filter, struct ui_out *out,
 		       struct value_print_options *opts,
-		       enum py_frame_args args_type,
-		       struct frame_info *frame)
+		       enum ext_lang_frame_args args_type,
+		       frame_info_ptr frame)
 {
-  struct cleanup *old_chain;
-  PyObject *args_iter;
-  PyObject *locals_iter;
-
-  args_iter = get_py_iter_from_func (filter, "frame_args");
-  old_chain = make_cleanup_py_xdecref (args_iter);
+  gdbpy_ref<> args_iter (get_py_iter_from_func (filter, "frame_args"));
   if (args_iter == NULL)
-    goto error;
+    return EXT_LANG_BT_ERROR;
 
-  locals_iter = get_py_iter_from_func (filter, "frame_locals");
+  gdbpy_ref<> locals_iter (get_py_iter_from_func (filter, "frame_locals"));
   if (locals_iter == NULL)
-    goto error;
+    return EXT_LANG_BT_ERROR;
 
-  make_cleanup_py_decref (locals_iter);
-  make_cleanup_ui_out_list_begin_end (out, "variables");
+  ui_out_emit_list list_emitter (out, "variables");
 
-  if (args_iter != Py_None)
-    if (enumerate_args (args_iter, out, args_type, 1, frame) == PY_BT_ERROR)
-      goto error;
+  if (args_iter != Py_None
+      && (enumerate_args (args_iter.get (), out, args_type, 1, frame)
+	  == EXT_LANG_BT_ERROR))
+    return EXT_LANG_BT_ERROR;
 
-  if (locals_iter != Py_None)
-    if (enumerate_locals (locals_iter, out, 1, args_type, 1, frame)
-	== PY_BT_ERROR)
-      goto error;
+  if (locals_iter != Py_None
+      && (enumerate_locals (locals_iter.get (), out, 1, args_type, 1, frame)
+	  == EXT_LANG_BT_ERROR))
+    return EXT_LANG_BT_ERROR;
 
-  do_cleanups (old_chain);
-  return PY_BT_OK;
-
- error:
-  do_cleanups (old_chain);
-  return PY_BT_ERROR;
+  return EXT_LANG_BT_OK;
 }
 
 /* Helper function for printing locals.  This function largely just
    creates the wrapping tuple, and calls enumerate_locals.  Returns
-   PY_BT_ERROR on error, or PY_BT_OK on success.*/
+   EXT_LANG_BT_ERROR on error, or EXT_LANG_BT_OK on success.  */
 
-static enum py_bt_status
+static enum ext_lang_bt_status
 py_print_locals (PyObject *filter,
 		 struct ui_out *out,
-		 enum py_frame_args args_type,
+		 enum ext_lang_frame_args args_type,
 		 int indent,
-		 struct frame_info *frame)
+		 frame_info_ptr frame)
 {
-  PyObject *locals_iter = get_py_iter_from_func (filter,
-						 "frame_locals");
-  struct cleanup *old_chain = make_cleanup_py_xdecref (locals_iter);
-
+  gdbpy_ref<> locals_iter (get_py_iter_from_func (filter, "frame_locals"));
   if (locals_iter == NULL)
-    goto locals_error;
+    return EXT_LANG_BT_ERROR;
 
-  make_cleanup_ui_out_list_begin_end (out, "locals");
+  ui_out_emit_list list_emitter (out, "locals");
 
-  if (locals_iter != Py_None)
-    if (enumerate_locals (locals_iter, out, indent, args_type,
-			  0, frame) == PY_BT_ERROR)
-      goto locals_error;
+  if (locals_iter != Py_None
+      && (enumerate_locals (locals_iter.get (), out, indent, args_type,
+			    0, frame) == EXT_LANG_BT_ERROR))
+    return EXT_LANG_BT_ERROR;
 
-  do_cleanups (old_chain);
-  return PY_BT_OK;;
-
- locals_error:
-  do_cleanups (old_chain);
-  return PY_BT_ERROR;
+  return EXT_LANG_BT_OK;
 }
 
 /* Helper function for printing frame arguments.  This function
    largely just creates the wrapping tuple, and calls enumerate_args.
-   Returns PY_BT_ERROR on error, with any GDB exceptions converted to
-   a Python exception, or PY_BT_OK on success.  */
+   Returns EXT_LANG_BT_ERROR on error, with any GDB exceptions converted to
+   a Python exception, or EXT_LANG_BT_OK on success.  */
 
-static enum py_bt_status
+static enum ext_lang_bt_status
 py_print_args (PyObject *filter,
 	       struct ui_out *out,
-	       enum py_frame_args args_type,
-	       struct frame_info *frame)
+	       enum ext_lang_frame_args args_type,
+	       frame_info_ptr frame)
 {
-  PyObject *args_iter  = get_py_iter_from_func (filter, "frame_args");
-  struct cleanup *old_chain = make_cleanup_py_xdecref (args_iter);
-  volatile struct gdb_exception except;
-
+  gdbpy_ref<> args_iter (get_py_iter_from_func (filter, "frame_args"));
   if (args_iter == NULL)
-    goto args_error;
+    return EXT_LANG_BT_ERROR;
 
-  make_cleanup_ui_out_list_begin_end (out, "args");
+  ui_out_emit_list list_emitter (out, "args");
 
-  TRY_CATCH (except, RETURN_MASK_ALL)
+  out->wrap_hint (3);
+  annotate_frame_args ();
+  out->text (" (");
+
+  if (args_type == CLI_PRESENCE)
     {
-      annotate_frame_args ();
-      if (! ui_out_is_mi_like_p (out))
-	ui_out_text (out, " (");
-    }
-  if (except.reason < 0)
-    {
-      gdbpy_convert_exception (except);
-      goto args_error;
-    }
+      if (args_iter != Py_None)
+	{
+	  gdbpy_ref<> item (PyIter_Next (args_iter.get ()));
 
-  if (args_iter != Py_None)
-    if (enumerate_args (args_iter, out, args_type, 0, frame) == PY_BT_ERROR)
-      goto args_error;
-
-  TRY_CATCH (except, RETURN_MASK_ALL)
-    {
-      if (! ui_out_is_mi_like_p (out))
-	ui_out_text (out, ")");
+	  if (item != NULL)
+	    out->text ("...");
+	  else if (PyErr_Occurred ())
+	    return EXT_LANG_BT_ERROR;
+	}
     }
-  if (except.reason < 0)
-    {
-      gdbpy_convert_exception (except);
-      goto args_error;
-    }
+  else if (args_iter != Py_None
+	   && (enumerate_args (args_iter.get (), out, args_type, 0, frame)
+	       == EXT_LANG_BT_ERROR))
+    return EXT_LANG_BT_ERROR;
 
-  do_cleanups (old_chain);
-  return PY_BT_OK;
+  out->text (")");
 
- args_error:
-  do_cleanups (old_chain);
-  return PY_BT_ERROR;
+  return EXT_LANG_BT_OK;
 }
 
 /*  Print a single frame to the designated output stream, detecting
@@ -997,23 +742,31 @@ py_print_args (PyObject *filter,
     (in the case of elided frames), and LEVELS_PRINTED is a hash-table
     containing all the frames level that have already been printed.
     If a frame level has been printed, do not print it again (in the
-    case of elided frames).  Returns PY_BT_ERROR on error, with any
-    GDB exceptions converted to a Python exception, or PY_BT_COMPLETED
-    on success.  */
+    case of elided frames).  Returns EXT_LANG_BT_ERROR on error, with any
+    GDB exceptions converted to a Python exception, or EXT_LANG_BT_OK
+    on success.  It can also throw an exception RETURN_QUIT.  */
 
-static enum py_bt_status
-py_print_frame (PyObject *filter, int flags, enum py_frame_args args_type,
+static enum ext_lang_bt_status
+py_print_frame (PyObject *filter, frame_filter_flags flags,
+		enum ext_lang_frame_args args_type,
 		struct ui_out *out, int indent, htab_t levels_printed)
 {
   int has_addr = 0;
   CORE_ADDR address = 0;
   struct gdbarch *gdbarch = NULL;
-  struct frame_info *frame = NULL;
-  struct cleanup *cleanup_stack = make_cleanup (null_cleanup, NULL);
+  frame_info_ptr frame = NULL;
   struct value_print_options opts;
-  PyObject *py_inf_frame, *elided;
+
   int print_level, print_frame_info, print_args, print_locals;
-  volatile struct gdb_exception except;
+  /* Note that the below default in non-mi mode is the same as the
+     default value for the backtrace command (see the call to print_frame_info
+     in backtrace_command_1).
+     Having the same default ensures that 'bt' and 'bt no-filters'
+     have the same behaviour when some filters exist but do not apply
+     to a frame.  */
+  enum print_what print_what
+    = out->is_mi_like_p () ? LOC_AND_ADDRESS : LOCATION;
+  gdb::unique_xmalloc_ptr<char> function_to_free;
 
   /* Extract print settings from FLAGS.  */
   print_level = (flags & PRINT_LEVEL) ? 1 : 0;
@@ -1022,426 +775,345 @@ py_print_frame (PyObject *filter, int flags, enum py_frame_args args_type,
   print_locals = (flags & PRINT_LOCALS) ? 1 : 0;
 
   get_user_print_options (&opts);
+  if (print_frame_info)
+    {
+      gdb::optional<enum print_what> user_frame_info_print_what;
+
+      get_user_print_what_frame_info (&user_frame_info_print_what);
+      if (!out->is_mi_like_p () && user_frame_info_print_what.has_value ())
+	{
+	  /* Use the specific frame information desired by the user.  */
+	  print_what = *user_frame_info_print_what;
+	}
+    }
 
   /* Get the underlying frame.  This is needed to determine GDB
   architecture, and also, in the cases of frame variables/arguments to
   read them if they returned filter object requires us to do so.  */
-  py_inf_frame = PyObject_CallMethod (filter, "inferior_frame", NULL);
+  gdbpy_ref<> py_inf_frame (PyObject_CallMethod (filter, "inferior_frame",
+						 NULL));
   if (py_inf_frame == NULL)
-    goto error;
+    return EXT_LANG_BT_ERROR;
 
-  frame = frame_object_to_frame_info (py_inf_frame);;
-
-  Py_DECREF (py_inf_frame);
-
+  frame = frame_object_to_frame_info (py_inf_frame.get ());
   if (frame == NULL)
-    goto error;
+    return EXT_LANG_BT_ERROR;
 
-  TRY_CATCH (except, RETURN_MASK_ALL)
-    {
-      gdbarch = get_frame_arch (frame);
-    }
-  if (except.reason < 0)
-    {
-      gdbpy_convert_exception (except);
-      goto error;
-    }
+  symtab_and_line sal = find_frame_sal (frame);
 
+  gdbarch = get_frame_arch (frame);
 
   /* stack-list-variables.  */
   if (print_locals && print_args && ! print_frame_info)
     {
       if (py_mi_print_variables (filter, out, &opts,
-				 args_type, frame) == PY_BT_ERROR)
-	goto error;
-      else
-	{
-	  do_cleanups (cleanup_stack);
-	  return PY_BT_COMPLETED;
-	}
+				 args_type, frame) == EXT_LANG_BT_ERROR)
+	return EXT_LANG_BT_ERROR;
+      return EXT_LANG_BT_OK;
     }
+
+  gdb::optional<ui_out_emit_tuple> tuple;
 
   /* -stack-list-locals does not require a
      wrapping frame attribute.  */
   if (print_frame_info || (print_args && ! print_locals))
-    make_cleanup_ui_out_tuple_begin_end (out, "frame");
+    tuple.emplace (out, "frame");
 
   if (print_frame_info)
     {
       /* Elided frames are also printed with this function (recursively)
 	 and are printed with indention.  */
       if (indent > 0)
-	{
-	TRY_CATCH (except, RETURN_MASK_ALL)
-	  {
-	    ui_out_spaces (out, indent*4);
-	  }
-	if (except.reason < 0)
-	  {
-	    gdbpy_convert_exception (except);
-	    goto error;
-	  }
-	}
+	out->spaces (indent * 4);
 
       /* The address is required for frame annotations, and also for
 	 address printing.  */
       if (PyObject_HasAttrString (filter, "address"))
 	{
-	  PyObject *paddr = PyObject_CallMethod (filter, "address", NULL);
-	  if (paddr != NULL)
+	  gdbpy_ref<> paddr (PyObject_CallMethod (filter, "address", NULL));
+
+	  if (paddr == NULL)
+	    return EXT_LANG_BT_ERROR;
+
+	  if (paddr != Py_None)
 	    {
-	      if (paddr != Py_None)
-		{
-		  address = PyLong_AsLong (paddr);
-		  has_addr = 1;
-		}
-	      Py_DECREF (paddr);
+	      if (get_addr_from_python (paddr.get (), &address) < 0)
+		return EXT_LANG_BT_ERROR;
+
+	      has_addr = 1;
 	    }
-	  else
-	    goto error;
 	}
     }
+
+  /* For MI, each piece is controlled individually.  */
+  bool location_print = (print_frame_info
+			 && !out->is_mi_like_p ()
+			 && (print_what == LOCATION
+			     || print_what == SRC_AND_LOC
+			     || print_what == LOC_AND_ADDRESS
+			     || print_what == SHORT_LOCATION));
 
   /* Print frame level.  MI does not require the level if
      locals/variables only are being printed.  */
-  if ((print_frame_info || print_args) && print_level)
+  if (print_level
+      && (location_print
+	  || (out->is_mi_like_p () && (print_frame_info || print_args))))
     {
       struct frame_info **slot;
       int level;
-      volatile struct gdb_exception except;
 
-      slot = (struct frame_info **) htab_find_slot (levels_printed,
-						    frame, INSERT);
-      TRY_CATCH (except, RETURN_MASK_ALL)
-	{
-	  level = frame_relative_level (frame);
+      slot = (frame_info **) htab_find_slot (levels_printed,
+						   frame.get(), INSERT);
 
-	  /* Check if this frame has already been printed (there are cases
-	     where elided synthetic dummy-frames have to 'borrow' the frame
-	     architecture from the eliding frame.  If that is the case, do
-	     not print 'level', but print spaces.  */
-	  if (*slot == frame)
-	    ui_out_field_skip (out, "level");
-	  else
-	    {
-	      *slot = frame;
-	      annotate_frame_begin (print_level ? level : 0,
-				    gdbarch, address);
-	      ui_out_text (out, "#");
-	      ui_out_field_fmt_int (out, 2, ui_left, "level",
-				    level);
-	    }
-	}
-      if (except.reason < 0)
+      level = frame_relative_level (frame);
+
+      /* Check if this frame has already been printed (there are cases
+	 where elided synthetic dummy-frames have to 'borrow' the frame
+	 architecture from the eliding frame.  If that is the case, do
+	 not print 'level', but print spaces.  */
+      if (*slot == frame)
+	out->field_skip ("level");
+      else
 	{
-	  gdbpy_convert_exception (except);
-	  goto error;
+	  *slot = frame.get ();
+	  annotate_frame_begin (print_level ? level : 0,
+				gdbarch, address);
+	  out->text ("#");
+	  out->field_fmt_signed (2, ui_left, "level", level);
 	}
     }
 
-  if (print_frame_info)
+  if (location_print || (out->is_mi_like_p () && print_frame_info))
     {
       /* Print address to the address field.  If an address is not provided,
 	 print nothing.  */
       if (opts.addressprint && has_addr)
 	{
-	  TRY_CATCH (except, RETURN_MASK_ALL)
+	  if (!sal.symtab
+	      || frame_show_address (frame, sal)
+	      || print_what == LOC_AND_ADDRESS)
 	    {
 	      annotate_frame_address ();
-	      ui_out_field_core_addr (out, "addr", gdbarch, address);
+	      out->field_core_addr ("addr", gdbarch, address);
+	      if (get_frame_pc_masked (frame))
+		out->field_string ("pac", " [PAC]");
 	      annotate_frame_address_end ();
-	      ui_out_text (out, " in ");
-	    }
-	  if (except.reason < 0)
-	    {
-	      gdbpy_convert_exception (except);
-	      goto error;
+	      out->text (" in ");
 	    }
 	}
 
       /* Print frame function name.  */
       if (PyObject_HasAttrString (filter, "function"))
 	{
-	  PyObject *py_func = PyObject_CallMethod (filter, "function", NULL);
+	  gdbpy_ref<> py_func (PyObject_CallMethod (filter, "function", NULL));
+	  const char *function = NULL;
 
-	  if (py_func != NULL)
+	  if (py_func == NULL)
+	    return EXT_LANG_BT_ERROR;
+
+	  if (gdbpy_is_string (py_func.get ()))
 	    {
-	      const char *function = NULL;
+	      function_to_free = python_string_to_host_string (py_func.get ());
 
-	      if (gdbpy_is_string (py_func))
-		{
-		  char *function_to_free = NULL;
+	      if (function_to_free == NULL)
+		return EXT_LANG_BT_ERROR;
 
-		  function = function_to_free =
-		    python_string_to_host_string (py_func);
-
-		  if (function == NULL)
-		    {
-		      Py_DECREF (py_func);
-		      goto error;
-		    }
-		  make_cleanup (xfree, function_to_free);
-		}
-	      else if (PyLong_Check (py_func))
-		{
-		  CORE_ADDR addr = PyLong_AsUnsignedLongLong (py_func);
-		  struct bound_minimal_symbol msymbol;
-
-		  if (PyErr_Occurred ())
-		    goto error;
-
-		  msymbol = lookup_minimal_symbol_by_pc (addr);
-		  if (msymbol.minsym != NULL)
-		    function = SYMBOL_PRINT_NAME (msymbol.minsym);
-		}
-	      else if (py_func != Py_None)
-		{
-		  PyErr_SetString (PyExc_RuntimeError,
-				   _("FrameDecorator.function: expecting a " \
-				     "String, integer or None."));
-		  Py_DECREF (py_func);
-		  goto error;
-		}
-
-
-	      TRY_CATCH (except, RETURN_MASK_ALL)
-		{
-		  annotate_frame_function_name ();
-		  if (function == NULL)
-		    ui_out_field_skip (out, "func");
-		  else
-		    ui_out_field_string (out, "func", function);
-		}
-	      if (except.reason < 0)
-		{
-		  Py_DECREF (py_func);
-		  gdbpy_convert_exception (except);
-		  goto error;
-		}
+	      function = function_to_free.get ();
 	    }
-	  Py_DECREF (py_func);
+	  else if (PyLong_Check (py_func.get ()))
+	    {
+	      CORE_ADDR addr;
+	      struct bound_minimal_symbol msymbol;
+
+	      if (get_addr_from_python (py_func.get (), &addr) < 0)
+		return EXT_LANG_BT_ERROR;
+
+	      msymbol = lookup_minimal_symbol_by_pc (addr);
+	      if (msymbol.minsym != NULL)
+		function = msymbol.minsym->print_name ();
+	    }
+	  else if (py_func != Py_None)
+	    {
+	      PyErr_SetString (PyExc_RuntimeError,
+			       _("FrameDecorator.function: expecting a " \
+				 "String, integer or None."));
+	      return EXT_LANG_BT_ERROR;
+	    }
+
+	  annotate_frame_function_name ();
+	  if (function == NULL)
+	    out->field_skip ("func");
+	  else
+	    out->field_string ("func", function, function_name_style.style ());
 	}
-      else
-	goto error;
     }
 
 
   /* Frame arguments.  Check the result, and error if something went
      wrong.  */
-  if (print_args)
+  if (print_args && (location_print || out->is_mi_like_p ()))
     {
-      if (py_print_args (filter, out, args_type, frame) == PY_BT_ERROR)
-	goto error;
+      if (py_print_args (filter, out, args_type, frame) == EXT_LANG_BT_ERROR)
+	return EXT_LANG_BT_ERROR;
     }
 
   /* File name/source/line number information.  */
-  if (print_frame_info)
+  bool print_location_source
+    = ((location_print && print_what != SHORT_LOCATION)
+       || (out->is_mi_like_p () && print_frame_info));
+  if (print_location_source)
     {
-      TRY_CATCH (except, RETURN_MASK_ALL)
-	{
-	  annotate_frame_source_begin ();
-	}
-      if (except.reason < 0)
-	{
-	  gdbpy_convert_exception (except);
-	  goto error;
-	}
+      annotate_frame_source_begin ();
 
       if (PyObject_HasAttrString (filter, "filename"))
 	{
-	  PyObject *py_fn = PyObject_CallMethod (filter, "filename",
-						 NULL);
-	  if (py_fn != NULL)
+	  gdbpy_ref<> py_fn (PyObject_CallMethod (filter, "filename", NULL));
+
+	  if (py_fn == NULL)
+	    return EXT_LANG_BT_ERROR;
+
+	  if (py_fn != Py_None)
 	    {
-	      if (py_fn != Py_None)
-		{
-		  char *filename = python_string_to_host_string (py_fn);
+	      gdb::unique_xmalloc_ptr<char>
+		filename (python_string_to_host_string (py_fn.get ()));
 
-		  if (filename == NULL)
-		    {
-		      Py_DECREF (py_fn);
-		      goto error;
-		    }
+	      if (filename == NULL)
+		return EXT_LANG_BT_ERROR;
 
-		  make_cleanup (xfree, filename);
-		  TRY_CATCH (except, RETURN_MASK_ALL)
-		    {
-		      ui_out_wrap_hint (out, "   ");
-		      ui_out_text (out, " at ");
-		      annotate_frame_source_file ();
-		      ui_out_field_string (out, "file", filename);
-		      annotate_frame_source_file_end ();
-		    }
-		  if (except.reason < 0)
-		    {
-		      Py_DECREF (py_fn);
-		      gdbpy_convert_exception (except);
-		      goto error;
-		    }
-		}
-	      Py_DECREF (py_fn);
+	      out->wrap_hint (3);
+	      out->text (" at ");
+	      annotate_frame_source_file ();
+	      out->field_string ("file", filename.get (),
+				 file_name_style.style ());
+	      annotate_frame_source_file_end ();
 	    }
-	  else
-	    goto error;
 	}
 
       if (PyObject_HasAttrString (filter, "line"))
 	{
-	  PyObject *py_line = PyObject_CallMethod (filter, "line", NULL);
+	  gdbpy_ref<> py_line (PyObject_CallMethod (filter, "line", NULL));
 	  int line;
 
-	  if (py_line != NULL)
+	  if (py_line == NULL)
+	    return EXT_LANG_BT_ERROR;
+
+	  if (py_line != Py_None)
 	    {
-	      if (py_line != Py_None)
-		{
-		  line = PyLong_AsLong (py_line);
-		  TRY_CATCH (except, RETURN_MASK_ALL)
-		    {
-		      ui_out_text (out, ":");
-		      annotate_frame_source_line ();
-		      ui_out_field_int (out, "line", line);
-		    }
-		  if (except.reason < 0)
-		    {
-		      Py_DECREF (py_line);
-		      gdbpy_convert_exception (except);
-		      goto error;
-		    }
-		}
-	      Py_DECREF (py_line);
+	      line = PyLong_AsLong (py_line.get ());
+	      if (PyErr_Occurred ())
+		return EXT_LANG_BT_ERROR;
+
+	      out->text (":");
+	      annotate_frame_source_line ();
+	      out->field_signed ("line", line);
 	    }
-	  else
-	    goto error;
 	}
+      if (out->is_mi_like_p ())
+	out->field_string ("arch",
+			   (gdbarch_bfd_arch_info (gdbarch))->printable_name);
+    }
+
+  bool source_print
+    = (! out->is_mi_like_p ()
+       && (print_what == SRC_LINE || print_what == SRC_AND_LOC));
+  if (source_print)
+    {
+      if (print_location_source)
+	out->text ("\n"); /* Newline after the location source.  */
+      print_source_lines (sal.symtab, sal.line, sal.line + 1, 0);
     }
 
   /* For MI we need to deal with the "children" list population of
      elided frames, so if MI output detected do not send newline.  */
-  if (! ui_out_is_mi_like_p (out))
+  if (! out->is_mi_like_p ())
     {
-      TRY_CATCH (except, RETURN_MASK_ALL)
-	{
-	  annotate_frame_end ();
-	  ui_out_text (out, "\n");
-	}
-      if (except.reason < 0)
-	{
-	  gdbpy_convert_exception (except);
-	  goto error;
-	}
+      annotate_frame_end ();
+      /* print_source_lines has already printed a newline.  */
+      if (!source_print)
+	out->text ("\n");
     }
 
   if (print_locals)
     {
       if (py_print_locals (filter, out, args_type, indent,
-			   frame) == PY_BT_ERROR)
-	goto error;
+			   frame) == EXT_LANG_BT_ERROR)
+	return EXT_LANG_BT_ERROR;
     }
 
-  /* Finally recursively print elided frames, if any.  */
-  elided  = get_py_iter_from_func (filter, "elided");
-  if (elided == NULL)
-    goto error;
-
-  make_cleanup_py_decref (elided);
-  if (elided != Py_None)
+  if ((flags & PRINT_HIDE) == 0)
     {
-      PyObject *item;
+      /* Finally recursively print elided frames, if any.  */
+      gdbpy_ref<> elided (get_py_iter_from_func (filter, "elided"));
+      if (elided == NULL)
+	return EXT_LANG_BT_ERROR;
 
-      make_cleanup_ui_out_list_begin_end (out, "children");
-
-      if (! ui_out_is_mi_like_p (out))
-	indent++;
-
-      while ((item = PyIter_Next (elided)))
+      if (elided != Py_None)
 	{
-	  enum py_bt_status success = py_print_frame (item, flags,
-						      args_type, out,
-						      indent,
-						      levels_printed);
+	  PyObject *item;
 
-	  if (success == PY_BT_ERROR)
+	  ui_out_emit_list inner_list_emiter (out, "children");
+
+	  indent++;
+
+	  while ((item = PyIter_Next (elided.get ())))
 	    {
-	      Py_DECREF (item);
-	      goto error;
-	    }
+	      gdbpy_ref<> item_ref (item);
 
-	  Py_DECREF (item);
+	      enum ext_lang_bt_status success
+		= py_print_frame (item, flags, args_type, out, indent,
+				  levels_printed);
+
+	      if (success == EXT_LANG_BT_ERROR)
+		return EXT_LANG_BT_ERROR;
+	    }
+	  if (item == NULL && PyErr_Occurred ())
+	    return EXT_LANG_BT_ERROR;
 	}
-      if (item == NULL && PyErr_Occurred ())
-	goto error;
     }
 
-
-  do_cleanups (cleanup_stack);
-  return PY_BT_COMPLETED;
-
- error:
-  do_cleanups (cleanup_stack);
-  return PY_BT_ERROR;
+  return EXT_LANG_BT_OK;
 }
 
 /* Helper function to initiate frame filter invocation at starting
    frame FRAME.  */
 
 static PyObject *
-bootstrap_python_frame_filters (struct frame_info *frame,
+bootstrap_python_frame_filters (frame_info_ptr frame,
 				int frame_low, int frame_high)
 {
-  struct cleanup *cleanups =
-    make_cleanup (null_cleanup, NULL);
-  PyObject *module, *sort_func, *iterable, *frame_obj, *iterator;
-  PyObject *py_frame_low, *py_frame_high;
-
-  frame_obj = frame_info_to_frame_object (frame);
+  gdbpy_ref<> frame_obj (frame_info_to_frame_object (frame));
   if (frame_obj == NULL)
-    goto error;
-  make_cleanup_py_decref (frame_obj);
+    return NULL;
 
-  module = PyImport_ImportModule ("gdb.frames");
+  gdbpy_ref<> module (PyImport_ImportModule ("gdb.frames"));
   if (module == NULL)
-    goto error;
-  make_cleanup_py_decref (module);
+    return NULL;
 
-  sort_func = PyObject_GetAttrString (module, "execute_frame_filters");
+  gdbpy_ref<> sort_func (PyObject_GetAttrString (module.get (),
+						 "execute_frame_filters"));
   if (sort_func == NULL)
-    goto error;
-  make_cleanup_py_decref (sort_func);
+    return NULL;
 
-  py_frame_low = PyInt_FromLong (frame_low);
+  gdbpy_ref<> py_frame_low = gdb_py_object_from_longest (frame_low);
   if (py_frame_low == NULL)
-    goto error;
-  make_cleanup_py_decref (py_frame_low);
+    return NULL;
 
-  py_frame_high = PyInt_FromLong (frame_high);
+  gdbpy_ref<> py_frame_high = gdb_py_object_from_longest (frame_high);
   if (py_frame_high == NULL)
-    goto error;
-  make_cleanup_py_decref (py_frame_high);
+    return NULL;
 
-  iterable = PyObject_CallFunctionObjArgs (sort_func, frame_obj,
-					   py_frame_low,
-					   py_frame_high,
-					   NULL);
+  gdbpy_ref<> iterable (PyObject_CallFunctionObjArgs (sort_func.get (),
+						      frame_obj.get (),
+						      py_frame_low.get (),
+						      py_frame_high.get (),
+						      NULL));
   if (iterable == NULL)
-    goto error;
-
-  do_cleanups (cleanups);
+    return NULL;
 
   if (iterable != Py_None)
-    {
-      iterator = PyObject_GetIter (iterable);
-      Py_DECREF (iterable);
-    }
+    return PyObject_GetIter (iterable.get ());
   else
-    {
-      return iterable;
-    }
-
-  return iterator;
-
- error:
-  do_cleanups (cleanups);
-  return NULL;
+    return iterable.release ();
 }
 
 /*  This is the only publicly exported function in this file.  FRAME
@@ -1456,40 +1128,47 @@ bootstrap_python_frame_filters (struct frame_info *frame,
     variables.  ARGS_TYPE is an enumerator describing the argument
     format, OUT is the output stream to print.  FRAME_LOW is the
     beginning of the slice of frames to print, and FRAME_HIGH is the
-    upper limit of the frames to count.  Returns PY_BT_ERROR on error,
-    or PY_BT_COMPLETED on success.*/
+    upper limit of the frames to count.  Returns EXT_LANG_BT_ERROR on error,
+    or EXT_LANG_BT_OK on success.  */
 
-enum py_bt_status
-apply_frame_filter (struct frame_info *frame, int flags,
-		    enum py_frame_args args_type,
-		    struct ui_out *out, int frame_low,
-		    int frame_high)
-
+enum ext_lang_bt_status
+gdbpy_apply_frame_filter (const struct extension_language_defn *extlang,
+			  frame_info_ptr frame, frame_filter_flags flags,
+			  enum ext_lang_frame_args args_type,
+			  struct ui_out *out, int frame_low, int frame_high)
 {
   struct gdbarch *gdbarch = NULL;
-  struct cleanup *cleanups;
-  enum py_bt_status success = PY_BT_ERROR;
-  PyObject *iterable;
-  volatile struct gdb_exception except;
-  PyObject *item;
-  htab_t levels_printed;
+  enum ext_lang_bt_status success = EXT_LANG_BT_ERROR;
 
   if (!gdb_python_initialized)
-    return PY_BT_NO_FILTERS;
+    return EXT_LANG_BT_NO_FILTERS;
 
-  cleanups = ensure_python_env (gdbarch, current_language);
-
-  TRY_CATCH (except, RETURN_MASK_ALL)
+  try
     {
       gdbarch = get_frame_arch (frame);
     }
-  if (except.reason < 0)
+  catch (const gdb_exception_error &except)
     {
-      gdbpy_convert_exception (except);
-      goto error;
+      /* Let gdb try to print the stack trace.  */
+      return EXT_LANG_BT_NO_FILTERS;
     }
 
-  iterable = bootstrap_python_frame_filters (frame, frame_low, frame_high);
+  gdbpy_enter enter_py (gdbarch);
+
+  /* When we're limiting the number of frames, be careful to request
+     one extra frame, so that we can print a message if there are more
+     frames.  */
+  int frame_countdown = -1;
+  if ((flags & PRINT_MORE_FRAMES) != 0 && frame_low >= 0 && frame_high >= 0)
+    {
+      ++frame_high;
+      /* This has an extra +1 because it is checked before a frame is
+	 printed.  */
+      frame_countdown = frame_high - frame_low + 1;
+    }
+
+  gdbpy_ref<> iterable (bootstrap_python_frame_filters (frame, frame_low,
+							frame_high));
 
   if (iterable == NULL)
     {
@@ -1501,56 +1180,69 @@ apply_frame_filter (struct frame_info *frame, int flags,
 	 where GDB cannot initialize the frame filters (most likely
 	 due to incorrect auto-load paths), GDB has printed nothing.
 	 In this case it is OK to print the default backtrace after
-	 printing the error message.  GDB returns PY_BT_NO_FILTERS
+	 printing the error message.  GDB returns EXT_LANG_BT_NO_FILTERS
 	 here to signify there are no filters after printing the
 	 initialization error.  This return code will trigger a
 	 default backtrace.  */
 
-      gdbpy_print_stack ();
-      do_cleanups (cleanups);
-      return PY_BT_NO_FILTERS;
+      gdbpy_print_stack_or_quit ();
+      return EXT_LANG_BT_NO_FILTERS;
     }
 
   /* If iterable is None, then there are no frame filters registered.
      If this is the case, defer to default GDB printing routines in MI
      and CLI.  */
-  make_cleanup_py_decref (iterable);
   if (iterable == Py_None)
-    {
-      success = PY_BT_NO_FILTERS;
-      goto done;
-    }
+    return EXT_LANG_BT_NO_FILTERS;
 
-  levels_printed = htab_create (20,
-				htab_hash_pointer,
-				htab_eq_pointer,
-				NULL);
-  make_cleanup_htab_delete (levels_printed);
+  htab_up levels_printed (htab_create (20,
+				       htab_hash_pointer,
+				       htab_eq_pointer,
+				       NULL));
 
-  while ((item = PyIter_Next (iterable)))
+  while (true)
     {
-      success = py_print_frame (item, flags, args_type, out, 0,
-				levels_printed);
+      gdbpy_ref<> item (PyIter_Next (iterable.get ()));
+
+      if (item == NULL)
+	{
+	  if (PyErr_Occurred ())
+	    {
+	      gdbpy_print_stack_or_quit ();
+	      return EXT_LANG_BT_ERROR;
+	    }
+	  break;
+	}
+
+      if (frame_countdown != -1)
+	{
+	  gdb_assert ((flags & PRINT_MORE_FRAMES) != 0);
+	  --frame_countdown;
+	  if (frame_countdown == 0)
+	    {
+	      /* We've printed all the frames we were asked to
+		 print, but more frames existed.  */
+	      gdb_printf (_("(More stack frames follow...)\n"));
+	      break;
+	    }
+	}
+
+      try
+	{
+	  success = py_print_frame (item.get (), flags, args_type, out, 0,
+				    levels_printed.get ());
+	}
+      catch (const gdb_exception_error &except)
+	{
+	  gdbpy_convert_exception (except);
+	  success = EXT_LANG_BT_ERROR;
+	}
 
       /* Do not exit on error printing a single frame.  Print the
 	 error and continue with other frames.  */
-      if (success == PY_BT_ERROR)
-	gdbpy_print_stack ();
-
-      Py_DECREF (item);
+      if (success == EXT_LANG_BT_ERROR)
+	gdbpy_print_stack_or_quit ();
     }
 
-  if (item == NULL && PyErr_Occurred ())
-    goto error;
-
- done:
-  do_cleanups (cleanups);
   return success;
-
-  /* Exit and abandon backtrace on error, printing the exception that
-     is set.  */
- error:
-  gdbpy_print_stack ();
-  do_cleanups (cleanups);
-  return PY_BT_ERROR;
 }

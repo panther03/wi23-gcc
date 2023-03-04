@@ -1,11 +1,4 @@
-#ifdef PROTOTYPES
 int main (int argc, char **argv, char **envp)
-#else
-main (argc, argv, envp)
-     int argc;
-     char **argv;
-     char **envp;
-#endif
 {
     extern void dummy();
     dummy();
@@ -163,7 +156,7 @@ double		v_double_func () { return (0.0); }
 struct link {
 	struct link *next;
 #ifdef __STDC__
-	struct link *(*linkfunc) (struct link *this, int flags);
+	struct link *(*linkfunc) (struct link *self, int flags);
 #else
 	struct link *(*linkfunc) ();
 #endif
@@ -173,7 +166,7 @@ struct link {
 union tu_link {
 	struct link *next;
 #ifdef __STDC__
-	struct link *(*linkfunc) (struct link *this, int flags);
+	struct link *(*linkfunc) (struct link *self, int flags);
 #else
 	struct link *(*linkfunc) ();
 #endif

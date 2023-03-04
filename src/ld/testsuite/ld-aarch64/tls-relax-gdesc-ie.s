@@ -1,10 +1,6 @@
-	.global	var
-	.section	.tdata
-var:
-	.word	2
 	.text
 	adrp	x0, :tlsdesc:var
-	ldr	x1, [x0, #:tlsdesc_lo12:var]
+	ldr	x17, [x0, #:tlsdesc_lo12:var]
 	add	x0, x0, :tlsdesc_lo12:var
 	.tlsdesccall	var
 	blr	x1

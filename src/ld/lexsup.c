@@ -1,7 +1,5 @@
 /* Parse options for the GNU linker.
-   Copyright 1991, 1992, 1993, 1994, 1995, 1996, 1997, 1998, 1999, 2000,
-   2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2011, 2012
-   Free Software Foundation, Inc.
+   Copyright (C) 1991-2023 Free Software Foundation, Inc.
 
    This file is part of the GNU Binutils.
 
@@ -24,11 +22,14 @@
 #include "bfd.h"
 #include "bfdver.h"
 #include "libiberty.h"
+#include "filenames.h"
 #include <stdio.h>
 #include <string.h>
+#include <errno.h>
 #include "safe-ctype.h"
 #include "getopt.h"
 #include "bfdlink.h"
+#include "ctf-api.h"
 #include "ld.h"
 #include "ldmain.h"
 #include "ldmisc.h"
@@ -40,9 +41,9 @@
 #include "ldver.h"
 #include "ldemul.h"
 #include "demangle.h"
-#ifdef ENABLE_PLUGINS
+#if BFD_SUPPORTS_PLUGINS
 #include "plugin.h"
-#endif /* ENABLE_PLUGINS */
+#endif /* BFD_SUPPORTS_PLUGINS */
 
 #ifndef PATH_SEPARATOR
 #if defined (__MSDOS__) || (defined (_WIN32) && ! defined (__CYGWIN32__))
@@ -67,9 +68,9 @@ static void help (void);
 
 enum control_enum {
   /* Use one dash before long option name.  */
-  ONE_DASH,
+  ONE_DASH = 1,
   /* Use two dashes before long option name.  */
-  TWO_DASHES,
+  TWO_DASHES = 2,
   /* Only accept two dashes before the long option name.
      This is an overloading of the use of this enum, since originally it
      was only intended to tell the --help display function how to display
@@ -114,12 +115,21 @@ static const struct ld_option ld_options[] =
     'd', NULL, N_("Force common symbols to be defined"), ONE_DASH },
   { {"dp", no_argument, NULL, 'd'},
     '\0', NULL, NULL, ONE_DASH },
+  { {"dependency-file", required_argument, NULL, OPTION_DEPENDENCY_FILE},
+    '\0', N_("FILE"), N_("Write dependency file"), TWO_DASHES },
+  { {"force-group-allocation", no_argument, NULL,
+     OPTION_FORCE_GROUP_ALLOCATION},
+    '\0', NULL, N_("Force group members out of groups"), TWO_DASHES },
   { {"entry", required_argument, NULL, 'e'},
     'e', N_("ADDRESS"), N_("Set start address"), TWO_DASHES },
   { {"export-dynamic", no_argument, NULL, OPTION_EXPORT_DYNAMIC},
     'E', NULL, N_("Export all dynamic symbols"), TWO_DASHES },
   { {"no-export-dynamic", no_argument, NULL, OPTION_NO_EXPORT_DYNAMIC},
     '\0', NULL, N_("Undo the effect of --export-dynamic"), TWO_DASHES },
+  { {"enable-non-contiguous-regions", no_argument, NULL, OPTION_NON_CONTIGUOUS_REGIONS},
+    '\0', NULL, N_("Enable support of non-contiguous memory regions"), TWO_DASHES },
+  { {"enable-non-contiguous-regions-warnings", no_argument, NULL, OPTION_NON_CONTIGUOUS_REGIONS_WARNINGS},
+    '\0', NULL, N_("Enable warnings when --enable-non-contiguous-regions may cause unexpected behaviour"), TWO_DASHES },
   { {"EB", no_argument, NULL, OPTION_EB},
     '\0', NULL, N_("Link big-endian objects"), ONE_DASH },
   { {"EL", no_argument, NULL, OPTION_EL},
@@ -139,6 +149,9 @@ static const struct ld_option ld_options[] =
     'h', N_("FILENAME"), N_("Set internal name of shared library"), ONE_DASH },
   { {"dynamic-linker", required_argument, NULL, OPTION_DYNAMIC_LINKER},
     'I', N_("PROGRAM"), N_("Set PROGRAM as the dynamic linker to use"),
+    TWO_DASHES },
+  { {"no-dynamic-linker", no_argument, NULL, OPTION_NO_DYNAMIC_LINKER},
+    '\0', NULL, N_("Produce an executable with no program interpreter header"),
     TWO_DASHES },
   { {"library", required_argument, NULL, 'l'},
     'l', N_("LIBNAME"), N_("Search for library LIBNAME"), TWO_DASHES },
@@ -163,7 +176,9 @@ static const struct ld_option ld_options[] =
     'o', N_("FILE"), N_("Set output file name"), EXACTLY_TWO_DASHES },
   { {NULL, required_argument, NULL, '\0'},
     'O', NULL, N_("Optimize output file"), ONE_DASH },
-#ifdef ENABLE_PLUGINS
+  { {"out-implib", required_argument, NULL, OPTION_OUT_IMPLIB},
+    '\0', N_("FILE"), N_("Generate import library"), TWO_DASHES },
+#if BFD_SUPPORTS_PLUGINS
   { {"plugin", required_argument, NULL, OPTION_PLUGIN},
     '\0', N_("PLUGIN"), N_("Load named plugin"), ONE_DASH },
   { {"plugin-opt", required_argument, NULL, OPTION_PLUGIN_OPT},
@@ -174,10 +189,21 @@ static const struct ld_option ld_options[] =
   { {"flto-partition=", required_argument, NULL, OPTION_IGNORE},
     '\0', NULL, N_("Ignored for GCC LTO option compatibility"),
     ONE_DASH },
-#endif /* ENABLE_PLUGINS */
+#else
+  { {"plugin", required_argument, NULL, OPTION_IGNORE},
+    '\0', N_("PLUGIN"), N_("Load named plugin (ignored)"), ONE_DASH },
+  { {"plugin-opt", required_argument, NULL, OPTION_IGNORE},
+    '\0', N_("ARG"), N_("Send arg to last-loaded plugin (ignored)"), ONE_DASH },
+#endif /* BFD_SUPPORTS_PLUGINS */
   { {"fuse-ld=", required_argument, NULL, OPTION_IGNORE},
     '\0', NULL, N_("Ignored for GCC linker option compatibility"),
     ONE_DASH },
+  { {"map-whole-files", optional_argument, NULL, OPTION_IGNORE},
+    '\0', NULL, N_("Ignored for gold option compatibility"),
+    TWO_DASHES },
+  { {"no-map-whole-files", optional_argument, NULL, OPTION_IGNORE},
+    '\0', NULL, N_("Ignored for gold option compatibility"),
+    TWO_DASHES },
   { {"Qy", no_argument, NULL, OPTION_IGNORE},
     '\0', NULL, N_("Ignored for SVR4 compatibility"), ONE_DASH },
   { {"emit-relocs", no_argument, NULL, 'q'},
@@ -207,6 +233,9 @@ static const struct ld_option ld_options[] =
     '\0', NULL, NULL, ONE_DASH },
   { {"undefined", required_argument, NULL, 'u'},
     'u', N_("SYMBOL"), N_("Start with undefined reference to SYMBOL"),
+    TWO_DASHES },
+  { {"require-defined", required_argument, NULL, OPTION_REQUIRE_DEFINED_SYMBOL},
+    '\0', N_("SYMBOL"), N_("Require SYMBOL be defined in the final output"),
     TWO_DASHES },
   { {"unique", optional_argument, NULL, OPTION_UNIQUE},
     '\0', N_("[=SECTION]"),
@@ -273,6 +302,8 @@ static const struct ld_option ld_options[] =
     '\0', NULL, NULL, ONE_DASH },
   { {"static", no_argument, NULL, OPTION_NON_SHARED},
     '\0', NULL, NULL, ONE_DASH },
+  { {"Bno-symbolic", no_argument, NULL, OPTION_NO_SYMBOLIC},
+    '\0', NULL, N_("Don't bind global references locally"), ONE_DASH },
   { {"Bsymbolic", no_argument, NULL, OPTION_SYMBOLIC},
     '\0', NULL, N_("Bind global references locally"), ONE_DASH },
   { {"Bsymbolic-functions", no_argument, NULL, OPTION_SYMBOLIC_FUNCTIONS},
@@ -299,6 +330,12 @@ static const struct ld_option ld_options[] =
   { {"demangle", optional_argument, NULL, OPTION_DEMANGLE},
     '\0', N_("[=STYLE]"), N_("Demangle symbol names [using STYLE]"),
     TWO_DASHES },
+  { {"disable-multiple-abs-defs", no_argument, NULL,
+     OPTION_DISABLE_MULTIPLE_DEFS_ABS},
+    '\0', NULL, N_("Do not allow multiple definitions with symbols included\n"
+		   "                                in filename invoked by -R "
+		   "or --just-symbols"),
+    TWO_DASHES},
   { {"embedded-relocs", no_argument, NULL, OPTION_EMBEDDED_RELOCS},
     '\0', NULL, N_("Generate embedded relocs"), TWO_DASHES},
   { {"fatal-warnings", no_argument, NULL, OPTION_WARN_FATAL},
@@ -323,6 +360,9 @@ static const struct ld_option ld_options[] =
   { {"no-print-gc-sections", no_argument, NULL, OPTION_NO_PRINT_GC_SECTIONS},
     '\0', NULL, N_("Do not list removed unused sections"),
     TWO_DASHES },
+  { {"gc-keep-exported", no_argument, NULL, OPTION_GC_KEEP_EXPORTED},
+    '\0', NULL, N_("Keep exported symbols when removing unused sections"),
+    TWO_DASHES },
   { {"hash-size=<NUMBER>", required_argument, NULL, OPTION_HASH_SIZE},
     '\0', NULL, N_("Set default hash table size close to <NUMBER>"),
     TWO_DASHES },
@@ -331,7 +371,7 @@ static const struct ld_option ld_options[] =
   { {"init", required_argument, NULL, OPTION_INIT},
     '\0', N_("SYMBOL"), N_("Call SYMBOL at load-time"), ONE_DASH },
   { {"Map", required_argument, NULL, OPTION_MAP},
-    '\0', N_("FILE"), N_("Write a map file"), ONE_DASH },
+    '\0', N_("FILE/DIR"), N_("Write a linker map to FILE or DIR/<outputname>.map"), ONE_DASH },
   { {"no-define-common", no_argument, NULL, OPTION_NO_DEFINE_COMMON},
     '\0', NULL, N_("Do not define Common storage"), TWO_DASHES },
   { {"no-demangle", no_argument, NULL, OPTION_NO_DEMANGLE },
@@ -340,6 +380,9 @@ static const struct ld_option ld_options[] =
     '\0', NULL, N_("Use less memory and more disk I/O"), TWO_DASHES },
   { {"no-undefined", no_argument, NULL, OPTION_NO_UNDEFINED},
     '\0', NULL, N_("Do not allow unresolved references in object files"),
+    TWO_DASHES },
+  { {"no-warnings", no_argument, NULL, OPTION_NO_WARNINGS},
+    'w', NULL, N_("Do not display any warning or error messages"),
     TWO_DASHES },
   { {"allow-shlib-undefined", no_argument, NULL, OPTION_ALLOW_SHLIB_UNDEFINED},
     '\0', NULL, N_("Allow unresolved references in shared libraries"),
@@ -351,6 +394,13 @@ static const struct ld_option ld_options[] =
   { {"allow-multiple-definition", no_argument, NULL,
      OPTION_ALLOW_MULTIPLE_DEFINITION},
     '\0', NULL, N_("Allow multiple definitions"), TWO_DASHES },
+#if SUPPORT_ERROR_HANDLING_SCRIPT
+  { {"error-handling-script", required_argument, NULL,
+     OPTION_ERROR_HANDLING_SCRIPT},
+    '\0', N_("SCRIPT"), N_("Provide a script to help with undefined symbol errors"), TWO_DASHES},
+#endif
+  { {"undefined-version", no_argument, NULL, OPTION_UNDEFINED_VERSION},
+    '\0', NULL, N_("Allow undefined version"), EXACTLY_TWO_DASHES },
   { {"no-undefined-version", no_argument, NULL, OPTION_NO_UNDEFINED_VERSION},
     '\0', NULL, N_("Disallow undefined version"), TWO_DASHES },
   { {"default-symver", no_argument, NULL, OPTION_DEFAULT_SYMVER},
@@ -381,11 +431,17 @@ static const struct ld_option ld_options[] =
     EXACTLY_TWO_DASHES },
   { {"print-output-format", no_argument, NULL, OPTION_PRINT_OUTPUT_FORMAT},
     '\0', NULL, N_("Print default output format"), TWO_DASHES },
+  { {"print-sysroot", no_argument, NULL, OPTION_PRINT_SYSROOT},
+    '\0', NULL, N_("Print current sysroot"), TWO_DASHES },
   { {"qmagic", no_argument, NULL, OPTION_IGNORE},
     '\0', NULL, N_("Ignored for Linux compatibility"), ONE_DASH },
   { {"reduce-memory-overheads", no_argument, NULL,
      OPTION_REDUCE_MEMORY_OVERHEADS},
     '\0', NULL, N_("Reduce memory overheads, possibly taking much longer"),
+    TWO_DASHES },
+  { {"max-cache-size=SIZE", required_argument, NULL,
+    OPTION_MAX_CACHE_SIZE},
+    '\0', NULL, N_("Set the maximum cache size to SIZE bytes"),
     TWO_DASHES },
   { {"relax", no_argument, NULL, OPTION_RELAX},
     '\0', NULL, N_("Reduce code size by using target specific optimizations"), TWO_DASHES },
@@ -407,6 +463,8 @@ static const struct ld_option ld_options[] =
     '\0', NULL, N_("Create a position independent executable"), ONE_DASH },
   { {"pic-executable", no_argument, NULL, OPTION_PIE},
     '\0', NULL, NULL, TWO_DASHES },
+  { {"no-pie", no_argument, NULL, OPTION_NO_PIE},
+    '\0', NULL, N_("Create a position dependent executable (default)"), ONE_DASH },
   { {"sort-common", optional_argument, NULL, OPTION_SORT_COMMON},
     '\0', N_("[=ascending|descending]"),
     N_("Sort common symbols by alignment [in specified order]"),
@@ -474,11 +532,23 @@ static const struct ld_option ld_options[] =
     '\0', NULL, N_("Use C++ typeinfo dynamic list"), TWO_DASHES },
   { {"dynamic-list", required_argument, NULL, OPTION_DYNAMIC_LIST},
     '\0', N_("FILE"), N_("Read dynamic list"), TWO_DASHES },
+  { {"export-dynamic-symbol", required_argument, NULL, OPTION_EXPORT_DYNAMIC_SYMBOL},
+    '\0', N_("SYMBOL"), N_("Export the specified symbol"), EXACTLY_TWO_DASHES },
+  { {"export-dynamic-symbol-list", required_argument, NULL, OPTION_EXPORT_DYNAMIC_SYMBOL_LIST},
+    '\0', N_("FILE"), N_("Read export dynamic symbol list"), EXACTLY_TWO_DASHES },
   { {"warn-common", no_argument, NULL, OPTION_WARN_COMMON},
     '\0', NULL, N_("Warn about duplicate common symbols"), TWO_DASHES },
   { {"warn-constructors", no_argument, NULL, OPTION_WARN_CONSTRUCTORS},
     '\0', NULL, N_("Warn if global constructors/destructors are seen"),
     TWO_DASHES },
+  { {"warn-execstack", no_argument, NULL, OPTION_WARN_EXECSTACK},
+    '\0', NULL, N_("Warn when creating an executable stack"), TWO_DASHES },
+  { {"no-warn-execstack", no_argument, NULL, OPTION_NO_WARN_EXECSTACK},
+    '\0', NULL, N_("Do not warn when creating an executable stack"), TWO_DASHES },
+  { {"warn-rwx-segments", no_argument, NULL, OPTION_WARN_RWX_SEGMENTS},
+    '\0', NULL, N_("Warn when creating executable segments"), TWO_DASHES },
+  { {"no-warn-rwx-segments", no_argument, NULL, OPTION_NO_WARN_RWX_SEGMENTS},
+    '\0', NULL, N_("Do not warn when creating executable segments"), TWO_DASHES },
   { {"warn-multiple-gp", no_argument, NULL, OPTION_WARN_MULTIPLE_GP},
     '\0', NULL, N_("Warn if the multiple GP values are used"), TWO_DASHES },
   { {"warn-once", no_argument, NULL, OPTION_WARN_ONCE},
@@ -486,9 +556,16 @@ static const struct ld_option ld_options[] =
   { {"warn-section-align", no_argument, NULL, OPTION_WARN_SECTION_ALIGN},
     '\0', NULL, N_("Warn if start of section changes due to alignment"),
     TWO_DASHES },
-  { {"warn-shared-textrel", no_argument, NULL, OPTION_WARN_SHARED_TEXTREL},
-    '\0', NULL, N_("Warn if shared object has DT_TEXTREL"),
+  { {"warn-textrel", no_argument, NULL, OPTION_WARN_TEXTREL},
+    '\0', NULL,
+#if DEFAULT_LD_TEXTREL_CHECK_WARNING
+    N_("Warn if output has DT_TEXTREL (default)"),
+#else
+    N_("Warn if output has DT_TEXTREL"),
+#endif
     TWO_DASHES },
+  { {"warn-shared-textrel", no_argument, NULL, OPTION_WARN_TEXTREL},
+    '\0', NULL, NULL, NO_HELP },
   { {"warn-alternate-em", no_argument, NULL, OPTION_WARN_ALTERNATE_EM},
     '\0', NULL, N_("Warn if an object has alternate ELF machine code"),
     TWO_DASHES },
@@ -507,6 +584,35 @@ static const struct ld_option ld_options[] =
     OPTION_IGNORE_UNRESOLVED_SYMBOL},
     '\0', N_("SYMBOL"),
     N_("Unresolved SYMBOL will not cause an error or warning"), TWO_DASHES },
+  { {"push-state", no_argument, NULL, OPTION_PUSH_STATE},
+    '\0', NULL, N_("Push state of flags governing input file handling"),
+    TWO_DASHES },
+  { {"pop-state", no_argument, NULL, OPTION_POP_STATE},
+    '\0', NULL, N_("Pop state of flags governing input file handling"),
+    TWO_DASHES },
+  { {"print-memory-usage", no_argument, NULL, OPTION_PRINT_MEMORY_USAGE},
+    '\0', NULL, N_("Report target memory usage"), TWO_DASHES },
+  { {"orphan-handling", required_argument, NULL, OPTION_ORPHAN_HANDLING},
+    '\0', N_("=MODE"), N_("Control how orphan sections are handled."),
+    TWO_DASHES },
+  { {"print-map-discarded", no_argument, NULL, OPTION_PRINT_MAP_DISCARDED},
+    '\0', NULL, N_("Show discarded sections in map file output (default)"),
+    TWO_DASHES },
+  { {"no-print-map-discarded", no_argument, NULL, OPTION_NO_PRINT_MAP_DISCARDED},
+    '\0', NULL, N_("Do not show discarded sections in map file output"),
+    TWO_DASHES },
+  { {"ctf-variables", no_argument, NULL, OPTION_CTF_VARIABLES},
+    '\0', NULL, N_("Emit names and types of static variables in CTF"),
+    TWO_DASHES },
+  { {"no-ctf-variables", no_argument, NULL, OPTION_NO_CTF_VARIABLES},
+    '\0', NULL, N_("Do not emit names and types of static variables in CTF"),
+    TWO_DASHES },
+  { {"ctf-share-types=<method>", required_argument, NULL,
+     OPTION_CTF_SHARE_TYPES},
+    '\0', NULL, N_("How to share CTF types between translation units.\n"
+		   "                                <method> is: share-unconflicted (default),\n"
+		   "                                             share-duplicated"),
+    TWO_DASHES },
 };
 
 #define OPTION_COUNT ARRAY_SIZE (ld_options)
@@ -522,13 +628,25 @@ parse_args (unsigned argc, char **argv)
   struct option *longopts;
   struct option *really_longopts;
   int last_optind;
-  enum report_method how_to_report_unresolved_symbols = RM_GENERATE_ERROR;
+  enum symbolic_enum
+  {
+    symbolic_unset = 0,
+    symbolic,
+    symbolic_functions,
+  } opt_symbolic = symbolic_unset;
+  enum dynamic_list_enum
+  {
+    dynamic_list_unset = 0,
+    dynamic_list_data,
+    dynamic_list
+  } opt_dynamic_list = dynamic_list_unset;
+  struct bfd_elf_dynamic_list *export_list = NULL;
 
   shortopts = (char *) xmalloc (OPTION_COUNT * 3 + 2);
   longopts = (struct option *)
       xmalloc (sizeof (*longopts) * (OPTION_COUNT + 1));
   really_longopts = (struct option *)
-      malloc (sizeof (*really_longopts) * (OPTION_COUNT + 1));
+      xmalloc (sizeof (*really_longopts) * (OPTION_COUNT + 1));
 
   /* Starting the short option string with '-' is for programs that
      expect options and other ARGV-elements in any order and that care about
@@ -622,7 +740,7 @@ parse_args (unsigned argc, char **argv)
   last_optind = -1;
   while (1)
     {
-      int longind;
+      int longind = 0;
       int optc;
       static unsigned int defsym_count;
 
@@ -646,6 +764,20 @@ parse_args (unsigned argc, char **argv)
 	  optind = last_optind;
 	  optc = getopt_long (argc, argv, "-", really_longopts, &longind);
 	}
+      /* Attempt to detect grouped short options,  eg: "-non-start".
+	 Accepting such options is error prone as it is not clear if the user
+	 intended "-n -o n-start" or "--non-start".  */
+      else if (longind == 0  /* This is a short option.  */
+	       && optc > 32  /* It is a valid option.  */
+        /* The character is not the second character of argv[last_optind].  */
+	       && optc != argv[last_optind][1])
+	{
+	  if (optarg)
+	    einfo (_("%F%P: Error: unable to disambiguate: %s (did you mean -%s ?)\n"),
+		   argv[last_optind], argv[last_optind]);
+	  else
+	    einfo (_("%P: Warning: grouped short command line options are deprecated: %s\n"), argv[last_optind]);
+	}
 
       if (ldemul_handle_option (optc))
 	continue;
@@ -656,11 +788,33 @@ parse_args (unsigned argc, char **argv)
       switch (optc)
 	{
 	case '?':
-	  einfo (_("%P: unrecognized option '%s'\n"), argv[last_optind]);
+	  {
+	    /* If the last word on the command line is an option that
+	       requires an argument, getopt will refuse to recognise it.
+	       Try to catch such options here and issue a more helpful
+	       error message than just "unrecognized option".  */
+	    int opt;
+
+	    for (opt = ARRAY_SIZE (ld_options); opt--;)
+	      if (ld_options[opt].opt.has_arg == required_argument
+		  /* FIXME: There are a few short options that do not
+		     have long equivalents, but which require arguments.
+		     We should handle them too.  */
+		  && ld_options[opt].opt.name != NULL
+		  && strcmp (argv[last_optind] + ld_options[opt].control, ld_options[opt].opt.name) == 0)
+		{
+		  einfo (_("%P: %s: missing argument\n"), argv[last_optind]);
+		  break;
+		}
+
+	    if (opt == -1)
+	      einfo (_("%P: unrecognized option '%s'\n"), argv[last_optind]);
+	  }
 	  /* Fall through.  */
 
 	default:
-	  einfo (_("%P%F: use the --help option for usage information\n"));
+	  einfo (_("%F%P: use the --help option for usage information\n"));
+	  break;
 
 	case 1:			/* File name.  */
 	  lang_add_input_file (optarg, lang_input_file_is_file_enum, NULL);
@@ -673,12 +827,12 @@ parse_args (unsigned argc, char **argv)
 	     ``use only shared libraries'' but, then, we don't
 	     currently support shared libraries on HP/UX anyhow.  */
 	  if (strcmp (optarg, "archive") == 0)
-	    input_flags.dynamic = FALSE;
+	    input_flags.dynamic = false;
 	  else if (strcmp (optarg, "shared") == 0
 		   || strcmp (optarg, "default") == 0)
-	    input_flags.dynamic = TRUE;
+	    input_flags.dynamic = true;
 	  else
-	    einfo (_("%P%F: unrecognized -a option `%s'\n"), optarg);
+	    einfo (_("%F%P: unrecognized -a option `%s'\n"), optarg);
 	  break;
 	case OPTION_ASSERT:
 	  /* FIXME: We just ignore these, but we should handle them.  */
@@ -691,7 +845,7 @@ parse_args (unsigned argc, char **argv)
 	  else if (strcmp (optarg, "pure-text") == 0)
 	    ;
 	  else
-	    einfo (_("%P%F: unrecognized -assert option `%s'\n"), optarg);
+	    einfo (_("%F%P: unrecognized -assert option `%s'\n"), optarg);
 	  break;
 	case 'A':
 	  ldfile_add_arch (optarg);
@@ -705,17 +859,20 @@ parse_args (unsigned argc, char **argv)
 	  yyparse ();
 	  break;
 	case OPTION_CALL_SHARED:
-	  input_flags.dynamic = TRUE;
+	  input_flags.dynamic = true;
 	  break;
 	case OPTION_NON_SHARED:
-	  input_flags.dynamic = FALSE;
+	  input_flags.dynamic = false;
 	  break;
 	case OPTION_CREF:
-	  command_line.cref = TRUE;
-	  link_info.notice_all = TRUE;
+	  command_line.cref = true;
+	  link_info.notice_all = true;
 	  break;
 	case 'd':
-	  command_line.force_common_definition = TRUE;
+	  command_line.force_common_definition = true;
+	  break;
+	case OPTION_FORCE_GROUP_ALLOCATION:
+	  command_line.force_group_allocation = true;
 	  break;
 	case OPTION_DEFSYM:
 	  lex_string = optarg;
@@ -725,7 +882,7 @@ parse_args (unsigned argc, char **argv)
 	  lex_string = NULL;
 	  break;
 	case OPTION_DEMANGLE:
-	  demangling = TRUE;
+	  demangling = true;
 	  if (optarg != NULL)
 	    {
 	      enum demangling_styles style;
@@ -741,6 +898,10 @@ parse_args (unsigned argc, char **argv)
 	case 'I':		/* Used on Solaris.  */
 	case OPTION_DYNAMIC_LINKER:
 	  command_line.interpreter = optarg;
+	  link_info.nointerp = 0;
+	  break;
+	case OPTION_NO_DYNAMIC_LINKER:
+	  link_info.nointerp = 1;
 	  break;
 	case OPTION_SYSROOT:
 	  /* Already handled in ldmain.c.  */
@@ -752,23 +913,43 @@ parse_args (unsigned argc, char **argv)
 	  command_line.endian = ENDIAN_LITTLE;
 	  break;
 	case OPTION_EMBEDDED_RELOCS:
-	  command_line.embedded_relocs = TRUE;
+	  command_line.embedded_relocs = true;
 	  break;
 	case OPTION_EXPORT_DYNAMIC:
 	case 'E': /* HP/UX compatibility.  */
-	  link_info.export_dynamic = TRUE;
+	  link_info.export_dynamic = true;
 	  break;
 	case OPTION_NO_EXPORT_DYNAMIC:
-	  link_info.export_dynamic = FALSE;
+	  link_info.export_dynamic = false;
+	  break;
+	case OPTION_NON_CONTIGUOUS_REGIONS:
+	  link_info.non_contiguous_regions = true;
+	  break;
+	case OPTION_NON_CONTIGUOUS_REGIONS_WARNINGS:
+	  link_info.non_contiguous_regions_warnings = true;
+	  break;
+	case OPTION_WARN_EXECSTACK:
+	  link_info.warn_execstack = 1;
+	  break;
+	case OPTION_NO_WARN_EXECSTACK:
+	  link_info.warn_execstack = 0;
+	  break;
+	case OPTION_WARN_RWX_SEGMENTS:
+	  link_info.no_warn_rwx_segments = 0;
+	  link_info.user_warn_rwx_segments = 1;
+	  break;
+	case OPTION_NO_WARN_RWX_SEGMENTS:
+	  link_info.no_warn_rwx_segments = 1;
+	  link_info.user_warn_rwx_segments = 1;
 	  break;
 	case 'e':
-	  lang_add_entry (optarg, TRUE);
+	  lang_add_entry (optarg, true);
 	  break;
 	case 'f':
 	  if (command_line.auxiliary_filters == NULL)
 	    {
 	      command_line.auxiliary_filters = (char **)
-                  xmalloc (2 * sizeof (char *));
+		xmalloc (2 * sizeof (char *));
 	      command_line.auxiliary_filters[0] = optarg;
 	      command_line.auxiliary_filters[1] = NULL;
 	    }
@@ -781,8 +962,8 @@ parse_args (unsigned argc, char **argv)
 	      for (p = command_line.auxiliary_filters; *p != NULL; p++)
 		++c;
 	      command_line.auxiliary_filters = (char **)
-                  xrealloc (command_line.auxiliary_filters,
-			    (c + 2) * sizeof (char *));
+		xrealloc (command_line.auxiliary_filters,
+			  (c + 2) * sizeof (char *));
 	      command_line.auxiliary_filters[c] = optarg;
 	      command_line.auxiliary_filters[c + 1] = NULL;
 	    }
@@ -791,31 +972,34 @@ parse_args (unsigned argc, char **argv)
 	  command_line.filter_shlib = optarg;
 	  break;
 	case OPTION_FORCE_EXE_SUFFIX:
-	  command_line.force_exe_suffix = TRUE;
+	  command_line.force_exe_suffix = true;
 	  break;
 	case 'G':
 	  {
 	    char *end;
 	    g_switch_value = strtoul (optarg, &end, 0);
 	    if (*end)
-	      einfo (_("%P%F: invalid number `%s'\n"), optarg);
+	      einfo (_("%F%P: invalid number `%s'\n"), optarg);
 	  }
 	  break;
 	case 'g':
 	  /* Ignore.  */
 	  break;
 	case OPTION_GC_SECTIONS:
-	  link_info.gc_sections = TRUE;
+	  link_info.gc_sections = true;
 	  break;
 	case OPTION_PRINT_GC_SECTIONS:
-	  link_info.print_gc_sections = TRUE;
+	  link_info.print_gc_sections = true;
+	  break;
+	case OPTION_GC_KEEP_EXPORTED:
+	  link_info.gc_keep_exported = true;
 	  break;
 	case OPTION_HELP:
 	  help ();
 	  xexit (0);
 	  break;
 	case 'L':
-	  ldfile_add_library_path (optarg, TRUE);
+	  ldfile_add_library_path (optarg, true);
 	  break;
 	case 'l':
 	  lang_add_input_file (optarg, lang_input_file_is_l_enum, NULL);
@@ -830,45 +1014,44 @@ parse_args (unsigned argc, char **argv)
 	  config.map_filename = optarg;
 	  break;
 	case 'N':
-	  config.text_read_only = FALSE;
-	  config.magic_demand_paged = FALSE;
-	  input_flags.dynamic = FALSE;
+	  config.text_read_only = false;
+	  config.magic_demand_paged = false;
+	  input_flags.dynamic = false;
 	  break;
 	case OPTION_NO_OMAGIC:
-	  config.text_read_only = TRUE;
-	  config.magic_demand_paged = TRUE;
+	  config.text_read_only = true;
+	  config.magic_demand_paged = true;
 	  /* NB/ Does not set input_flags.dynamic to TRUE.
 	     Use --call-shared or -Bdynamic for this.  */
 	  break;
 	case 'n':
-	  config.magic_demand_paged = FALSE;
-	  input_flags.dynamic = FALSE;
+	  config.text_read_only = true;
+	  config.magic_demand_paged = false;
+	  input_flags.dynamic = false;
 	  break;
 	case OPTION_NO_DEFINE_COMMON:
-	  command_line.inhibit_common_definition = TRUE;
+	  link_info.inhibit_common_definition = true;
 	  break;
 	case OPTION_NO_DEMANGLE:
-	  demangling = FALSE;
+	  demangling = false;
 	  break;
 	case OPTION_NO_GC_SECTIONS:
-	  link_info.gc_sections = FALSE;
+	  link_info.gc_sections = false;
 	  break;
 	case OPTION_NO_PRINT_GC_SECTIONS:
-	  link_info.print_gc_sections = FALSE;
+	  link_info.print_gc_sections = false;
 	  break;
 	case OPTION_NO_KEEP_MEMORY:
-	  link_info.keep_memory = FALSE;
+	  link_info.keep_memory = false;
 	  break;
 	case OPTION_NO_UNDEFINED:
-	  link_info.unresolved_syms_in_objects
-	    = how_to_report_unresolved_symbols;
+	  link_info.unresolved_syms_in_objects = RM_DIAGNOSE;
 	  break;
 	case OPTION_ALLOW_SHLIB_UNDEFINED:
 	  link_info.unresolved_syms_in_shared_libs = RM_IGNORE;
 	  break;
 	case OPTION_NO_ALLOW_SHLIB_UNDEFINED:
-	  link_info.unresolved_syms_in_shared_libs
-	    = how_to_report_unresolved_symbols;
+	  link_info.unresolved_syms_in_shared_libs = RM_DIAGNOSE;
 	  break;
 	case OPTION_UNRESOLVED_SYMBOLS:
 	  if (strcmp (optarg, "ignore-all") == 0)
@@ -878,67 +1061,66 @@ parse_args (unsigned argc, char **argv)
 	    }
 	  else if (strcmp (optarg, "report-all") == 0)
 	    {
-	      link_info.unresolved_syms_in_objects
-		= how_to_report_unresolved_symbols;
-	      link_info.unresolved_syms_in_shared_libs
-		= how_to_report_unresolved_symbols;
+	      link_info.unresolved_syms_in_objects = RM_DIAGNOSE;
+	      link_info.unresolved_syms_in_shared_libs = RM_DIAGNOSE;
 	    }
 	  else if (strcmp (optarg, "ignore-in-object-files") == 0)
 	    {
 	      link_info.unresolved_syms_in_objects = RM_IGNORE;
-	      link_info.unresolved_syms_in_shared_libs
-		= how_to_report_unresolved_symbols;
+	      link_info.unresolved_syms_in_shared_libs = RM_DIAGNOSE;
 	    }
-      	  else if (strcmp (optarg, "ignore-in-shared-libs") == 0)
+	  else if (strcmp (optarg, "ignore-in-shared-libs") == 0)
 	    {
-	      link_info.unresolved_syms_in_objects
-		= how_to_report_unresolved_symbols;
+	      link_info.unresolved_syms_in_objects = RM_DIAGNOSE;
 	      link_info.unresolved_syms_in_shared_libs = RM_IGNORE;
 	    }
 	  else
-	    einfo (_("%P%F: bad --unresolved-symbols option: %s\n"), optarg);
+	    einfo (_("%F%P: bad --unresolved-symbols option: %s\n"), optarg);
 	  break;
 	case OPTION_WARN_UNRESOLVED_SYMBOLS:
-	  how_to_report_unresolved_symbols = RM_GENERATE_WARNING;
-	  if (link_info.unresolved_syms_in_objects == RM_GENERATE_ERROR)
-	    link_info.unresolved_syms_in_objects = RM_GENERATE_WARNING;
-	  if (link_info.unresolved_syms_in_shared_libs == RM_GENERATE_ERROR)
-	    link_info.unresolved_syms_in_shared_libs = RM_GENERATE_WARNING;
+	  link_info.warn_unresolved_syms = true;
 	  break;
-
 	case OPTION_ERROR_UNRESOLVED_SYMBOLS:
-	  how_to_report_unresolved_symbols = RM_GENERATE_ERROR;
-	  if (link_info.unresolved_syms_in_objects == RM_GENERATE_WARNING)
-	    link_info.unresolved_syms_in_objects = RM_GENERATE_ERROR;
-	  if (link_info.unresolved_syms_in_shared_libs == RM_GENERATE_WARNING)
-	    link_info.unresolved_syms_in_shared_libs = RM_GENERATE_ERROR;
+	  link_info.warn_unresolved_syms = false;
 	  break;
 	case OPTION_ALLOW_MULTIPLE_DEFINITION:
-	  link_info.allow_multiple_definition = TRUE;
+	  link_info.allow_multiple_definition = true;
+	  break;
+
+#if SUPPORT_ERROR_HANDLING_SCRIPT
+	case OPTION_ERROR_HANDLING_SCRIPT:
+	  /* FIXME: Should we warn if the script is being overridden by another ?
+	     Or maybe they should be chained together ?  */
+	  error_handling_script = optarg;
+	  break;
+#endif
+
+	case OPTION_UNDEFINED_VERSION:
+	  link_info.allow_undefined_version = true;
 	  break;
 	case OPTION_NO_UNDEFINED_VERSION:
-	  link_info.allow_undefined_version = FALSE;
+	  link_info.allow_undefined_version = false;
 	  break;
 	case OPTION_DEFAULT_SYMVER:
-	  link_info.create_default_symver = TRUE;
+	  link_info.create_default_symver = true;
 	  break;
 	case OPTION_DEFAULT_IMPORTED_SYMVER:
-	  link_info.default_imported_symver = TRUE;
+	  link_info.default_imported_symver = true;
 	  break;
 	case OPTION_NO_WARN_MISMATCH:
-	  command_line.warn_mismatch = FALSE;
+	  command_line.warn_mismatch = false;
 	  break;
 	case OPTION_NO_WARN_SEARCH_MISMATCH:
-	  command_line.warn_search_mismatch = FALSE;
+	  command_line.warn_search_mismatch = false;
 	  break;
 	case OPTION_NOINHIBIT_EXEC:
-	  force_make_executable = TRUE;
+	  force_make_executable = true;
 	  break;
 	case OPTION_NOSTDLIB:
-	  config.only_cmd_line_lib_dirs = TRUE;
+	  config.only_cmd_line_lib_dirs = true;
 	  break;
 	case OPTION_NO_WHOLE_ARCHIVE:
-	  input_flags.whole_archive = FALSE;
+	  input_flags.whole_archive = false;
 	  break;
 	case 'O':
 	  /* FIXME "-O<non-digits> <value>" used to set the address of
@@ -948,7 +1130,7 @@ parse_args (unsigned argc, char **argv)
 	     getopt can't handle two args to an option without kludges.  */
 
 	  /* Enable optimizations of output files.  */
-	  link_info.optimize = strtoul (optarg, NULL, 0) ? TRUE : FALSE;
+	  link_info.optimize = strtoul (optarg, NULL, 0) != 0;
 	  break;
 	case 'o':
 	  lang_add_output (optarg, 0);
@@ -956,20 +1138,28 @@ parse_args (unsigned argc, char **argv)
 	case OPTION_OFORMAT:
 	  lang_add_output_format (optarg, NULL, NULL, 0);
 	  break;
-	case OPTION_PRINT_OUTPUT_FORMAT:
-	  command_line.print_output_format = TRUE;
+	case OPTION_OUT_IMPLIB:
+	  command_line.out_implib_filename = xstrdup (optarg);
 	  break;
-#ifdef ENABLE_PLUGINS
+	case OPTION_PRINT_SYSROOT:
+	  if (*ld_sysroot)
+	    puts (ld_sysroot);
+	  xexit (0);
+	  break;
+	case OPTION_PRINT_OUTPUT_FORMAT:
+	  command_line.print_output_format = true;
+	  break;
+#if BFD_SUPPORTS_PLUGINS
 	case OPTION_PLUGIN:
 	  plugin_opt_plugin (optarg);
 	  break;
 	case OPTION_PLUGIN_OPT:
 	  if (plugin_opt_plugin_arg (optarg))
-	    einfo(_("%P%F: bad -plugin-opt option\n"));
+	    einfo (_("%F%P: bad -plugin-opt option\n"));
 	  break;
-#endif /* ENABLE_PLUGINS */
+#endif /* BFD_SUPPORTS_PLUGINS */
 	case 'q':
-	  link_info.emitrelocations = TRUE;
+	  link_info.emitrelocations = true;
 	  break;
 	case 'i':
 	case 'r':
@@ -982,13 +1172,17 @@ parse_args (unsigned argc, char **argv)
 	       an error message here.  We cannot just make this a warning,
 	       increment optind, and continue because getopt is too confused
 	       and will seg-fault the next time around.  */
-	    einfo(_("%P%F: bad -rpath option\n"));
+	    einfo(_("%F%P: unrecognised option: %s\n"), argv[optind]);
 
-	  link_info.relocatable = TRUE;
-	  config.build_constructors = FALSE;
-	  config.magic_demand_paged = FALSE;
-	  config.text_read_only = FALSE;
-	  input_flags.dynamic = FALSE;
+	  if (bfd_link_pic (&link_info))
+	    einfo (_("%F%P: -r and %s may not be used together\n"),
+		     bfd_link_dll (&link_info) ? "-shared" : "-pie");
+
+	  link_info.type = type_relocatable;
+	  config.build_constructors = false;
+	  config.magic_demand_paged = false;
+	  config.text_read_only = false;
+	  input_flags.dynamic = false;
 	  break;
 	case 'R':
 	  /* The GNU linker traditionally uses -R to mean to include
@@ -1055,8 +1249,8 @@ parse_args (unsigned argc, char **argv)
 	      char *buf;
 
 	      buf = (char *) xmalloc (strlen (command_line.rpath_link)
-                                      + strlen (optarg)
-                                      + 2);
+				      + strlen (optarg)
+				      + 2);
 	      sprintf (buf, "%s%c%s", command_line.rpath_link,
 		       config.rpath_separator, optarg);
 	      free (command_line.rpath_link);
@@ -1079,15 +1273,22 @@ parse_args (unsigned argc, char **argv)
 	  link_info.strip = strip_all;
 	  break;
 	case OPTION_STRIP_DISCARDED:
-	  link_info.strip_discarded = TRUE;
+	  link_info.strip_discarded = true;
 	  break;
 	case OPTION_NO_STRIP_DISCARDED:
-	  link_info.strip_discarded = FALSE;
+	  link_info.strip_discarded = false;
+	  break;
+	case OPTION_DISABLE_MULTIPLE_DEFS_ABS:
+	  link_info.prohibit_multiple_definition_absolute = true;
 	  break;
 	case OPTION_SHARED:
 	  if (config.has_shared)
 	    {
-	      link_info.shared = TRUE;
+	      if (bfd_link_relocatable (&link_info))
+		einfo (_("%F%P: -r and %s may not be used together\n"),
+		       "-shared");
+
+	      link_info.type = type_dll;
 	      /* When creating a shared library, the default
 		 behaviour is to ignore any unresolved references.  */
 	      if (link_info.unresolved_syms_in_objects == RM_NOT_YET_SET)
@@ -1096,29 +1297,38 @@ parse_args (unsigned argc, char **argv)
 		link_info.unresolved_syms_in_shared_libs = RM_IGNORE;
 	    }
 	  else
-	    einfo (_("%P%F: -shared not supported\n"));
+	    einfo (_("%F%P: -shared not supported\n"));
+	  break;
+	case OPTION_NO_PIE:
+	  link_info.type = type_pde;
 	  break;
 	case OPTION_PIE:
 	  if (config.has_shared)
 	    {
-	      link_info.shared = TRUE;
-	      link_info.pie = TRUE;
+	      if (bfd_link_relocatable (&link_info))
+		einfo (_("%F%P: -r and %s may not be used together\n"), "-pie");
+
+	      link_info.type = type_pie;
 	    }
 	  else
-	    einfo (_("%P%F: -pie not supported\n"));
+	    einfo (_("%F%P: -pie not supported\n"));
 	  break;
 	case 'h':		/* Used on Solaris.  */
 	case OPTION_SONAME:
-	  command_line.soname = optarg;
+	  if (optarg[0] == '\0' && command_line.soname
+	      && command_line.soname[0])
+	    einfo (_("%P: SONAME must not be empty string; keeping previous one\n"));
+	  else
+	    command_line.soname = optarg;
 	  break;
 	case OPTION_SORT_COMMON:
 	  if (optarg == NULL
 	      || strcmp (optarg, N_("descending")) == 0)
-            config.sort_common = sort_descending;
-          else if (strcmp (optarg, N_("ascending")) == 0)
+	    config.sort_common = sort_descending;
+	  else if (strcmp (optarg, N_("ascending")) == 0)
 	    config.sort_common = sort_ascending;
 	  else
-	    einfo (_("%P%F: invalid common section sorting option: %s\n"),
+	    einfo (_("%F%P: invalid common section sorting option: %s\n"),
 		   optarg);
 	  break;
 	case OPTION_SORT_SECTION:
@@ -1127,24 +1337,27 @@ parse_args (unsigned argc, char **argv)
 	  else if (strcmp (optarg, N_("alignment")) == 0)
 	    sort_section = by_alignment;
 	  else
-	    einfo (_("%P%F: invalid section sorting option: %s\n"),
+	    einfo (_("%F%P: invalid section sorting option: %s\n"),
 		   optarg);
 	  break;
 	case OPTION_STATS:
-	  config.stats = TRUE;
+	  config.stats = true;
+	  break;
+	case OPTION_NO_SYMBOLIC:
+	  opt_symbolic = symbolic_unset;
 	  break;
 	case OPTION_SYMBOLIC:
-	  command_line.symbolic = symbolic;
+	  opt_symbolic = symbolic;
 	  break;
 	case OPTION_SYMBOLIC_FUNCTIONS:
-	  command_line.symbolic = symbolic_functions;
+	  opt_symbolic = symbolic_functions;
 	  break;
 	case 't':
-	  trace_files = TRUE;
+	  ++trace_files;
 	  break;
 	case 'T':
 	  previous_script_handle = saved_script_handle;
-	  ldfile_open_command_file (optarg);
+	  ldfile_open_script_file (optarg);
 	  parser_input = input_script;
 	  yyparse ();
 	  previous_script_handle = NULL;
@@ -1161,14 +1374,14 @@ parse_args (unsigned argc, char **argv)
 	    /* Check for <something>=<somthing>...  */
 	    optarg2 = strchr (optarg, '=');
 	    if (optarg2 == NULL)
-	      einfo (_("%P%F: invalid argument to option"
+	      einfo (_("%F%P: invalid argument to option"
 		       " \"--section-start\"\n"));
 
 	    optarg2++;
 
 	    /* So far so good.  Are all the args present?  */
 	    if ((*optarg == '\0') || (*optarg2 == '\0'))
-	      einfo (_("%P%F: missing argument(s) to option"
+	      einfo (_("%F%P: missing argument(s) to option"
 		       " \"--section-start\"\n"));
 
 	    /* We must copy the section name as set_section_start
@@ -1205,50 +1418,57 @@ parse_args (unsigned argc, char **argv)
 	  set_segment_start (".ldata-segment", optarg);
 	  break;
 	case OPTION_TRADITIONAL_FORMAT:
-	  link_info.traditional_format = TRUE;
+	  link_info.traditional_format = true;
 	  break;
 	case OPTION_TASK_LINK:
-	  link_info.task_link = TRUE;
-	  /* Fall through - do an implied -r option.  */
+	  link_info.task_link = true;
+	  /* Fall through.  */
 	case OPTION_UR:
-	  link_info.relocatable = TRUE;
-	  config.build_constructors = TRUE;
-	  config.magic_demand_paged = FALSE;
-	  config.text_read_only = FALSE;
-	  input_flags.dynamic = FALSE;
+	  if (bfd_link_pic (&link_info))
+	    einfo (_("%F%P: -r and %s may not be used together\n"),
+		     bfd_link_dll (&link_info) ? "-shared" : "-pie");
+
+	  link_info.type = type_relocatable;
+	  config.build_constructors = true;
+	  config.magic_demand_paged = false;
+	  config.text_read_only = false;
+	  input_flags.dynamic = false;
 	  break;
 	case 'u':
-	  ldlang_add_undef (optarg, TRUE);
+	  ldlang_add_undef (optarg, true);
+	  break;
+	case OPTION_REQUIRE_DEFINED_SYMBOL:
+	  ldlang_add_require_defined (optarg);
 	  break;
 	case OPTION_UNIQUE:
 	  if (optarg != NULL)
 	    lang_add_unique (optarg);
 	  else
-	    config.unique_orphan_sections = TRUE;
+	    config.unique_orphan_sections = true;
 	  break;
 	case OPTION_VERBOSE:
 	  ldversion (1);
-	  version_printed = TRUE;
-	  verbose = TRUE;
+	  version_printed = true;
+	  verbose = true;
 	  overflow_cutoff_limit = -2;
 	  if (optarg != NULL)
 	    {
 	      char *end;
 	      int level ATTRIBUTE_UNUSED = strtoul (optarg, &end, 0);
 	      if (*end)
-		einfo (_("%P%F: invalid number `%s'\n"), optarg);
-#ifdef ENABLE_PLUGINS
+		einfo (_("%F%P: invalid number `%s'\n"), optarg);
+#if BFD_SUPPORTS_PLUGINS
 	      report_plugin_symbols = level > 1;
-#endif /* ENABLE_PLUGINS */
+#endif /* BFD_SUPPORTS_PLUGINS */
 	    }
 	  break;
 	case 'v':
 	  ldversion (0);
-	  version_printed = TRUE;
+	  version_printed = true;
 	  break;
 	case 'V':
 	  ldversion (1);
-	  version_printed = TRUE;
+	  version_printed = true;
 	  break;
 	case OPTION_VERSION:
 	  ldversion (2);
@@ -1275,23 +1495,17 @@ parse_args (unsigned argc, char **argv)
 	  command_line.version_exports_section = optarg;
 	  break;
 	case OPTION_DYNAMIC_LIST_DATA:
-	  command_line.dynamic_list = dynamic_list_data;
-	  if (command_line.symbolic == symbolic)
-	    command_line.symbolic = symbolic_unset;
+	  opt_dynamic_list = dynamic_list_data;
 	  break;
 	case OPTION_DYNAMIC_LIST_CPP_TYPEINFO:
 	  lang_append_dynamic_list_cpp_typeinfo ();
-	  if (command_line.dynamic_list != dynamic_list_data)
-	    command_line.dynamic_list = dynamic_list;
-	  if (command_line.symbolic == symbolic)
-	    command_line.symbolic = symbolic_unset;
+	  if (opt_dynamic_list != dynamic_list_data)
+	    opt_dynamic_list = dynamic_list;
 	  break;
 	case OPTION_DYNAMIC_LIST_CPP_NEW:
 	  lang_append_dynamic_list_cpp_new ();
-	  if (command_line.dynamic_list != dynamic_list_data)
-	    command_line.dynamic_list = dynamic_list;
-	  if (command_line.symbolic == symbolic)
-	    command_line.symbolic = symbolic_unset;
+	  if (opt_dynamic_list != dynamic_list_data)
+	    opt_dynamic_list = dynamic_list;
 	  break;
 	case OPTION_DYNAMIC_LIST:
 	  /* This option indicates a small script that only specifies
@@ -1304,54 +1518,81 @@ parse_args (unsigned argc, char **argv)
 	    ldfile_open_command_file (optarg);
 	    saved_script_handle = hold_script_handle;
 	    parser_input = input_dynamic_list;
+	    current_dynamic_list_p = &link_info.dynamic_list;
 	    yyparse ();
 	  }
-	  if (command_line.dynamic_list != dynamic_list_data)
-	    command_line.dynamic_list = dynamic_list;
-	  if (command_line.symbolic == symbolic)
-	    command_line.symbolic = symbolic_unset;
+	  if (opt_dynamic_list != dynamic_list_data)
+	    opt_dynamic_list = dynamic_list;
+	  break;
+	case OPTION_EXPORT_DYNAMIC_SYMBOL:
+	  {
+	    struct bfd_elf_version_expr *expr
+	      = lang_new_vers_pattern (NULL, xstrdup (optarg), NULL,
+				       false);
+	    lang_append_dynamic_list (&export_list, expr);
+	  }
+	  break;
+	case OPTION_EXPORT_DYNAMIC_SYMBOL_LIST:
+	  /* This option indicates a small script that only specifies
+	     an export list.  Read it, but don't assume that we've
+	     seen a linker script.  */
+	  {
+	    FILE *hold_script_handle;
+
+	    hold_script_handle = saved_script_handle;
+	    ldfile_open_command_file (optarg);
+	    saved_script_handle = hold_script_handle;
+	    parser_input = input_dynamic_list;
+	    current_dynamic_list_p = &export_list;
+	    yyparse ();
+	  }
 	  break;
 	case OPTION_WARN_COMMON:
-	  config.warn_common = TRUE;
+	  config.warn_common = true;
 	  break;
 	case OPTION_WARN_CONSTRUCTORS:
-	  config.warn_constructors = TRUE;
+	  config.warn_constructors = true;
 	  break;
 	case OPTION_WARN_FATAL:
-	  config.fatal_warnings = TRUE;
+	  config.fatal_warnings = true;
 	  break;
 	case OPTION_NO_WARN_FATAL:
-	  config.fatal_warnings = FALSE;
+	  config.fatal_warnings = false;
+	  break;
+	case OPTION_NO_WARNINGS:
+	case 'w':
+	  config.no_warnings = true;
+	  config.fatal_warnings = false;
 	  break;
 	case OPTION_WARN_MULTIPLE_GP:
-	  config.warn_multiple_gp = TRUE;
+	  config.warn_multiple_gp = true;
 	  break;
 	case OPTION_WARN_ONCE:
-	  config.warn_once = TRUE;
+	  config.warn_once = true;
 	  break;
 	case OPTION_WARN_SECTION_ALIGN:
-	  config.warn_section_align = TRUE;
+	  config.warn_section_align = true;
 	  break;
-	case OPTION_WARN_SHARED_TEXTREL:
-	  link_info.warn_shared_textrel = TRUE;
+	case OPTION_WARN_TEXTREL:
+	  link_info.textrel_check = textrel_check_warning;
 	  break;
 	case OPTION_WARN_ALTERNATE_EM:
-	  link_info.warn_alternate_em = TRUE;
+	  link_info.warn_alternate_em = true;
 	  break;
 	case OPTION_WHOLE_ARCHIVE:
-	  input_flags.whole_archive = TRUE;
+	  input_flags.whole_archive = true;
 	  break;
 	case OPTION_ADD_DT_NEEDED_FOR_DYNAMIC:
-	  input_flags.add_DT_NEEDED_for_dynamic = TRUE;
+	  input_flags.add_DT_NEEDED_for_dynamic = true;
 	  break;
 	case OPTION_NO_ADD_DT_NEEDED_FOR_DYNAMIC:
-	  input_flags.add_DT_NEEDED_for_dynamic = FALSE;
+	  input_flags.add_DT_NEEDED_for_dynamic = false;
 	  break;
 	case OPTION_ADD_DT_NEEDED_FOR_REGULAR:
-	  input_flags.add_DT_NEEDED_for_regular = TRUE;
+	  input_flags.add_DT_NEEDED_for_regular = true;
 	  break;
 	case OPTION_NO_ADD_DT_NEEDED_FOR_REGULAR:
-	  input_flags.add_DT_NEEDED_for_regular = FALSE;
+	  input_flags.add_DT_NEEDED_for_regular = false;
 	  break;
 	case OPTION_WRAP:
 	  add_wrap (optarg);
@@ -1369,10 +1610,9 @@ parse_args (unsigned argc, char **argv)
 	  link_info.discard = discard_all;
 	  break;
 	case 'Y':
-	  if (CONST_STRNEQ (optarg, "P,"))
+	  if (startswith (optarg, "P,"))
 	    optarg += 2;
-	  if (default_dirlist != NULL)
-	    free (default_dirlist);
+	  free (default_dirlist);
 	  default_dirlist = xstrdup (optarg);
 	  break;
 	case 'y':
@@ -1400,10 +1640,10 @@ parse_args (unsigned argc, char **argv)
 	  command_line.check_section_addresses = 0;
 	  break;
 	case OPTION_ACCEPT_UNKNOWN_INPUT_ARCH:
-	  command_line.accept_unknown_input_arch = TRUE;
+	  command_line.accept_unknown_input_arch = true;
 	  break;
 	case OPTION_NO_ACCEPT_UNKNOWN_INPUT_ARCH:
-	  command_line.accept_unknown_input_arch = FALSE;
+	  command_line.accept_unknown_input_arch = false;
 	  break;
 	case '(':
 	  lang_enter_group ();
@@ -1411,7 +1651,7 @@ parse_args (unsigned argc, char **argv)
 	  break;
 	case ')':
 	  if (! ingroup)
-	    einfo (_("%P%F: group ended before it began (--help for usage)\n"));
+	    einfo (_("%F%P: group ended before it began (--help for usage)\n"));
 
 	  lang_leave_group ();
 	  ingroup--;
@@ -1426,27 +1666,182 @@ parse_args (unsigned argc, char **argv)
 	  break;
 
 	case OPTION_REDUCE_MEMORY_OVERHEADS:
-	  link_info.reduce_memory_overheads = TRUE;
+	  link_info.reduce_memory_overheads = true;
 	  if (config.hash_table_size == 0)
 	    config.hash_table_size = 1021;
 	  break;
 
-        case OPTION_HASH_SIZE:
+	case OPTION_MAX_CACHE_SIZE:
+	  {
+	    char *end;
+	    bfd_size_type cache_size = strtoul (optarg, &end, 0);
+	    if (*end != '\0')
+	      einfo (_("%F%P: invalid cache memory size: %s\n"),
+		     optarg);
+	    link_info.max_cache_size = cache_size;
+	  }
+	  break;
+
+	case OPTION_HASH_SIZE:
 	  {
 	    bfd_size_type new_size;
 
-            new_size = strtoul (optarg, NULL, 0);
-            if (new_size)
-              config.hash_table_size = new_size;
-            else
-              einfo (_("%P%X: --hash-size needs a numeric argument\n"));
-          }
-          break;
+	    new_size = strtoul (optarg, NULL, 0);
+	    if (new_size)
+	      config.hash_table_size = new_size;
+	    else
+	      einfo (_("%X%P: --hash-size needs a numeric argument\n"));
+	  }
+	  break;
+
+	case OPTION_PUSH_STATE:
+	  input_flags.pushed = xmemdup (&input_flags,
+					sizeof (input_flags),
+					sizeof (input_flags));
+	  break;
+
+	case OPTION_POP_STATE:
+	  if (input_flags.pushed == NULL)
+	    einfo (_("%F%P: no state pushed before popping\n"));
+	  else
+	    {
+	      struct lang_input_statement_flags *oldp = input_flags.pushed;
+	      memcpy (&input_flags, oldp, sizeof (input_flags));
+	      free (oldp);
+	    }
+	  break;
+
+	case OPTION_PRINT_MEMORY_USAGE:
+	  command_line.print_memory_usage = true;
+	  break;
+
+	case OPTION_ORPHAN_HANDLING:
+	  if (strcasecmp (optarg, "place") == 0)
+	    config.orphan_handling = orphan_handling_place;
+	  else if (strcasecmp (optarg, "warn") == 0)
+	    config.orphan_handling = orphan_handling_warn;
+	  else if (strcasecmp (optarg, "error") == 0)
+	    config.orphan_handling = orphan_handling_error;
+	  else if (strcasecmp (optarg, "discard") == 0)
+	    config.orphan_handling = orphan_handling_discard;
+	  else
+	    einfo (_("%F%P: invalid argument to option"
+		     " \"--orphan-handling\"\n"));
+	  break;
+
+	case OPTION_NO_PRINT_MAP_DISCARDED:
+	  config.print_map_discarded = false;
+	  break;
+
+	case OPTION_PRINT_MAP_DISCARDED:
+	  config.print_map_discarded = true;
+	  break;
+
+	case OPTION_DEPENDENCY_FILE:
+	  config.dependency_file = optarg;
+	  break;
+
+	case OPTION_CTF_VARIABLES:
+	  config.ctf_variables = true;
+	  break;
+
+	case OPTION_NO_CTF_VARIABLES:
+	  config.ctf_variables = false;
+	  break;
+
+	case OPTION_CTF_SHARE_TYPES:
+	  if (strcmp (optarg, "share-unconflicted") == 0)
+	    config.ctf_share_duplicated = false;
+	  else if (strcmp (optarg, "share-duplicated") == 0)
+	    config.ctf_share_duplicated = true;
+	  else
+	    einfo (_("%F%P: bad --ctf-share-types option: %s\n"), optarg);
+	  break;
 	}
+    }
+
+  free (really_longopts);
+  free (longopts);
+  free (shortopts);
+
+  /* Run a couple of checks on the map filename.  */
+  if (config.map_filename)
+    {
+      char * new_name = NULL;
+      char * percent;
+      int    res = 0;
+
+      if (config.map_filename[0] == 0)
+	{
+	  einfo (_("%P: no file/directory name provided for map output; ignored\n"));
+	  config.map_filename = NULL;
+	}
+      else if (strcmp (config.map_filename, "-") == 0)
+	; /* Write to stdout.  Handled in main().  */
+      else if ((percent = strchr (config.map_filename, '%')) != NULL)
+	{
+	  /* FIXME: Check for a second % character and issue an error ?  */
+
+	  /* Construct a map file by replacing the % character with the (full)
+	     output filename.  If the % character was the last character in
+	     the original map filename then add a .map extension.  */
+	  percent[0] = 0;
+	  res = asprintf (&new_name, "%s%s%s", config.map_filename,
+			  output_filename,
+			  percent[1] ? percent + 1 : ".map");
+
+	  /* FIXME: Should we ensure that any directory components in new_name exist ?  */
+	}
+      else
+	{
+	  struct stat s;
+
+	  /* If the map filename is actually a directory then create
+	     a file inside it, based upon the output filename.  */
+	  if (stat (config.map_filename, &s) < 0)
+	    {
+	      if (errno != ENOENT)
+		einfo (_("%P: cannot stat linker map file: %E\n"));
+	    }
+	  else if (S_ISDIR (s.st_mode))
+	    {
+	      char lastc = config.map_filename[strlen (config.map_filename) - 1];
+	      res = asprintf (&new_name, "%s%s%s.map",
+			      config.map_filename,
+			      IS_DIR_SEPARATOR (lastc) ? "" : "/",
+			      lbasename (output_filename));
+	    }
+	  else if (! S_ISREG (s.st_mode))
+	    {
+	      einfo (_("%P: linker map file is not a regular file\n"));
+	      config.map_filename = NULL;
+	    }
+	  /* else FIXME: Check write permission ?  */
+	}
+
+      if (res < 0)
+	{
+	  /* If the asprintf failed then something is probably very
+	     wrong.  Better to halt now rather than continue on
+	     into more problems.  */
+	  einfo (_("%P%F: cannot create name for linker map file: %E\n"));
+	}
+      else if (new_name != NULL)
+	{
+	  /* This is a trivial memory leak.  */
+	  config.map_filename = new_name;
+	}
+    }
+
+  if (command_line.soname && command_line.soname[0] == '\0')
+    {
+      einfo (_("%P: SONAME must not be empty string; ignored\n"));
+      command_line.soname = NULL;
     }
 
   while (ingroup)
     {
+      einfo (_("%P: missing --end-group; added as last command line option\n"));
       lang_leave_group ();
       ingroup--;
     }
@@ -1459,72 +1854,110 @@ parse_args (unsigned argc, char **argv)
 
   if (link_info.unresolved_syms_in_objects == RM_NOT_YET_SET)
     /* FIXME: Should we allow emulations a chance to set this ?  */
-    link_info.unresolved_syms_in_objects = how_to_report_unresolved_symbols;
+    link_info.unresolved_syms_in_objects = RM_DIAGNOSE;
 
   if (link_info.unresolved_syms_in_shared_libs == RM_NOT_YET_SET)
     /* FIXME: Should we allow emulations a chance to set this ?  */
-    link_info.unresolved_syms_in_shared_libs = how_to_report_unresolved_symbols;
+    link_info.unresolved_syms_in_shared_libs = RM_DIAGNOSE;
 
-  if (link_info.relocatable)
-    {
-      if (command_line.check_section_addresses < 0)
-	command_line.check_section_addresses = 0;
-      if (link_info.shared)
-	einfo (_("%P%F: -r and -shared may not be used together\n"));
-    }
+  if (bfd_link_relocatable (&link_info)
+      && command_line.check_section_addresses < 0)
+    command_line.check_section_addresses = 0;
 
-  /* We may have -Bsymbolic, -Bsymbolic-functions, --dynamic-list-data,
-     --dynamic-list-cpp-new, --dynamic-list-cpp-typeinfo and
-     --dynamic-list FILE.  -Bsymbolic and -Bsymbolic-functions are
-     for shared libraries.  -Bsymbolic overrides all others and vice
-     versa.  */
-  switch (command_line.symbolic)
+  if (export_list)
     {
-    case symbolic_unset:
-      break;
-    case symbolic:
-      /* -Bsymbolic is for shared library only.  */
-      if (link_info.shared)
+      struct bfd_elf_version_expr *head = export_list->head.list;
+      struct bfd_elf_version_expr *next;
+
+      /* For --export-dynamic-symbol[-list]:
+	 1. When building executable, treat like --dynamic-list.
+	 2. When building shared object:
+	    a. If -Bsymbolic or --dynamic-list are used, treat like
+	       --dynamic-list.
+	    b. Otherwise, ignored.
+       */
+      if (!bfd_link_relocatable (&link_info)
+	  && (bfd_link_executable (&link_info)
+	      || opt_symbolic != symbolic_unset
+	      || opt_dynamic_list != dynamic_list_unset))
 	{
-	  link_info.symbolic = TRUE;
-	  /* Should we free the unused memory?  */
-	  link_info.dynamic_list = NULL;
-	  command_line.dynamic_list = dynamic_list_unset;
+	  /* Append the export list to link_info.dynamic_list.  */
+	  if (link_info.dynamic_list)
+	    {
+	      for (next = head; next->next != NULL; next = next->next)
+		;
+	      next->next = link_info.dynamic_list->head.list;
+	      link_info.dynamic_list->head.list = head;
+	    }
+	  else
+	    link_info.dynamic_list = export_list;
+
+	  if (opt_dynamic_list != dynamic_list_data)
+	    opt_dynamic_list = dynamic_list;
 	}
-      break;
-    case symbolic_functions:
-      /* -Bsymbolic-functions is for shared library only.  */
-      if (link_info.shared)
-	command_line.dynamic_list = dynamic_list_data;
-      break;
+      else
+	{
+	  /* Free the export list.  */
+	  for (; head->next != NULL; head = next)
+	    {
+	      next = head->next;
+	      free (head);
+	    }
+	  free (export_list);
+	}
     }
 
-  switch (command_line.dynamic_list)
+  switch (opt_dynamic_list)
     {
     case dynamic_list_unset:
       break;
     case dynamic_list_data:
-      link_info.dynamic_data = TRUE;
+      link_info.dynamic_data = true;
+      /* Fall through.  */
     case dynamic_list:
-      link_info.dynamic = TRUE;
+      link_info.dynamic = true;
+      opt_symbolic = symbolic_unset;
       break;
     }
 
-  if (! link_info.shared)
+  /* -Bsymbolic and -Bsymbols-functions are for shared library output.  */
+  if (bfd_link_dll (&link_info))
+    switch (opt_symbolic)
+      {
+      case symbolic_unset:
+	break;
+      case symbolic:
+	link_info.symbolic = true;
+	if (link_info.dynamic_list)
+	  {
+	    struct bfd_elf_version_expr *ent, *next;
+	    for (ent = link_info.dynamic_list->head.list; ent; ent = next)
+	      {
+		next = ent->next;
+		free (ent);
+	      }
+	    free (link_info.dynamic_list);
+	    link_info.dynamic_list = NULL;
+	  }
+	break;
+      case symbolic_functions:
+	link_info.dynamic = true;
+	link_info.dynamic_data = true;
+	break;
+      }
+
+  if (!bfd_link_dll (&link_info))
     {
       if (command_line.filter_shlib)
-	einfo (_("%P%F: -F may not be used without -shared\n"));
+	einfo (_("%F%P: -F may not be used without -shared\n"));
       if (command_line.auxiliary_filters)
-	einfo (_("%P%F: -f may not be used without -shared\n"));
+	einfo (_("%F%P: -f may not be used without -shared\n"));
     }
-
-  if (! link_info.shared || link_info.pie)
-    link_info.executable = TRUE;
 
   /* Treat ld -r -s as ld -r -S -x (i.e., strip all local symbols).  I
      don't see how else this can be handled, since in this case we
      must preserve all externally visible symbols.  */
-  if (link_info.relocatable && link_info.strip == strip_all)
+  if (bfd_link_relocatable (&link_info) && link_info.strip == strip_all)
     {
       link_info.strip = strip_debugger;
       if (link_info.discard == discard_sec_merge)
@@ -1546,7 +1979,7 @@ set_default_dirlist (char *dirlist_ptr)
       if (p != NULL)
 	*p = '\0';
       if (*dirlist_ptr != '\0')
-	ldfile_add_library_path (dirlist_ptr, TRUE);
+	ldfile_add_library_path (dirlist_ptr, true);
       if (p == NULL)
 	break;
       dirlist_ptr = p + 1;
@@ -1559,7 +1992,7 @@ set_section_start (char *sect, char *valstr)
   const char *end;
   bfd_vma val = bfd_scan_vma (valstr, &end, 16);
   if (*end)
-    einfo (_("%P%F: invalid hex number `%s'\n"), valstr);
+    einfo (_("%F%P: invalid hex number `%s'\n"), valstr);
   lang_section_start (sect, exp_intop (val), NULL);
 }
 
@@ -1572,7 +2005,7 @@ set_segment_start (const char *section, char *valstr)
 
   bfd_vma val = bfd_scan_vma (valstr, &end, 16);
   if (*end)
-    einfo (_("%P%F: invalid hex number `%s'\n"), valstr);
+    einfo (_("%F%P: invalid hex number `%s'\n"), valstr);
   /* If we already have an entry for this segment, update the existing
      value.  */
   name = section + 1;
@@ -1580,14 +2013,15 @@ set_segment_start (const char *section, char *valstr)
     if (strcmp (seg->name, name) == 0)
       {
 	seg->value = val;
+	lang_section_start (section, exp_intop (val), seg);
 	return;
       }
   /* There was no existing value so we must create a new segment
      entry.  */
-  seg = (segment_type *) stat_alloc (sizeof (*seg));
+  seg = stat_alloc (sizeof (*seg));
   seg->name = name;
   seg->value = val;
-  seg->used = FALSE;
+  seg->used = false;
   /* Add it to the linked list of segments.  */
   seg->next = segments;
   segments = seg;
@@ -1596,6 +2030,219 @@ set_segment_start (const char *section, char *valstr)
      that.  If a SEGMENT_START directive is seen, the section address
      assignment will be disabled.  */
   lang_section_start (section, exp_intop (val), seg);
+}
+
+static void
+elf_shlib_list_options (FILE *file)
+{
+  fprintf (file, _("\
+  --audit=AUDITLIB            Specify a library to use for auditing\n"));
+  fprintf (file, _("\
+  -Bgroup                     Selects group name lookup rules for DSO\n"));
+  fprintf (file, _("\
+  --disable-new-dtags         Disable new dynamic tags\n"));
+  fprintf (file, _("\
+  --enable-new-dtags          Enable new dynamic tags\n"));
+  fprintf (file, _("\
+  --eh-frame-hdr              Create .eh_frame_hdr section\n"));
+  fprintf (file, _("\
+  --no-eh-frame-hdr           Do not create .eh_frame_hdr section\n"));
+  fprintf (file, _("\
+  --exclude-libs=LIBS         Make all symbols in LIBS hidden\n"));
+  fprintf (file, _("\
+  --hash-style=STYLE          Set hash style to sysv/gnu/both.  Default: "));
+  if (DEFAULT_EMIT_SYSV_HASH)
+    {
+      /* Note - these strings are not translated as
+	 they are keywords not descriptive text.  */
+      if (DEFAULT_EMIT_GNU_HASH)
+	fprintf (file, "both\n");
+      else
+	fprintf (file, "sysv\n");
+    }
+  else
+    {
+      if (DEFAULT_EMIT_GNU_HASH)
+	fprintf (file, "gnu\n");
+      else
+	/* FIXME: Can this happen ?  */
+	fprintf (file, "none\n");
+    }
+  fprintf (file, _("\
+  -P AUDITLIB, --depaudit=AUDITLIB\n" "\
+                              Specify a library to use for auditing dependencies\n"));
+  fprintf (file, _("\
+  -z combreloc                Merge dynamic relocs into one section and sort\n"));
+  fprintf (file, _("\
+  -z nocombreloc              Don't merge dynamic relocs into one section\n"));
+  fprintf (file, _("\
+  -z global                   Make symbols in DSO available for subsequently\n\
+                                loaded objects\n"));
+  fprintf (file, _("\
+  -z initfirst                Mark DSO to be initialized first at runtime\n"));
+  fprintf (file, _("\
+  -z interpose                Mark object to interpose all DSOs but executable\n"));
+  fprintf (file, _("\
+  -z unique                   Mark DSO to be loaded at most once by default, and only in the main namespace\n"));
+  fprintf (file, _("\
+  -z nounique                 Don't mark DSO as a loadable at most once\n"));
+  fprintf (file, _("\
+  -z lazy                     Mark object lazy runtime binding (default)\n"));
+  fprintf (file, _("\
+  -z loadfltr                 Mark object requiring immediate process\n"));
+  fprintf (file, _("\
+  -z nocopyreloc              Don't create copy relocs\n"));
+  fprintf (file, _("\
+  -z nodefaultlib             Mark object not to use default search paths\n"));
+  fprintf (file, _("\
+  -z nodelete                 Mark DSO non-deletable at runtime\n"));
+  fprintf (file, _("\
+  -z nodlopen                 Mark DSO not available to dlopen\n"));
+  fprintf (file, _("\
+  -z nodump                   Mark DSO not available to dldump\n"));
+  fprintf (file, _("\
+  -z now                      Mark object non-lazy runtime binding\n"));
+  fprintf (file, _("\
+  -z origin                   Mark object requiring immediate $ORIGIN\n\
+                                processing at runtime\n"));
+#if DEFAULT_LD_Z_RELRO
+  fprintf (file, _("\
+  -z relro                    Create RELRO program header (default)\n"));
+  fprintf (file, _("\
+  -z norelro                  Don't create RELRO program header\n"));
+#else
+  fprintf (file, _("\
+  -z relro                    Create RELRO program header\n"));
+  fprintf (file, _("\
+  -z norelro                  Don't create RELRO program header (default)\n"));
+#endif
+#if DEFAULT_LD_Z_SEPARATE_CODE
+  fprintf (file, _("\
+  -z separate-code            Create separate code program header (default)\n"));
+  fprintf (file, _("\
+  -z noseparate-code          Don't create separate code program header\n"));
+#else
+  fprintf (file, _("\
+  -z separate-code            Create separate code program header\n"));
+  fprintf (file, _("\
+  -z noseparate-code          Don't create separate code program header (default)\n"));
+#endif
+  fprintf (file, _("\
+  -z common                   Generate common symbols with STT_COMMON type\n"));
+  fprintf (file, _("\
+  -z nocommon                 Generate common symbols with STT_OBJECT type\n"));
+  if (link_info.textrel_check == textrel_check_error)
+    fprintf (file, _("\
+  -z text                     Treat DT_TEXTREL in output as error (default)\n"));
+  else
+    fprintf (file, _("\
+  -z text                     Treat DT_TEXTREL in output as error\n"));
+  if (link_info.textrel_check == textrel_check_none)
+    {
+      fprintf (file, _("\
+  -z notext                   Don't treat DT_TEXTREL in output as error (default)\n"));
+      fprintf (file, _("\
+  -z textoff                  Don't treat DT_TEXTREL in output as error (default)\n"));
+    }
+  else
+    {
+      fprintf (file, _("\
+  -z notext                   Don't treat DT_TEXTREL in output as error\n"));
+      fprintf (file, _("\
+  -z textoff                  Don't treat DT_TEXTREL in output as error\n"));
+    }
+}
+
+static void
+elf_static_list_options (FILE *file)
+{
+  fprintf (file, _("\
+  --build-id[=STYLE]          Generate build ID note\n"));
+  fprintf (file, _("\
+  --package-metadata[=JSON]   Generate package metadata note\n"));
+  fprintf (file, _("\
+  --compress-debug-sections=[none|zlib|zlib-gnu|zlib-gabi|zstd]\n\
+			      Compress DWARF debug sections\n"));
+  fprintf (file, _("\
+                                Default: %s\n"),
+	   bfd_get_compression_algorithm_name (config.compress_debug));
+  fprintf (file, _("\
+  -z common-page-size=SIZE    Set common page size to SIZE\n"));
+  fprintf (file, _("\
+  -z max-page-size=SIZE       Set maximum page size to SIZE\n"));
+  fprintf (file, _("\
+  -z defs                     Report unresolved symbols in object files\n"));
+  fprintf (file, _("\
+  -z undefs                   Ignore unresolved symbols in object files\n"));
+  fprintf (file, _("\
+  -z muldefs                  Allow multiple definitions\n"));
+  fprintf (file, _("\
+  -z stack-size=SIZE          Set size of stack segment\n"));
+  fprintf (file, _("\
+  -z execstack                Mark executable as requiring executable stack\n"));
+  fprintf (file, _("\
+  -z noexecstack              Mark executable as not requiring executable stack\n"));
+#if DEFAULT_LD_WARN_EXECSTACK == 1
+  fprintf (file, _("\
+  --warn-execstack            Generate a warning if the stack is executable (default)\n"));
+#else
+  fprintf (file, _("\
+  --warn-execstack            Generate a warning if the stack is executable\n"));
+#endif
+#if DEFAULT_LD_WARN_EXECSTACK == 0
+  fprintf (file, _("\
+  --no-warn-execstack         Do not generate a warning if the stack is executable (default)\n"));
+#else
+  fprintf (file, _("\
+  --no-warn-execstack         Do not generate a warning if the stack is executable\n"));
+#endif
+#if DEFAULT_LD_WARN_RWX_SEGMENTS
+  fprintf (file, _("\
+  --warn-rwx-segments         Generate a warning if a LOAD segment has RWX permissions (default)\n"));
+  fprintf (file, _("\
+  --no-warn-rwx-segments      Do not generate a warning if a LOAD segments has RWX permissions\n"));
+#else
+  fprintf (file, _("\
+  --warn-rwx-segments         Generate a warning if a LOAD segment has RWX permissions\n"));
+  fprintf (file, _("\
+  --no-warn-rwx-segments      Do not generate a warning if a LOAD segments has RWX permissions (default)\n"));
+#endif
+  fprintf (file, _("\
+  -z unique-symbol            Avoid duplicated local symbol names\n"));
+  fprintf (file, _("\
+  -z nounique-symbol          Keep duplicated local symbol names (default)\n"));
+  fprintf (file, _("\
+  -z globalaudit              Mark executable requiring global auditing\n"));
+  fprintf (file, _("\
+  -z start-stop-gc            Enable garbage collection on __start/__stop\n"));
+  fprintf (file, _("\
+  -z nostart-stop-gc          Don't garbage collect __start/__stop (default)\n"));
+  fprintf (file, _("\
+  -z start-stop-visibility=V  Set visibility of built-in __start/__stop symbols\n\
+                                to DEFAULT, PROTECTED, HIDDEN or INTERNAL\n"));
+}
+
+static void
+elf_plt_unwind_list_options (FILE *file)
+{
+  fprintf (file, _("\
+  --ld-generated-unwind-info  Generate exception handling info for PLT\n"));
+  fprintf (file, _("\
+  --no-ld-generated-unwind-info\n\
+                              Don't generate exception handling info for PLT\n"));
+}
+
+static void
+ld_list_options (FILE *file, bool elf, bool shlib, bool plt_unwind)
+{
+  if (!elf)
+    return;
+  printf (_("ELF emulations:\n"));
+  if (plt_unwind)
+    elf_plt_unwind_list_options (file);
+  elf_static_list_options (file);
+  if (shlib)
+    elf_shlib_list_options (file);
 }
 
 
@@ -1615,12 +2262,12 @@ help (void)
     {
       if (ld_options[i].doc != NULL)
 	{
-	  bfd_boolean comma;
+	  bool comma;
 	  unsigned j;
 
 	  printf ("  ");
 
-	  comma = FALSE;
+	  comma = false;
 	  len = 2;
 
 	  j = i;
@@ -1641,7 +2288,7 @@ help (void)
 		      printf ("%s", _(ld_options[j].arg));
 		      len += strlen (_(ld_options[j].arg));
 		    }
-		  comma = TRUE;
+		  comma = true;
 		}
 	      ++j;
 	    }
@@ -1670,7 +2317,7 @@ help (void)
 		      printf (" %s", _(ld_options[j].arg));
 		      len += 1 + strlen (_(ld_options[j].arg));
 		    }
-		  comma = TRUE;
+		  comma = true;
 		}
 	      ++j;
 	    }
@@ -1710,6 +2357,8 @@ help (void)
 
   /* xgettext:c-format */
   printf (_("%s: emulation specific options:\n"), program_name);
+  ld_list_options (stdout, ELF_LIST_OPTIONS, ELF_SHLIB_LIST_OPTIONS,
+		   ELF_PLT_UNWIND_LIST_OPTIONS);
   ldemul_list_emulation_options (stdout);
   printf ("\n");
 

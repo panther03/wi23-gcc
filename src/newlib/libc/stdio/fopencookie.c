@@ -10,7 +10,7 @@ FUNCTION
 INDEX
 	fopencookie
 
-ANSI_SYNOPSIS
+SYNOPSIS
 	#include <stdio.h>
 	FILE *fopencookie(const void *<[cookie]>, const char *<[mode]>,
 			  cookie_io_functions_t <[functions]>);
@@ -82,6 +82,7 @@ It is not portable.  See also the <<funopen>> interface from BSD.
 Supporting OS subroutines required: <<sbrk>>.
 */
 
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <errno.h>
 #include <sys/lock.h>
@@ -97,25 +98,23 @@ typedef struct fccookie {
 } fccookie;
 
 static _READ_WRITE_RETURN_TYPE
-_DEFUN(fcreader, (ptr, cookie, buf, n),
-       struct _reent *ptr _AND
-       void *cookie _AND
-       char *buf _AND
+fcreader (struct _reent *ptr,
+       void *cookie,
+       char *buf,
        _READ_WRITE_BUFSIZE_TYPE n)
 {
   int result;
   fccookie *c = (fccookie *) cookie;
   errno = 0;
   if ((result = c->readfn (c->cookie, buf, n)) < 0 && errno)
-    ptr->_errno = errno;
+    _REENT_ERRNO(ptr) = errno;
   return result;
 }
 
 static _READ_WRITE_RETURN_TYPE
-_DEFUN(fcwriter, (ptr, cookie, buf, n),
-       struct _reent *ptr _AND
-       void *cookie _AND
-       const char *buf _AND
+fcwriter (struct _reent *ptr,
+       void *cookie,
+       const char *buf,
        _READ_WRITE_BUFSIZE_TYPE n)
 {
   int result;
@@ -130,15 +129,14 @@ _DEFUN(fcwriter, (ptr, cookie, buf, n),
     }
   errno = 0;
   if ((result = c->writefn (c->cookie, buf, n)) < 0 && errno)
-    ptr->_errno = errno;
+    _REENT_ERRNO(ptr) = errno;
   return result;
 }
 
 static _fpos_t
-_DEFUN(fcseeker, (ptr, cookie, pos, whence),
-       struct _reent *ptr _AND
-       void *cookie _AND
-       _fpos_t pos _AND
+fcseeker (struct _reent *ptr,
+       void *cookie,
+       _fpos_t pos,
        int whence)
 {
   fccookie *c = (fccookie *) cookie;
@@ -150,11 +148,11 @@ _DEFUN(fcseeker, (ptr, cookie, pos, whence),
 
   errno = 0;
   if (c->seekfn (c->cookie, &offset, whence) < 0 && errno)
-    ptr->_errno = errno;
+    _REENT_ERRNO(ptr) = errno;
 #ifdef __LARGE64_FILES
   else if ((_fpos_t)offset != offset)
     {
-      ptr->_errno = EOVERFLOW;
+      _REENT_ERRNO(ptr) = EOVERFLOW;
       offset = -1;
     }
 #endif /* __LARGE64_FILES */
@@ -163,24 +161,22 @@ _DEFUN(fcseeker, (ptr, cookie, pos, whence),
 
 #ifdef __LARGE64_FILES
 static _fpos64_t
-_DEFUN(fcseeker64, (ptr, cookie, pos, whence),
-       struct _reent *ptr _AND
-       void *cookie _AND
-       _fpos64_t pos _AND
+fcseeker64 (struct _reent *ptr,
+       void *cookie,
+       _fpos64_t pos,
        int whence)
 {
   _off64_t offset;
   fccookie *c = (fccookie *) cookie;
   errno = 0;
   if (c->seekfn (c->cookie, &offset, whence) < 0 && errno)
-    ptr->_errno = errno;
+    _REENT_ERRNO(ptr) = errno;
   return (_fpos64_t) offset;
 }
 #endif /* __LARGE64_FILES */
 
 static int
-_DEFUN(fccloser, (ptr, cookie),
-       struct _reent *ptr _AND
+fccloser (struct _reent *ptr,
        void *cookie)
 {
   int result = 0;
@@ -189,17 +185,16 @@ _DEFUN(fccloser, (ptr, cookie),
     {
       errno = 0;
       if ((result = c->closefn (c->cookie)) < 0 && errno)
-	ptr->_errno = errno;
+	_REENT_ERRNO(ptr) = errno;
     }
   _free_r (ptr, c);
   return result;
 }
 
 FILE *
-_DEFUN(_fopencookie_r, (ptr, cookie, mode, functions),
-       struct _reent *ptr _AND
-       void *cookie _AND
-       const char *mode _AND
+_fopencookie_r (struct _reent *ptr,
+       void *cookie,
+       const char *mode,
        cookie_io_functions_t functions)
 {
   FILE *fp;
@@ -212,7 +207,7 @@ _DEFUN(_fopencookie_r, (ptr, cookie, mode, functions),
   if (((flags & (__SRD | __SRW)) && !functions.read)
       || ((flags & (__SWR | __SRW)) && !functions.write))
     {
-      ptr->_errno = EINVAL;
+      _REENT_ERRNO(ptr) = EINVAL;
       return NULL;
     }
   if ((fp = __sfp (ptr)) == NULL)
@@ -252,9 +247,8 @@ _DEFUN(_fopencookie_r, (ptr, cookie, mode, functions),
 
 #ifndef _REENT_ONLY
 FILE *
-_DEFUN(fopencookie, (cookie, mode, functions),
-       void *cookie _AND
-       const char *mode _AND
+fopencookie (void *cookie,
+       const char *mode,
        cookie_io_functions_t functions)
 {
   return _fopencookie_r (_REENT, cookie, mode, functions);

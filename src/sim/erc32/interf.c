@@ -1,30 +1,28 @@
-/*
- * This file is part of SIS.
- * 
- * SIS, SPARC instruction simulator V1.6 Copyright (C) 1995 Jiri Gaisler,
- * European Space Agency
- * 
- * This program is free software; you can redistribute it and/or modify it under
- * the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 3 of the License, or (at your option)
- * any later version.
- * 
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- * 
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, see <http://www.gnu.org/licenses/>.
- * 
- */
+/* This file is part of SIS (SPARC instruction simulator)
 
-#include "config.h"
+   Copyright (C) 1995-2023 Free Software Foundation, Inc.
+   Contributed by Jiri Gaisler, European Space Agency
+
+   This program is free software; you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation; either version 3 of the License, or
+   (at your option) any later version.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
+
+   You should have received a copy of the GNU General Public License
+   along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
+
+/* This must come before any other includes.  */
+#include "defs.h"
+
 #include <signal.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <time.h>
 #include <sys/fcntl.h>
 #include "sis.h"
 #include "libiberty.h"
@@ -32,7 +30,7 @@
 #include <dis-asm.h>
 #include "sim-config.h"
 
-#include "gdb/remote-sim.h"
+#include "sim/sim.h"
 #include "gdb/signals.h"
 
 #define PSR_CWP 0x7
@@ -41,7 +39,6 @@ extern struct disassemble_info dinfo;
 extern struct pstate sregs;
 extern struct estate ebase;
 
-extern int	current_target_byte_order;
 extern int      ctrl_c;
 extern int      nfp;
 extern int      ift;
@@ -65,10 +62,7 @@ int             sis_gdb_break = 1;
 host_callback *sim_callback;
 
 int
-run_sim(sregs, icount, dis)
-    struct pstate  *sregs;
-    uint64          icount;
-    int             dis;
+run_sim(struct pstate *sregs, uint64_t icount, int dis)
 {
     int             mexc, irq;
 
@@ -76,8 +70,10 @@ run_sim(sregs, icount, dis)
 	(*sim_callback->printf_filtered) (sim_callback, "resuming at %x\n",
 					  sregs->pc);
    init_stdio();
-   sregs->starttime = time(NULL);
+   sregs->starttime = get_time();
    irq = 0;
+   if ((sregs->pc != 0) && (ebase.simtime == 0))
+	boot_init();
    while (!sregs->err_mode & (icount > 0)) {
 
 	sregs->fhold = 0;
@@ -94,9 +90,8 @@ run_sim(sregs, icount, dis)
             if (sregs->pc == 0 || sregs->npc == 0)
                 printf ("bogus pc or npc\n");
 #endif
-        mexc = memory_read(sregs->asi, sregs->pc, &sregs->inst,
-                           2, &sregs->hold);
-#if 1	/* DELETE ME! for debugging purposes only */
+        mexc = memory_iread (sregs->pc, &sregs->inst, &sregs->hold);
+#if 0	/* DELETE ME! for debugging purposes only */
         if (sis_verbose > 2)
             printf("pc %x, np %x, sp %x, fp %x, wm %x, cw %x, i %08x\n",
                    sregs->pc, sregs->npc,
@@ -124,7 +119,7 @@ run_sim(sregs, icount, dis)
                         sim_halt();
 			restore_stdio();
 			clearerr(stdin);
-			return (BPT_HIT);
+			return BPT_HIT;
 		    } else
 			dispatch_instruction(sregs);
 		}
@@ -141,45 +136,44 @@ run_sim(sregs, icount, dis)
 	}
     }
     sim_halt();
-    sregs->tottime += time(NULL) - sregs->starttime;
+    sregs->tottime += get_time() - sregs->starttime;
     restore_stdio();
     clearerr(stdin);
     if (sregs->err_mode)
 	error_mode(sregs->pc);
     if (sregs->err_mode)
-	return (ERROR);
+	return ERROR;
     if (sregs->bphit) {
 	if (sis_verbose)
 	    (*sim_callback->printf_filtered) (sim_callback,
 					      "HW BP hit at %x\n", sregs->pc);
-	return (BPT_HIT);
+	return BPT_HIT;
     }
     if (ctrl_c) {
 	ctrl_c = 0;
-	return (CTRL_C);
+	return CTRL_C;
     }
-    return (TIME_OUT);
+    return TIME_OUT;
 }
 
-void
-sim_set_callbacks (ptr)
-     host_callback *ptr;
+static int ATTRIBUTE_PRINTF (3, 4)
+fprintf_styled (void *stream, enum disassembler_style style,
+		const char *fmt, ...)
 {
-  sim_callback = ptr;
-}
+  int ret;
+  FILE *out = (FILE *) stream;
+  va_list args;
 
-void
-sim_size (memsize)
-     int memsize;
-{
+  va_start (args, fmt);
+  ret = vfprintf (out, fmt, args);
+  va_end (args);
+
+  return ret;
 }
 
 SIM_DESC
-sim_open (kind, callback, abfd, argv)
-     SIM_OPEN_KIND kind;
-     struct host_callback_struct *callback;
-     struct bfd *abfd;
-     char **argv;
+sim_open (SIM_OPEN_KIND kind, struct host_callback_struct *callback,
+	  struct bfd *abfd, char * const *argv)
 {
 
     int             argc = 0;
@@ -188,8 +182,7 @@ sim_open (kind, callback, abfd, argv)
 
     sim_callback = callback;
 
-    while (argv[argc])
-      argc++;
+    argc = countargv (argv);
     while (stat < argc) {
 	if (argv[stat][0] == '-') {
 	    if (strcmp(argv[stat], "-v") == 0) {
@@ -263,9 +256,16 @@ sim_open (kind, callback, abfd, argv)
     }
 
     sregs.freq = freq ? freq : 15;
+#ifdef F_GETFL
     termsave = fcntl(0, F_GETFL, 0);
-    INIT_DISASSEMBLE_INFO(dinfo, stdout,(fprintf_ftype)fprintf);
+#endif
+    INIT_DISASSEMBLE_INFO(dinfo, stdout,(fprintf_ftype)fprintf,
+			  fprintf_styled);
+#ifdef HOST_LITTLE_ENDIAN
+    dinfo.endian = BFD_ENDIAN_LITTLE;
+#else
     dinfo.endian = BFD_ENDIAN_BIG;
+#endif
     reset_all();
     ebase.simtime = 0;
     init_sim();
@@ -277,33 +277,25 @@ sim_open (kind, callback, abfd, argv)
 }
 
 void
-sim_close(sd, quitting)
-     SIM_DESC sd;
-     int quitting;
+sim_close(SIM_DESC sd, int quitting)
 {
 
     exit_sim();
+#ifdef F_SETFL
     fcntl(0, F_SETFL, termsave);
-
-};
+#endif
+}
 
 SIM_RC
-sim_load(sd, prog, abfd, from_tty)
-     SIM_DESC sd;
-     char *prog;
-     bfd *abfd;
-     int from_tty;
+sim_load(SIM_DESC sd, const char *prog, bfd *abfd, int from_tty)
 {
     bfd_load (prog);
     return SIM_RC_OK;
 }
 
 SIM_RC
-sim_create_inferior(sd, abfd, argv, env)
-     SIM_DESC sd;
-     struct bfd *abfd;
-     char **argv;
-     char **env;
+sim_create_inferior(SIM_DESC sd, bfd *abfd, char * const *argv,
+		    char * const *env)
 {
     bfd_vma start_address = 0;
     if (abfd != NULL)
@@ -318,60 +310,51 @@ sim_create_inferior(sd, abfd, argv, env)
 }
 
 int
-sim_store_register(sd, regno, value, length)
-    SIM_DESC sd;
-    int             regno;
-    unsigned char  *value;
-    int length;
+sim_store_register(SIM_DESC sd, int regno, const void *buf, int length)
 {
-    /* FIXME: Review the computation of regval.  */
+    const unsigned char *value = buf;
     int regval;
-    if (current_target_byte_order == BIG_ENDIAN)
-	regval = (value[0] << 24) | (value[1] << 16)
+
+    regval = (value[0] << 24) | (value[1] << 16)
 		 | (value[2] << 8) | value[3];
-    else
-	regval = (value[3] << 24) | (value[2] << 16)
-		 | (value[1] << 8) | value[0];
     set_regi(&sregs, regno, regval);
     return length;
 }
 
 
 int
-sim_fetch_register(sd, regno, buf, length)
-     SIM_DESC sd;
-    int             regno;
-    unsigned char  *buf;
-     int length;
+sim_fetch_register(SIM_DESC sd, int regno, void *buf, int length)
 {
     get_regi(&sregs, regno, buf);
     return -1;
 }
 
-int
-sim_write(sd, mem, buf, length)
-     SIM_DESC sd;
-    SIM_ADDR             mem;
-    const unsigned char  *buf;
-    int             length;
+uint64_t
+sim_write (SIM_DESC sd, uint64_t mem, const void *buffer, uint64_t length)
 {
-    return (sis_memory_write(mem, buf, length));
+    int i, len;
+    const unsigned char *data = buffer;
+
+    for (i = 0; i < length; i++) {
+	sis_memory_write ((mem + i) ^ EBT, &data[i], 1);
+    }
+    return length;
 }
 
-int
-sim_read(sd, mem, buf, length)
-     SIM_DESC sd;
-     SIM_ADDR mem;
-     unsigned char *buf;
-     int length;
+uint64_t
+sim_read (SIM_DESC sd, uint64_t mem, void *buffer, uint64_t length)
 {
-    return (sis_memory_read(mem, buf, length));
+    int i, len;
+    unsigned char *data = buffer;
+
+    for (i = 0; i < length; i++) {
+	sis_memory_read ((mem + i) ^ EBT, &data[i], 1);
+    }
+    return length;
 }
 
 void
-sim_info(sd, verbose)
-     SIM_DESC sd;
-     int verbose;
+sim_info(SIM_DESC sd, bool verbose)
 {
     show_stat(&sregs);
 }
@@ -379,10 +362,7 @@ sim_info(sd, verbose)
 int             simstat = OK;
 
 void
-sim_stop_reason(sd, reason, sigrc)
-     SIM_DESC sd;
-     enum sim_stop * reason;
-     int *sigrc;
+sim_stop_reason(SIM_DESC sd, enum sim_stop *reason, int *sigrc)
 {
 
     switch (simstat) {
@@ -416,7 +396,7 @@ sim_stop_reason(sd, reason, sigrc)
 */
 
 static void
-flush_windows ()
+flush_windows (void)
 {
   int invwin;
   int cwp;
@@ -439,13 +419,13 @@ flush_windows ()
 
   for (win = invwin; ; win = (win - 1) & PSR_CWP)
     {
-      uint32 sp;
+      uint32_t sp;
       int i;
 
       sp = sregs.r[(win * 16 + 14) & 0x7f];
 #if 1
       if (sis_verbose > 2) {
-	uint32 fp = sregs.r[(win * 16 + 30) & 0x7f];
+	uint32_t fp = sregs.r[(win * 16 + 30) & 0x7f];
 	printf("flush_window: win %d, sp %x, fp %x\n", win, sp, fp);
       }
 #endif
@@ -467,25 +447,20 @@ sim_resume(SIM_DESC sd, int step, int siggnal)
     if (sis_gdb_break) flush_windows ();
 }
 
-int
-sim_trace (sd)
-     SIM_DESC sd;
-{
-  /* FIXME: unfinished */
-  sim_resume (sd, 0, 0);
-  return 1;
-}
-
 void
-sim_do_command(sd, cmd)
-     SIM_DESC sd;
-    char           *cmd;
+sim_do_command(SIM_DESC sd, const char *cmd)
 {
     exec_cmd(&sregs, cmd);
 }
 
 char **
 sim_complete_command (SIM_DESC sd, const char *text, const char *word)
+{
+  return NULL;
+}
+
+char *
+sim_memory_map (SIM_DESC sd)
 {
   return NULL;
 }

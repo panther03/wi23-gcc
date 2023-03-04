@@ -1,6 +1,5 @@
 # This shell script emits a C file. -*- C -*-
-#   Copyright 2003, 2004, 2005, 2007, 2008, 2009
-#   Free Software Foundation, Inc.
+#   Copyright (C) 2003-2023 Free Software Foundation, Inc.
 #
 # This file is part of the GNU Binutils.
 #
@@ -20,7 +19,7 @@
 # MA 02110-1301, USA.
 #
 
-# This file is sourced from elf32.em, and defines extra alpha
+# This file is sourced from elf.em, and defines extra alpha
 # specific routines.
 #
 fragment <<EOF
@@ -29,9 +28,9 @@ fragment <<EOF
 #include "elf/alpha.h"
 #include "elf-bfd.h"
 
-static bfd_boolean limit_32bit;
+static bool limit_32bit;
 
-extern bfd_boolean elf64_alpha_use_secureplt;
+extern bool elf64_alpha_use_secureplt;
 
 
 /* Set the start address as in the Tru64 ld.  */
@@ -48,7 +47,7 @@ alpha_after_open (void)
       lang_output_section_statement_type *plt_os[2];
 
       num_plt = 0;
-      for (os = &lang_output_section_statement.head->output_section_statement;
+      for (os = (void *) lang_os_list.head;
 	   os != NULL;
 	   os = os->next)
 	{
@@ -73,14 +72,17 @@ alpha_after_open (void)
 static void
 alpha_after_parse (void)
 {
-  if (limit_32bit && !link_info.shared && !link_info.relocatable)
+  link_info.relax_pass = 2;
+  if (limit_32bit
+      && !bfd_link_pic (&link_info)
+      && !bfd_link_relocatable (&link_info))
     lang_section_start (".interp",
 			exp_binop ('+',
 				   exp_intop (ALPHA_TEXT_START_32BIT),
 				   exp_nameop (SIZEOF_HEADERS, NULL)),
 			NULL);
 
-  after_parse_default ();
+  ldelf_after_parse ();
 }
 
 static void
@@ -90,7 +92,9 @@ alpha_before_allocation (void)
   gld${EMULATION_NAME}_before_allocation ();
 
   /* Add -relax if -O, not -r, and not explicitly disabled.  */
-  if (link_info.optimize && !link_info.relocatable && ! RELAXATION_DISABLED_BY_USER)
+  if (link_info.optimize
+      && !bfd_link_relocatable (&link_info)
+      && ! RELAXATION_DISABLED_BY_USER)
     ENABLE_RELAXATION;
 }
 
@@ -122,10 +126,11 @@ PARSE_AND_LIST_LONGOPTS='
 PARSE_AND_LIST_OPTIONS='
   fprintf (file, _("\
   --taso                      Load executable in the lower 31-bit addressable\n\
-                                virtual address range.\n\
-  --secureplt                 Force PLT in text segment.\n\
-  --no-secureplt              Force PLT in data segment.\n\
-"));
+                                virtual address range\n"));
+  fprintf (file, _("\
+  --secureplt                 Force PLT in text segment\n"));
+  fprintf (file, _("\
+  --no-secureplt              Force PLT in data segment\n"));
 '
 
 PARSE_AND_LIST_ARGS_CASES='
@@ -133,10 +138,10 @@ PARSE_AND_LIST_ARGS_CASES='
       limit_32bit = 1;
       break;
     case OPTION_SECUREPLT:
-      elf64_alpha_use_secureplt = TRUE;
+      elf64_alpha_use_secureplt = true;
       break;
     case OPTION_NO_SECUREPLT:
-      elf64_alpha_use_secureplt = FALSE;
+      elf64_alpha_use_secureplt = false;
       break;
 '
 

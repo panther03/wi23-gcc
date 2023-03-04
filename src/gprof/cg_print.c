@@ -1,7 +1,6 @@
 /* cg_print.c -  Print routines for displaying call graphs.
 
-   Copyright 2000, 2001, 2002, 2004, 2007, 2009, 2011
-   Free Software Foundation, Inc.
+   Copyright (C) 2000-2023 Free Software Foundation, Inc.
 
    This file is part of GNU Binutils.
 
@@ -48,9 +47,9 @@ static void print_parents (Sym *);
 static void sort_children (Sym *);
 static void print_children (Sym *);
 static void print_line (Sym *);
-static int cmp_name (const PTR, const PTR);
-static int cmp_arc_count (const PTR, const PTR);
-static int cmp_fun_nuses (const PTR, const PTR);
+static int cmp_name (const void *, const void *);
+static int cmp_arc_count (const void *, const void *);
+static int cmp_fun_nuses (const void *, const void *);
 static void order_and_dump_functions_by_arcs
   (Arc **, unsigned long, int, Arc **, unsigned long *);
 
@@ -62,10 +61,10 @@ double print_time = 0.0;
 
 
 static void
-print_header ()
+print_header (void)
 {
   if (first_output)
-    first_output = FALSE;
+    first_output = false;
   else
     printf ("\f\n");
 
@@ -552,7 +551,7 @@ cg_print (Sym ** timesortsym)
 
 
 static int
-cmp_name (const PTR left, const PTR right)
+cmp_name (const void *left, const void *right)
 {
   const Sym **npp1 = (const Sym **) left;
   const Sym **npp2 = (const Sym **) right;
@@ -562,7 +561,7 @@ cmp_name (const PTR left, const PTR right)
 
 
 void
-cg_print_index ()
+cg_print_index (void)
 {
   unsigned int sym_index;
   unsigned int nnames, todo, i, j;
@@ -676,7 +675,7 @@ cg_print_index ()
    We want to sort in descending order.  */
 
 static int
-cmp_arc_count (const PTR left, const PTR right)
+cmp_arc_count (const void *left, const void *right)
 {
   const Arc **npp1 = (const Arc **) left;
   const Arc **npp2 = (const Arc **) right;
@@ -693,7 +692,7 @@ cmp_arc_count (const PTR left, const PTR right)
    We want to sort in descending order.  */
 
 static int
-cmp_fun_nuses (const PTR left, const PTR right)
+cmp_fun_nuses (const void *left, const void *right)
 {
   const Sym **npp1 = (const Sym **) left;
   const Sym **npp2 = (const Sym **) right;
@@ -848,7 +847,7 @@ cg_print_function_ordering (void)
       tmp_arcs_count += arcs[arc_index]->count;
 
       /* Count how many times each parent and child are used up
-	 to our threshhold of arcs (90%).  */
+	 to our threshold of arcs (90%).  */
       if ((double)tmp_arcs_count / (double)total_arcs > 0.90)
 	break;
 
@@ -985,13 +984,9 @@ cg_print_function_ordering (void)
 
 #define MOST 0.99
 static void
-order_and_dump_functions_by_arcs (the_arcs, arc_count, all,
-				  unplaced_arcs, unplaced_arc_count)
-     Arc **the_arcs;
-     unsigned long arc_count;
-     int all;
-     Arc **unplaced_arcs;
-     unsigned long *unplaced_arc_count;
+order_and_dump_functions_by_arcs (Arc **the_arcs, unsigned long arc_count,
+				  int all, Arc **unplaced_arcs,
+				  unsigned long *unplaced_arc_count)
 {
 #ifdef __GNUC__
   unsigned long long tmp_arcs, total_arcs;

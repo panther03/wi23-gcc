@@ -1,6 +1,5 @@
 /* Table of relaxations for Xtensa assembly.
-   Copyright 2003, 2004, 2005, 2006, 2007, 2008, 2009
-   Free Software Foundation, Inc.
+   Copyright (C) 2003-2023 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -88,23 +87,13 @@
    when the first and second operands are not the same as specified
    by the "| %at!=%as" precondition clause.
    {"l32i %at,%as,%imm | %at!=%as",
-   "LITERAL %imm; l32r %at,%LITERAL; add %at,%at,%as; l32i %at,%at,0"}
-
-   There is special case for loop instructions here, but because we do
-   not currently have the ability to represent the difference of two
-   symbols, the conversion requires special code in the assembler to
-   write the operands of the addi/addmi pair representing the
-   difference of the old and new loop end label.  */
+   "LITERAL %imm; l32r %at,%LITERAL; add %at,%at,%as; l32i %at,%at,0"}  */
 
 #include "as.h"
 #include "xtensa-isa.h"
 #include "xtensa-relax.h"
 #include <stddef.h>
-#include "xtensa-config.h"
-
-#ifndef XCHAL_HAVE_WIDE_BRANCHES
-#define XCHAL_HAVE_WIDE_BRANCHES 0
-#endif
+#include "xtensa-dynconfig.h"
 
 /* Imported from bfd.  */
 extern xtensa_isa xtensa_default_isa;
@@ -248,7 +237,7 @@ struct string_pattern_pair_struct
      addi.n a4, 0x1010
      => addi a4, 0x1010
      => addmi a4, 0x1010
-     => addmi a4, 0x1000, addi a4, 0x10.  
+     => addmi a4, 0x1000, addi a4, 0x10.
 
    See the comments in xg_assembly_relax for some important details
    regarding how these chains must be built.  */
@@ -307,44 +296,83 @@ static string_pattern_pair widen_spec_list[] =
   {"l32i %at,%as,%imm | %at!=%as ? IsaUseConst16",
    "const16 %at,HI16U(%imm); const16 %at,LOW16U(%imm); add %at,%at,%as; l32i %at,%at,0"},
 
-  /* This is only PART of the loop instruction.  In addition,
-     hardcoded into its use is a modification of the final operand in
-     the instruction in bytes 9 and 12.  */
-  {"loop %as,%label | %as!=1 ? IsaUseLoops",
+  /* Widening loops with literals.  */
+  {"loop %as,%label | %as!=1 ? IsaUseLoops ? IsaUseL32R",
    "loop %as,%LABEL;"
    "rsr.lend    %as;"		/* LEND */
    "wsr.lbeg    %as;"		/* LBEG */
-   "addi    %as, %as, 0;"	/* lo8(%label-%LABEL1) */
-   "addmi   %as, %as, 0;"	/* mid8(%label-%LABEL1) */
+   "LITERAL     %label;"
+   "l32r        %as, %LITERAL;"
+   "nop;"
    "wsr.lend    %as;"
    "isync;"
    "rsr.lcount    %as;"		/* LCOUNT */
-   "addi    %as, %as, 1;"	/* density -> addi.n %as, %as, 1 */
+   "addi    %as, %as, 1;"
    "LABEL"},
-  {"loopgtz %as,%label | %as!=1 ? IsaUseLoops",
+  {"loopgtz %as,%label | %as!=1 ? IsaUseLoops ? IsaUseL32R",
    "beqz    %as,%label;"
    "bltz    %as,%label;"
    "loopgtz %as,%LABEL;"
    "rsr.lend    %as;"		/* LEND */
    "wsr.lbeg    %as;"		/* LBEG */
-   "addi    %as, %as, 0;"	/* lo8(%label-%LABEL1) */
-   "addmi   %as, %as, 0;"	/* mid8(%label-%LABEL1) */
+   "LITERAL     %label;"
+   "l32r        %as, %LITERAL;"
+   "nop;"
    "wsr.lend    %as;"
    "isync;"
    "rsr.lcount    %as;"		/* LCOUNT */
-   "addi    %as, %as, 1;"	/* density -> addi.n %as, %as, 1 */
+   "addi    %as, %as, 1;"
    "LABEL"},
-  {"loopnez %as,%label | %as!=1 ? IsaUseLoops",
+  {"loopnez %as,%label | %as!=1 ? IsaUseLoops ? IsaUseL32R",
    "beqz     %as,%label;"
    "loopnez %as,%LABEL;"
    "rsr.lend    %as;"		/* LEND */
    "wsr.lbeg    %as;"		/* LBEG */
-   "addi    %as, %as, 0;"	/* lo8(%label-%LABEL1) */
-   "addmi   %as, %as, 0;"	/* mid8(%label-%LABEL1) */
+   "LITERAL     %label;"
+   "l32r        %as, %LITERAL;"
+   "nop;"
    "wsr.lend    %as;"
    "isync;"
    "rsr.lcount    %as;"		/* LCOUNT */
-   "addi    %as, %as, 1;"	/* density -> addi.n %as, %as, 1 */
+   "addi    %as, %as, 1;"
+   "LABEL"},
+
+  /* Widening loops with const16.  */
+  {"loop %as,%label | %as!=1 ? IsaUseLoops ? IsaUseConst16",
+   "loop %as,%LABEL;"
+   "rsr.lend    %as;"		/* LEND */
+   "wsr.lbeg    %as;"		/* LBEG */
+   "const16     %as,HI16U(%label);"
+   "const16     %as,LOW16U(%label);"
+   "wsr.lend    %as;"
+   "isync;"
+   "rsr.lcount    %as;"		/* LCOUNT */
+   "addi    %as, %as, 1;"
+   "LABEL"},
+  {"loopgtz %as,%label | %as!=1 ? IsaUseLoops ? IsaUseConst16",
+   "beqz    %as,%label;"
+   "bltz    %as,%label;"
+   "loopgtz %as,%LABEL;"
+   "rsr.lend    %as;"		/* LEND */
+   "wsr.lbeg    %as;"		/* LBEG */
+   "const16     %as,HI16U(%label);"
+   "const16     %as,LOW16U(%label);"
+   "wsr.lend    %as;"
+   "isync;"
+   "rsr.lcount    %as;"		/* LCOUNT */
+   "addi    %as, %as, 1;"
+   "LABEL"},
+  {"loopnez %as,%label | %as!=1 ? IsaUseLoops ? IsaUseConst16",
+   "beqz     %as,%label;"
+   "loopnez %as,%LABEL;"
+   "rsr.lend    %as;"		/* LEND */
+   "wsr.lbeg    %as;"		/* LBEG */
+   "const16     %as,HI16U(%label);"
+   "const16     %as,LOW16U(%label);"
+   "wsr.lend    %as;"
+   "isync;"
+   "rsr.lcount    %as;"		/* LCOUNT */
+   "addi    %as, %as, 1;"
    "LABEL"},
 
   /* Relaxing to wide branches.  Order is important here.  With wide
@@ -352,7 +380,7 @@ static string_pattern_pair widen_spec_list[] =
      out-of-range branch.  Put the wide branch relaxations first in the
      table since they are more efficient than the branch-around
      relaxations.  */
-  
+
   {"beqz %as,%label ? IsaUseWideBranches", "WIDE.beqz %as,%label"},
   {"bnez %as,%label ? IsaUseWideBranches", "WIDE.bnez %as,%label"},
   {"bgez %as,%label ? IsaUseWideBranches", "WIDE.bgez %as,%label"},
@@ -377,7 +405,7 @@ static string_pattern_pair widen_spec_list[] =
   {"bnall %as,%at,%label ? IsaUseWideBranches", "WIDE.bnall %as,%at,%label"},
   {"bbc %as,%at,%label ? IsaUseWideBranches", "WIDE.bbc %as,%at,%label"},
   {"bbs %as,%at,%label ? IsaUseWideBranches", "WIDE.bbs %as,%at,%label"},
-  
+
   /* Widening branch comparisons eq/ne to zero.  Prefer relaxing to narrow
      branches if the density option is available.  */
   {"beqz %as,%label ? IsaUseDensityInstruction", "bnez.n %as,%LABEL;j %label;LABEL"},
@@ -513,7 +541,7 @@ string_pattern_pair simplify_spec_list[] =
 
 /* Externally visible functions.  */
 
-extern bfd_boolean xg_has_userdef_op_fn (OpType);
+extern bool xg_has_userdef_op_fn (OpType);
 extern long xg_apply_userdef_op_fn (OpType, long);
 
 
@@ -523,7 +551,7 @@ append_transition (TransitionTable *tt,
 		   TransitionRule *t,
 		   transition_cmp_fn cmp)
 {
-  TransitionList *tl = (TransitionList *) xmalloc (sizeof (TransitionList));
+  TransitionList *tl = XNEW (TransitionList);
   TransitionList *prev;
   TransitionList **t_p;
   gas_assert (tt != NULL);
@@ -555,8 +583,7 @@ append_transition (TransitionTable *tt,
 static void
 append_condition (TransitionRule *tr, Precondition *cond)
 {
-  PreconditionList *pl =
-    (PreconditionList *) xmalloc (sizeof (PreconditionList));
+  PreconditionList *pl = XNEW (PreconditionList);
   PreconditionList *prev = tr->conditions;
   PreconditionList *nxt;
 
@@ -583,7 +610,7 @@ append_value_condition (TransitionRule *tr,
 			unsigned op1,
 			unsigned op2)
 {
-  Precondition *cond = (Precondition *) xmalloc (sizeof (Precondition));
+  Precondition *cond = XNEW (Precondition);
 
   cond->cmp = cmp;
   cond->op_num = op1;
@@ -599,7 +626,7 @@ append_constant_value_condition (TransitionRule *tr,
 				 unsigned op1,
 				 unsigned cnst)
 {
-  Precondition *cond = (Precondition *) xmalloc (sizeof (Precondition));
+  Precondition *cond = XNEW (Precondition);
 
   cond->cmp = cmp;
   cond->op_num = op1;
@@ -655,7 +682,7 @@ append_op (BuildInstr *bi, BuildOp *b_op)
 static void
 append_literal_op (BuildInstr *bi, unsigned op1, unsigned src_op)
 {
-  BuildOp *b_op = (BuildOp *) xmalloc (sizeof (BuildOp));
+  BuildOp *b_op = XNEW (BuildOp);
 
   b_op->op_num = op1;
   b_op->typ = OP_LITERAL;
@@ -668,7 +695,7 @@ append_literal_op (BuildInstr *bi, unsigned op1, unsigned src_op)
 static void
 append_label_op (BuildInstr *bi, unsigned op1)
 {
-  BuildOp *b_op = (BuildOp *) xmalloc (sizeof (BuildOp));
+  BuildOp *b_op = XNEW (BuildOp);
 
   b_op->op_num = op1;
   b_op->typ = OP_LABEL;
@@ -681,7 +708,7 @@ append_label_op (BuildInstr *bi, unsigned op1)
 static void
 append_constant_op (BuildInstr *bi, unsigned op1, unsigned cnst)
 {
-  BuildOp *b_op = (BuildOp *) xmalloc (sizeof (BuildOp));
+  BuildOp *b_op = XNEW (BuildOp);
 
   b_op->op_num = op1;
   b_op->typ = OP_CONSTANT;
@@ -694,7 +721,7 @@ append_constant_op (BuildInstr *bi, unsigned op1, unsigned cnst)
 static void
 append_field_op (BuildInstr *bi, unsigned op1, unsigned src_op)
 {
-  BuildOp *b_op = (BuildOp *) xmalloc (sizeof (BuildOp));
+  BuildOp *b_op = XNEW (BuildOp);
 
   b_op->op_num = op1;
   b_op->typ = OP_OPERAND;
@@ -712,7 +739,7 @@ append_user_fn_field_op (BuildInstr *bi,
 			 OpType typ,
 			 unsigned src_op)
 {
-  BuildOp *b_op = (BuildOp *) xmalloc (sizeof (BuildOp));
+  BuildOp *b_op = XNEW (BuildOp);
 
   b_op->op_num = op1;
   b_op->typ = typ;
@@ -767,7 +794,7 @@ operand_function_HI16U (long a)
 }
 
 
-bfd_boolean
+bool
 xg_has_userdef_op_fn (OpType op)
 {
   switch (op)
@@ -777,11 +804,11 @@ xg_has_userdef_op_fn (OpType op)
     case OP_OPERAND_HI24S:
     case OP_OPERAND_LOW16U:
     case OP_OPERAND_HI16U:
-      return TRUE;
+      return true;
     default:
       break;
     }
-  return FALSE;
+  return false;
 }
 
 
@@ -803,7 +830,7 @@ xg_apply_userdef_op_fn (OpType op, long a)
     default:
       break;
     }
-  return FALSE;
+  return false;
 }
 
 
@@ -820,10 +847,8 @@ enter_opname_n (const char *name, int len)
 	  && strncmp (op->opname, name, len) == 0)
 	return op->opname;
     }
-  op = (opname_e *) xmalloc (sizeof (opname_e));
-  op->opname = (char *) xmalloc (len + 1);
-  strncpy (op->opname, name, len);
-  op->opname[len] = '\0';
+  op = XNEW (opname_e);
+  op->opname = xmemdup0 (name, len);
   return op->opname;
 }
 
@@ -838,7 +863,7 @@ enter_opname (const char *name)
       if (strcmp (op->opname, name) == 0)
 	return op->opname;
     }
-  op = (opname_e *) xmalloc (sizeof (opname_e));
+  op = XNEW (opname_e);
   op->opname = xstrdup (name);
   return op->opname;
 }
@@ -867,11 +892,11 @@ clear_opname_map (opname_map *m)
 }
 
 
-static bfd_boolean
+static bool
 same_operand_name (const opname_map_e *m1, const opname_map_e *m2)
 {
-  if (m1->operand_name == NULL || m1->operand_name == NULL)
-    return FALSE;
+  if (m1->operand_name == NULL || m2->operand_name == NULL)
+    return false;
   return (m1->operand_name == m2->operand_name);
 }
 
@@ -890,7 +915,7 @@ get_opmatch (opname_map *map, const char *operand_name)
 }
 
 
-static bfd_boolean
+static bool
 op_is_constant (const opname_map_e *m1)
 {
   return (m1->operand_name == NULL);
@@ -997,14 +1022,14 @@ insn_templ_operand_count (const insn_templ *t)
 
 /* Convert a string to a number.  E.G.: parse_constant("10", &num) */
 
-static bfd_boolean
+static bool
 parse_constant (const char *in, unsigned *val_p)
 {
   unsigned val = 0;
   const char *p;
 
   if (in == NULL)
-    return FALSE;
+    return false;
   p = in;
 
   while (*p != '\0')
@@ -1012,37 +1037,37 @@ parse_constant (const char *in, unsigned *val_p)
       if (*p >= '0' && *p <= '9')
 	val = val * 10 + (*p - '0');
       else
-	return FALSE;
+	return false;
       ++p;
     }
   *val_p = val;
-  return TRUE;
+  return true;
 }
 
 
-static bfd_boolean
+static bool
 parse_special_fn (const char *name,
 		  const char **fn_name_p,
 		  const char **arg_name_p)
 {
-  char *p_start;
+  const char *p_start;
   const char *p_end;
 
   p_start = strchr (name, '(');
   if (p_start == NULL)
-    return FALSE;
+    return false;
 
   p_end = strchr (p_start, ')');
 
   if (p_end == NULL)
-    return FALSE;
+    return false;
 
   if (p_end[1] != '\0')
-    return FALSE;
+    return false;
 
   *fn_name_p = enter_opname_n (name, p_start - name);
   *arg_name_p = enter_opname_n (p_start + 1, p_end - p_start - 1);
-  return TRUE;
+  return true;
 }
 
 
@@ -1089,7 +1114,7 @@ static void
 split_string (split_rec *rec,
 	      const char *in,
 	      char c,
-	      bfd_boolean elide_whitespace)
+	      bool elide_whitespace)
 {
   int cnt = 0;
   int i;
@@ -1108,7 +1133,7 @@ split_string (split_rec *rec,
   if (rec->count == 0)
     return;
 
-  rec->vec = (char **) xmalloc (sizeof (char *) * cnt);
+  rec->vec = XNEWVEC (char *, cnt);
   for (i = 0; i < cnt; i++)
     rec->vec[i] = 0;
 
@@ -1128,9 +1153,7 @@ split_string (split_rec *rec,
       else
 	{
 	  len = p - q;
-	  rec->vec[i] = (char *) xmalloc (sizeof (char) * (len + 1));
-	  strncpy (rec->vec[i], q, len);
-	  rec->vec[i][len] = '\0';
+	  rec->vec[i] = xmemdup0 (q, len);
 	  p++;
 	}
 
@@ -1166,7 +1189,7 @@ init_split_rec (split_rec *rec)
 
 /* Parse an instruction template like "insn op1, op2, op3".  */
 
-static bfd_boolean
+static bool
 parse_insn_templ (const char *s, insn_templ *t)
 {
   const char *p = s;
@@ -1181,7 +1204,7 @@ parse_insn_templ (const char *s, insn_templ *t)
   p = skip_white (p);
   insn_name_len = strcspn (s, " ");
   if (insn_name_len == 0)
-    return FALSE;
+    return false;
 
   init_insn_templ (t);
   t->opcode_name = enter_opname_n (p, insn_name_len);
@@ -1189,12 +1212,12 @@ parse_insn_templ (const char *s, insn_templ *t)
   p = p + insn_name_len;
 
   /* Split by ',' and skip beginning and trailing whitespace.  */
-  split_string (&oprec, p, ',', TRUE);
+  split_string (&oprec, p, ',', true);
 
   for (i = 0; i < oprec.count; i++)
     {
       const char *opname = oprec.vec[i];
-      opname_map_e *e = (opname_map_e *) xmalloc (sizeof (opname_map_e));
+      opname_map_e *e = XNEW (opname_map_e);
       e->next = NULL;
       e->operand_name = NULL;
       e->constant_value = 0;
@@ -1212,7 +1235,7 @@ parse_insn_templ (const char *s, insn_templ *t)
 	      free (e);
 	      clear_split_rec (&oprec);
 	      clear_insn_templ (t);
-	      return FALSE;
+	      return false;
 	    }
 	}
       else
@@ -1222,11 +1245,11 @@ parse_insn_templ (const char *s, insn_templ *t)
       t->operand_map.tail = &e->next;
     }
   clear_split_rec (&oprec);
-  return TRUE;
+  return true;
 }
 
 
-static bfd_boolean
+static bool
 parse_precond (const char *s, precond_e *precond)
 {
   /* All preconditions are currently of the form:
@@ -1248,19 +1271,19 @@ parse_precond (const char *s, precond_e *precond)
   len = strcspn (p, " !=");
 
   if (len == 0)
-    return FALSE;
+    return false;
 
   precond->opname1 = enter_opname_n (p, len);
   p = p + len;
   p = skip_white (p);
 
   /* Check for "==" and "!=".  */
-  if (strncmp (p, "==", 2) == 0)
+  if (startswith (p, "=="))
     precond->cmpop = OP_EQUAL;
-  else if (strncmp (p, "!=", 2) == 0)
+  else if (startswith (p, "!="))
     precond->cmpop = OP_NOTEQUAL;
   else
-    return FALSE;
+    return false;
 
   p = p + 2;
   p = skip_white (p);
@@ -1272,11 +1295,11 @@ parse_precond (const char *s, precond_e *precond)
       if (parse_constant (p, &val))
 	precond->opval2 = val;
       else
-	return FALSE;
+	return false;
     }
   else
     precond->opname2 = enter_opname (p);
-  return TRUE;
+  return true;
 }
 
 
@@ -1312,7 +1335,7 @@ clone_req_or_option_list (ReqOrOption *req_or_option)
   if (req_or_option == NULL)
     return NULL;
 
-  new_req_or_option = (ReqOrOption *) xmalloc (sizeof (ReqOrOption));
+  new_req_or_option = XNEW (ReqOrOption);
   new_req_or_option->option_name = xstrdup (req_or_option->option_name);
   new_req_or_option->is_true = req_or_option->is_true;
   new_req_or_option->next = NULL;
@@ -1329,7 +1352,7 @@ clone_req_option_list (ReqOption *req_option)
   if (req_option == NULL)
     return NULL;
 
-  new_req_option = (ReqOption *) xmalloc (sizeof (ReqOption));
+  new_req_option = XNEW (ReqOption);
   new_req_option->or_option_terms = NULL;
   new_req_option->next = NULL;
   new_req_option->or_option_terms =
@@ -1339,7 +1362,7 @@ clone_req_option_list (ReqOption *req_option)
 }
 
 
-static bfd_boolean
+static bool
 parse_option_cond (const char *s, ReqOption *option)
 {
   int i;
@@ -1350,30 +1373,30 @@ parse_option_cond (const char *s, ReqOption *option)
      "Ands" are divided by "?".  */
 
   init_split_rec (&option_term_rec);
-  split_string (&option_term_rec, s, '+', TRUE);
+  split_string (&option_term_rec, s, '+', true);
 
   if (option_term_rec.count == 0)
     {
       clear_split_rec (&option_term_rec);
-      return FALSE;
+      return false;
     }
 
   for (i = 0; i < option_term_rec.count; i++)
     {
       char *option_name = option_term_rec.vec[i];
-      bfd_boolean is_true = TRUE;
+      bool is_true = true;
       ReqOrOption *req;
       ReqOrOption **r_p;
 
-      if (strncmp (option_name, "no-", 3) == 0)
+      if (startswith (option_name, "no-"))
 	{
 	  option_name = xstrdup (&option_name[3]);
-	  is_true = FALSE;
+	  is_true = false;
 	}
       else
 	option_name = xstrdup (option_name);
 
-      req = (ReqOrOption *) xmalloc (sizeof (ReqOrOption));
+      req = XNEW (ReqOrOption);
       req->option_name = option_name;
       req->is_true = is_true;
       req->next = NULL;
@@ -1384,7 +1407,7 @@ parse_option_cond (const char *s, ReqOption *option)
 	;
       (*r_p) = req;
     }
-  return TRUE;
+  return true;
 }
 
 
@@ -1404,7 +1427,7 @@ parse_option_cond (const char *s, ReqOption *option)
    split_string, it requires that '|' and '?' are only used as
    delimiters for predicates and required options.  */
 
-static bfd_boolean
+static bool
 parse_insn_pattern (const char *in, insn_pattern *insn)
 {
   split_rec rec;
@@ -1414,41 +1437,41 @@ parse_insn_pattern (const char *in, insn_pattern *insn)
   init_insn_pattern (insn);
 
   init_split_rec (&optionrec);
-  split_string (&optionrec, in, '?', TRUE);
+  split_string (&optionrec, in, '?', true);
   if (optionrec.count == 0)
     {
       clear_split_rec (&optionrec);
-      return FALSE;
+      return false;
     }
 
   init_split_rec (&rec);
 
-  split_string (&rec, optionrec.vec[0], '|', TRUE);
+  split_string (&rec, optionrec.vec[0], '|', true);
 
   if (rec.count == 0)
     {
       clear_split_rec (&rec);
       clear_split_rec (&optionrec);
-      return FALSE;
+      return false;
     }
 
   if (!parse_insn_templ (rec.vec[0], &insn->t))
     {
       clear_split_rec (&rec);
       clear_split_rec (&optionrec);
-      return FALSE;
+      return false;
     }
 
   for (i = 1; i < rec.count; i++)
     {
-      precond_e *cond = (precond_e *) xmalloc (sizeof (precond_e));
+      precond_e *cond = XNEW (precond_e);
 
       if (!parse_precond (rec.vec[i], cond))
 	{
 	  clear_split_rec (&rec);
 	  clear_split_rec (&optionrec);
 	  clear_insn_pattern (insn);
-	  return FALSE;
+	  return false;
 	}
 
       /* Append the condition.  */
@@ -1460,7 +1483,7 @@ parse_insn_pattern (const char *in, insn_pattern *insn)
     {
       /* Handle the option conditions.  */
       ReqOption **r_p;
-      ReqOption *req_option = (ReqOption *) xmalloc (sizeof (ReqOption));
+      ReqOption *req_option = XNEW (ReqOption);
       req_option->or_option_terms = NULL;
       req_option->next = NULL;
 
@@ -1470,7 +1493,7 @@ parse_insn_pattern (const char *in, insn_pattern *insn)
 	  clear_split_rec (&optionrec);
 	  clear_insn_pattern (insn);
 	  clear_req_option_list (&req_option);
-	  return FALSE;
+	  return false;
 	}
 
       /* Append the condition.  */
@@ -1482,22 +1505,22 @@ parse_insn_pattern (const char *in, insn_pattern *insn)
 
   clear_split_rec (&rec);
   clear_split_rec (&optionrec);
-  return TRUE;
+  return true;
 }
 
 
-static bfd_boolean
+static bool
 parse_insn_repl (const char *in, insn_repl *r_p)
 {
   /* This is a list of instruction templates separated by ';'.  */
   split_rec rec;
   int i;
 
-  split_string (&rec, in, ';', TRUE);
+  split_string (&rec, in, ';', true);
 
   for (i = 0; i < rec.count; i++)
     {
-      insn_repl_e *e = (insn_repl_e *) xmalloc (sizeof (insn_repl_e));
+      insn_repl_e *e = XNEW (insn_repl_e);
 
       e->next = NULL;
 
@@ -1505,16 +1528,16 @@ parse_insn_repl (const char *in, insn_repl *r_p)
 	{
 	  free (e);
 	  clear_insn_repl (r_p);
-	  return FALSE;
+	  return false;
 	}
       *r_p->tail = e;
       r_p->tail = &e->next;
     }
-  return TRUE;
+  return true;
 }
 
 
-static bfd_boolean
+static bool
 transition_applies (insn_pattern *initial_insn,
 		    const char *from_string ATTRIBUTE_UNUSED,
 		    const char *to_string ATTRIBUTE_UNUSED)
@@ -1531,9 +1554,9 @@ transition_applies (insn_pattern *initial_insn,
 	  || req_or_option->next != NULL)
 	continue;
 
-      if (strncmp (req_or_option->option_name, "IsaUse", 6) == 0)
+      if (startswith (req_or_option->option_name, "IsaUse"))
 	{
-	  bfd_boolean option_available = FALSE;
+	  bool option_available = false;
 	  char *option_name = req_or_option->option_name + 6;
 	  if (!strcmp (option_name, "DensityInstruction"))
 	    option_available = (XCHAL_HAVE_DENSITY == 1);
@@ -1544,7 +1567,7 @@ transition_applies (insn_pattern *initial_insn,
 	  else if (!strcmp (option_name, "Loops"))
 	    option_available = (XCHAL_HAVE_LOOPS == 1);
 	  else if (!strcmp (option_name, "WideBranches"))
-	    option_available 
+	    option_available
 	      = (XCHAL_HAVE_WIDE_BRANCHES == 1 && produce_flix == FLIX_ALL);
 	  else if (!strcmp (option_name, "PredictedBranches"))
 	    option_available
@@ -1556,32 +1579,32 @@ transition_applies (insn_pattern *initial_insn,
 	    as_warn (_("invalid configuration option '%s' in transition rule '%s'"),
 		     req_or_option->option_name, from_string);
 	  if ((option_available ^ req_or_option->is_true) != 0)
-	    return FALSE;
+	    return false;
 	}
       else if (strcmp (req_or_option->option_name, "realnop") == 0)
 	{
-	  bfd_boolean nop_available =
+	  bool nop_available =
 	    (xtensa_opcode_lookup (xtensa_default_isa, "nop")
 	     != XTENSA_UNDEFINED);
 	  if ((nop_available ^ req_or_option->is_true) != 0)
-	    return FALSE;
+	    return false;
 	}
     }
-  return TRUE;
+  return true;
 }
 
 
-static bfd_boolean
+static bool
 wide_branch_opcode (const char *opcode_name,
-		    char *suffix,
+		    const char *suffix,
 		    xtensa_opcode *popcode)
 {
   xtensa_isa isa = xtensa_default_isa;
   xtensa_opcode opcode;
   static char wbr_name_buf[20];
 
-  if (strncmp (opcode_name, "WIDE.", 5) != 0)
-    return FALSE;
+  if (!startswith (opcode_name, "WIDE."))
+    return false;
 
   strcpy (wbr_name_buf, opcode_name + 5);
   strcat (wbr_name_buf, suffix);
@@ -1589,10 +1612,10 @@ wide_branch_opcode (const char *opcode_name,
   if (opcode != XTENSA_UNDEFINED)
     {
       *popcode = opcode;
-      return TRUE;
+      return true;
     }
 
-  return FALSE;
+  return false;
 }
 
 
@@ -1613,7 +1636,7 @@ build_transition (insn_pattern *initial_insn,
   precond_e *precond;
   insn_repl_e *r;
 
-  if (!wide_branch_opcode (initial_insn->t.opcode_name, ".w18", &opcode) 
+  if (!wide_branch_opcode (initial_insn->t.opcode_name, ".w18", &opcode)
       && !wide_branch_opcode (initial_insn->t.opcode_name, ".w15", &opcode))
     opcode = xtensa_opcode_lookup (isa, initial_insn->t.opcode_name);
 
@@ -1633,7 +1656,7 @@ build_transition (insn_pattern *initial_insn,
       return NULL;
     }
 
-  tr = (TransitionRule *) xmalloc (sizeof (TransitionRule));
+  tr = XNEW (TransitionRule);
   tr->opcode = opcode;
   tr->conditions = NULL;
   tr->to_instr = NULL;
@@ -1689,7 +1712,7 @@ build_transition (insn_pattern *initial_insn,
 	  op2 = get_opmatch (&initial_insn->t.operand_map, precond->opname2);
 	  if (op2 == NULL)
 	    as_fatal (_("opcode '%s': no bound opname '%s' "
-			"for precondition in %s"),
+			"for precondition in '%s'"),
 		      xtensa_opcode_name (isa, opcode),
 		      precond->opname2, from_string);
 	}
@@ -1728,7 +1751,7 @@ build_transition (insn_pattern *initial_insn,
       const char *fn_name;
       const char *operand_arg_name;
 
-      bi = (BuildInstr *) xmalloc (sizeof (BuildInstr));
+      bi = XNEW (BuildInstr);
       append_build_insn (tr, bi);
 
       bi->opcode = XTENSA_UNDEFINED;
@@ -1770,7 +1793,9 @@ build_transition (insn_pattern *initial_insn,
 	  /* Check for the right number of ops.  */
 	  if (xtensa_opcode_num_operands (isa, bi->opcode)
 	      != (int) operand_count)
-	    as_fatal (_("opcode '%s': replacement does not have %d ops"),
+	    as_fatal (ngettext ("opcode '%s': replacement does not have %d op",
+				"opcode '%s': replacement does not have %d ops",
+				xtensa_opcode_num_operands (isa, bi->opcode)),
 		      opcode_name,
 		      xtensa_opcode_num_operands (isa, bi->opcode));
 	}
@@ -1800,7 +1825,7 @@ build_transition (insn_pattern *initial_insn,
 	      orig_op = get_opmatch (&initial_insn->t.operand_map,
 				     op->operand_name);
 	      if (orig_op == NULL)
-		as_fatal (_("opcode %s: unidentified operand '%s' in '%s'"),
+		as_fatal (_("opcode '%s': unidentified operand '%s' in '%s'"),
 			  opcode_name, op->operand_name, to_string);
 	      append_field_op (bi, op->operand_num, orig_op->operand_num);
 	    }
@@ -1830,13 +1855,13 @@ build_transition (insn_pattern *initial_insn,
 	      orig_op = get_opmatch (&initial_insn->t.operand_map,
 				     operand_arg_name);
 	      if (orig_op == NULL)
-		as_fatal (_("opcode %s: unidentified operand '%s' in '%s'"),
+		as_fatal (_("opcode '%s': unidentified operand '%s' in '%s'"),
 			  opcode_name, op->operand_name, to_string);
 	      append_user_fn_field_op (bi, op->operand_num,
 				       typ, orig_op->operand_num);
 	    }
 	  else
-	    as_fatal (_("opcode %s: could not parse operand '%s' in '%s'"),
+	    as_fatal (_("opcode '%s': could not parse operand '%s' in '%s'"),
 		      opcode_name, op->operand_name, to_string);
 	}
     }
@@ -1858,10 +1883,9 @@ build_transition_table (const string_pattern_pair *transitions,
     return table;
 
   /* Otherwise, build it now.  */
-  table = (TransitionTable *) xmalloc (sizeof (TransitionTable));
+  table = XNEW (TransitionTable);
   table->num_opcodes = num_opcodes;
-  table->table =
-    (TransitionList **) xmalloc (sizeof (TransitionTable *) * num_opcodes);
+  table->table = XNEWVEC (TransitionList *, num_opcodes);
 
   for (i = 0; i < num_opcodes; i++)
     table->table[i] = NULL;

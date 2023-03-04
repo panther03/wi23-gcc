@@ -1,6 +1,5 @@
 /* tc-moxie.c -- Assemble code for moxie
-   Copyright 2009, 2012
-   Free Software Foundation, Inc.
+   Copyright (C) 2009-2023 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -33,7 +32,7 @@ const char line_separator_chars[] = ";";
 const char line_comment_chars[]   = "#";
 
 static int pending_reloc;
-static struct hash_control *opcode_hash_control;
+static htab_t opcode_hash_control;
 
 const pseudo_typeS md_pseudo_table[] =
 {
@@ -47,7 +46,6 @@ static valueT md_chars_to_number (char * buf, int n);
 
 /* Byte order.  */
 extern int target_big_endian;
-const char *moxie_target_format = DEFAULT_TARGET_FORMAT;
 
 void
 md_operand (expressionS *op __attribute__((unused)))
@@ -64,17 +62,17 @@ md_begin (void)
 {
   int count;
   const moxie_opc_info_t *opcode;
-  opcode_hash_control = hash_new ();
+  opcode_hash_control = str_htab_create ();
 
   /* Insert names into hash table.  */
   for (count = 0, opcode = moxie_form1_opc_info; count++ < 64; opcode++)
-    hash_insert (opcode_hash_control, opcode->name, (char *) opcode);
+    str_hash_insert (opcode_hash_control, opcode->name, opcode, 0);
 
   for (count = 0, opcode = moxie_form2_opc_info; count++ < 4; opcode++)
-    hash_insert (opcode_hash_control, opcode->name, (char *) opcode);
+    str_hash_insert (opcode_hash_control, opcode->name, opcode, 0);
 
   for (count = 0, opcode = moxie_form3_opc_info; count++ < 10; opcode++)
-    hash_insert (opcode_hash_control, opcode->name, (char *) opcode);
+    str_hash_insert (opcode_hash_control, opcode->name, opcode, 0);
 
   bfd_set_arch_mach (stdoutput, TARGET_ARCH, 0);
 }
@@ -180,7 +178,7 @@ md_assemble (char *str)
 
   if (nlen == 0)
     as_bad (_("can't find opcode "));
-  opcode = (moxie_opc_info_t *) hash_find (opcode_hash_control, op_start);
+  opcode = (moxie_opc_info_t *) str_hash_find (opcode_hash_control, op_start);
   *op_end = pend;
 
   if (opcode == NULL)
@@ -404,7 +402,7 @@ md_assemble (char *str)
 	iword += (a << 4);
       }
       break;
-    case MOXIE_F1_ABi4:
+    case MOXIE_F1_ABi2:
       iword = opcode->opcode << 8;
       while (ISSPACE (*op_end))
 	op_end++;
@@ -426,13 +424,13 @@ md_assemble (char *str)
 	op_end++;
 
 	op_end = parse_exp_save_ilp (op_end, &arg);
-	offset = frag_more (4);
+	offset = frag_more (2);
 	fix_new_exp (frag_now,
 		     (offset - frag_now->fr_literal),
-		     4,
+		     2,
 		     &arg,
 		     0,
-		     BFD_RELOC_32);
+		     BFD_RELOC_16);
 
 	if (*op_end != '(')
 	  {
@@ -458,7 +456,7 @@ md_assemble (char *str)
 	iword += (a << 4) + b;
       }
       break;
-    case MOXIE_F1_AiB4:
+    case MOXIE_F1_AiB2:
       iword = opcode->opcode << 8;
       while (ISSPACE (*op_end))
 	op_end++;
@@ -468,13 +466,13 @@ md_assemble (char *str)
 	int a, b;
 
 	op_end = parse_exp_save_ilp (op_end, &arg);
-	offset = frag_more (4);
+	offset = frag_more (2);
 	fix_new_exp (frag_now,
 		     (offset - frag_now->fr_literal),
-		     4,
+		     2,
 		     &arg,
 		     0,
-		     BFD_RELOC_32);
+		     BFD_RELOC_16);
 
 	if (*op_end != '(')
 	  {
@@ -531,15 +529,23 @@ md_assemble (char *str)
 		     (p - frag_now->fr_literal),
 		     2,
 		     &arg,
-		     TRUE,
+		     true,
 		     BFD_RELOC_MOXIE_10_PCREL);
       }
+      break;
+    case MOXIE_BAD:
+      iword = 0;
+      while (ISSPACE (*op_end))
+	op_end++;
+      if (*op_end != 0)
+	as_warn (_("extra stuff on line ignored"));
       break;
     default:
       abort ();
     }
 
   md_number_to_chars (p, iword, 2);
+  dwarf2_emit_insn (2);
 
   while (ISSPACE (*op_end))
     op_end++;
@@ -556,7 +562,7 @@ md_assemble (char *str)
    of LITTLENUMS emitted is stored in *SIZEP .  An error message is
    returned, or NULL on OK.  */
 
-char *
+const char *
 md_atof (int type, char *litP, int *sizeP)
 {
   int prec;
@@ -612,19 +618,17 @@ size_t md_longopts_size = sizeof (md_longopts);
 const char *md_shortopts = "";
 
 int
-md_parse_option (int c ATTRIBUTE_UNUSED, char *arg ATTRIBUTE_UNUSED)
+md_parse_option (int c ATTRIBUTE_UNUSED, const char *arg ATTRIBUTE_UNUSED)
 {
   switch (c)
     {
-    case OPTION_EB: 
-      target_big_endian = 1; 
-      moxie_target_format = "elf32-bigmoxie";
+    case OPTION_EB:
+      target_big_endian = 1;
       break;
-    case OPTION_EL: 
+    case OPTION_EL:
       target_big_endian = 0;
-      moxie_target_format = "elf32-littlemoxie";
       break;
-    default:        
+    default:
       return 0;
     }
 
@@ -642,7 +646,7 @@ md_show_usage (FILE *stream ATTRIBUTE_UNUSED)
 /* Apply a fixup to the object file.  */
 
 void
-md_apply_fix (fixS *fixP ATTRIBUTE_UNUSED, 
+md_apply_fix (fixS *fixP ATTRIBUTE_UNUSED,
 	      valueT * valP ATTRIBUTE_UNUSED, segT seg ATTRIBUTE_UNUSED)
 {
   char *buf = fixP->fx_where + fixP->fx_frag->fr_literal;
@@ -773,9 +777,8 @@ tc_gen_reloc (asection *section ATTRIBUTE_UNUSED, fixS *fixP)
       return 0;
     }
 
-  relP = xmalloc (sizeof (arelent));
-  gas_assert (relP != 0);
-  relP->sym_ptr_ptr = xmalloc (sizeof (asymbol *));
+  relP = XNEW (arelent);
+  relP->sym_ptr_ptr = XNEW (asymbol *);
   *relP->sym_ptr_ptr = symbol_get_bfdsym (fixP->fx_addsy);
   relP->address = fixP->fx_frag->fr_address + fixP->fx_where;
 

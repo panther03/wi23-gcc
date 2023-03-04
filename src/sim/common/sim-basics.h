@@ -1,6 +1,6 @@
 /* The common simulator framework for GDB, the GNU Debugger.
 
-   Copyright 2002-2013 Free Software Foundation, Inc.
+   Copyright 2002-2023 Free Software Foundation, Inc.
 
    Contributed by Andrew Cagney and Red Hat.
 
@@ -20,47 +20,32 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 
-#ifndef _SIM_BASICS_H_
-#define _SIM_BASICS_H_
+#ifndef SIM_BASICS_H
+#define SIM_BASICS_H
 
 
 /* Basic configuration */
 
-#ifdef HAVE_CONFIG_H
-#include "cconfig.h"
-#endif
+#include "defs.h"
 
 /* Basic host dependant mess - hopefully <stdio.h> + <stdarg.h> will
    bring potential conflicts out in the open */
 
+#include <setjmp.h>
 #include <stdarg.h>
 #include <stdio.h>
-#include <setjmp.h>
 
-#ifdef __CYGWIN32__
-extern int vasprintf (char **result, const char *format, va_list args);
-extern int asprintf (char **result, const char *format, ...);
+
+#ifndef min
+#define min(a, b) ((a) < (b) ? (a) : (b))
 #endif
-
-
-#ifndef NULL
-#define NULL 0
-#endif
-
-
-
-/* Some versions of GCC include an attribute operator, define it */
-
-#if !defined (__attribute__)
-#if (!defined(__GNUC__) || (__GNUC__ < 2) || (__GNUC__ == 2 && __GNUC_MINOR__ < 6))
-#define __attribute__(arg)
-#endif
+#ifndef max
+#define max(a, b) ((a) > (b) ? (a) : (b))
 #endif
 
 
 /* Global types that code manipulates */
 
-typedef struct _device device;
 struct hw;
 struct _sim_fpu;
 
@@ -126,14 +111,7 @@ typedef enum {
 
 /* Basic definitions - ordered so that nothing calls what comes after it.  */
 
-/* FIXME: conditionalizing tconfig.h on HAVE_CONFIG_H seems wrong.  */
-#ifdef HAVE_CONFIG_H
-#include "tconfig.h"
-#endif
-
-#include "ansidecl.h"
-#include "gdb/callback.h"
-#include "gdb/remote-sim.h"
+#include "sim/sim.h"
 
 #include "sim-config.h"
 
@@ -142,8 +120,6 @@ typedef enum {
 #include "sim-types.h"
 #include "sim-bits.h"
 #include "sim-endian.h"
-#include "sim-signal.h"
-#include "sim-arange.h"
 
 #include "sim-utils.h"
 
@@ -151,4 +127,4 @@ typedef enum {
    weight objects, such as core and events, are defined in the more
    serious sim-base.h header. */
 
-#endif /* _SIM_BASICS_H_ */
+#endif /* SIM_BASICS_H */

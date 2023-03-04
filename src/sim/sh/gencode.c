@@ -30,22 +30,27 @@
 
 */
 
+#include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include "libiberty.h"
 
 #define MAX_NR_STUFF 42
 
 typedef struct
 {
-  char *defs;
-  char *refs;
-  char *name;
-  char *code;
-  char *stuff[MAX_NR_STUFF];
+  const char *defs;
+  const char *refs;
+  const char *name;
+  const char *code;
+  const char * const stuff[MAX_NR_STUFF];
   int index;
 } op;
 
 
-op tab[] =
+static op tab[] =
 {
 
   { "n", "", "add #<imm>,<REG_N>", "0111nnnni8*1....",
@@ -349,7 +354,7 @@ op tab[] =
 
   /* sh4a */
   { "", "", "clrdmxy", "0000000010001000",
-    "saved_state.asregs.cregs.named.sr &= ~(SR_MASK_DMX | SR_MASK_DMY);"
+    "saved_state.asregs.sr &= ~(SR_MASK_DMX | SR_MASK_DMY);"
   },
 
   { "", "0", "cmp/eq #<imm>,R0", "10001000i8*1....",
@@ -401,11 +406,11 @@ op tab[] =
   },
 
   { "", "nm", "dmuls.l <REG_M>,<REG_N>", "0011nnnnmmmm1101",
-    "dmul (1/*signed*/, R[n], R[m]);",
+    "dmul_s (R[n], R[m]);",
   },
 
   { "", "nm", "dmulu.l <REG_M>,<REG_N>", "0011nnnnmmmm0101",
-    "dmul (0/*unsigned*/, R[n], R[m]);",
+    "dmul_u (R[n], R[m]);",
   },
 
   { "n", "n", "dt <REG_N>", "0100nnnn00010000",
@@ -429,8 +434,14 @@ op tab[] =
 
   /* sh2e */
   { "", "", "fabs <FREG_N>", "1111nnnn01011101",
-    "FP_UNARY (n, fabs);",
-    "/* FIXME: FR (n) &= 0x7fffffff; */",
+    "  union",
+    "  {",
+    "    unsigned int i;",
+    "    float f;",
+    "  } u;",
+    "  u.f = FR (n);",
+    "  u.i &= 0x7fffffff;",
+    "  SET_FR (n, u.f);",
   },
 
   /* sh2e */
@@ -662,7 +673,14 @@ op tab[] =
 
   /* sh2e */
   { "", "", "fneg <FREG_N>", "1111nnnn01001101",
-    "FP_UNARY (n, -);",
+    "  union",
+    "  {",
+    "    unsigned int i;",
+    "    float f;",
+    "  } u;",
+    "  u.f = FR (n);",
+    "  u.i ^= 0x80000000;",
+    "  SET_FR (n, u.f);",
   },
 
   /* sh4a */
@@ -1221,17 +1239,17 @@ op tab[] =
   },
 
   { "", "n", "ocbi @<REG_N>", "0000nnnn10010011",
-    "RSBAT (R[n]); /* Take exceptions like byte load, otherwise noop.  */",
+    "(void) RSBAT (R[n]); /* Take exceptions like byte load, otherwise noop.  */",
     "/* FIXME: Cache not implemented */",
   },
 
   { "", "n", "ocbp @<REG_N>", "0000nnnn10100011",
-    "RSBAT (R[n]); /* Take exceptions like byte load, otherwise noop.  */",
+    "(void) RSBAT (R[n]); /* Take exceptions like byte load, otherwise noop.  */",
     "/* FIXME: Cache not implemented */",
   },
 
   { "", "n", "ocbwb @<REG_N>", "0000nnnn10110011",
-    "RSBAT (R[n]); /* Take exceptions like byte load, otherwise noop.  */",
+    "(void) RSBAT (R[n]); /* Take exceptions like byte load, otherwise noop.  */",
     "/* FIXME: Cache not implemented */",
   },
 
@@ -1324,14 +1342,14 @@ op tab[] =
 
   /* sh4a */
   { "", "", "setdmx", "0000000010011000",
-    "saved_state.asregs.cregs.named.sr |=  SR_MASK_DMX;"
-    "saved_state.asregs.cregs.named.sr &= ~SR_MASK_DMY;"
+    "saved_state.asregs.sr |=  SR_MASK_DMX;"
+    "saved_state.asregs.sr &= ~SR_MASK_DMY;"
   },
 
   /* sh4a */
   { "", "", "setdmy", "0000000011001000",
-    "saved_state.asregs.cregs.named.sr |=  SR_MASK_DMY;"
-    "saved_state.asregs.cregs.named.sr &= ~SR_MASK_DMX;"
+    "saved_state.asregs.sr |=  SR_MASK_DMY;"
+    "saved_state.asregs.sr &= ~SR_MASK_DMX;"
   },
 
   /* sh-dsp */
@@ -1409,7 +1427,7 @@ op tab[] =
   },
 
   { "", "", "sleep", "0000000000011011",
-    "nip += trap (0xc3, &R0, PC, memory, maskl, maskw, endianw);",
+    "nip += trap (sd, 0xc3, &R0, PC, memory, maskl, maskw, endianw);",
   },
 
   { "n", "", "stc <CREG_M>,<REG_N>", "0000nnnnmmmm0010",
@@ -1507,7 +1525,7 @@ op tab[] =
     "long imm = 0xff & i;",
     "RAISE_EXCEPTION_IF_IN_DELAY_SLOT ();",
     "if (i < 20 || i == 33 || i == 34 || i == 0xc3)",
-    "  nip += trap (i, &R0, PC, memory, maskl, maskw, endianw);",
+    "  nip += trap (sd, i, &R0, PC, memory, maskl, maskw, endianw);",
 #if 0
     "else {",
     /* SH-[12] */
@@ -1845,7 +1863,7 @@ op ppi_tab[] =
     "if (i <= 16)",
     "  res = Sz << i;",
     "else if (i >= 128 - 16)",
-    "  res = (unsigned) Sz >> 128 - i;	/* no sign extension */",
+    "  res = (unsigned) Sz >> (128 - i);	/* no sign extension */",
     "else",
     "  {",
     "    RAISE_EXCEPTION (SIGILL);",
@@ -1869,7 +1887,7 @@ op ppi_tab[] =
     "    else",
     "      {",
     "        res = Sz << i;",
-    "        res_grd = Sz_grd << i | (unsigned) Sz >> 32 - i;",
+    "        res_grd = Sz_grd << i | (unsigned) Sz >> (32 - i);",
     "      }",
     "    res_grd = SEXT (res_grd);",
     "    carry = res_grd & 1;",
@@ -1884,7 +1902,7 @@ op ppi_tab[] =
     "      }",
     "    else",
     "      {",
-    "        res = Sz >> i | Sz_grd << 32 - i;",
+    "        res = Sz >> i | Sz_grd << (32 - i);",
     "        res_grd = Sz_grd >> i;",
     "      }",
     "    carry = Sz >> (i - 1) & 1;",
@@ -1955,7 +1973,7 @@ op ppi_tab[] =
     "ADD_SUB_GE;",
     "DSR &= ~0xf1;\n",
     "if (res || res_grd)\n",
-    "  DSR |= greater_equal | res_grd >> 2 & DSR_MASK_N | overflow;\n",
+    "  DSR |= greater_equal | (res_grd >> 2 & DSR_MASK_N) | overflow;\n",
     "else\n",
     "  DSR |= DSR_MASK_Z | overflow;\n",
     "DSR |= carry;\n",
@@ -1974,7 +1992,7 @@ op ppi_tab[] =
     "ADD_SUB_GE;",
     "DSR &= ~0xf1;\n",
     "if (res || res_grd)\n",
-    "  DSR |= greater_equal | res_grd >> 2 & DSR_MASK_N | overflow;\n",
+    "  DSR |= greater_equal | (res_grd >> 2 & DSR_MASK_N) | overflow;\n",
     "else\n",
     "  DSR |= DSR_MASK_Z | overflow;\n",
     "DSR |= carry;\n",
@@ -2130,7 +2148,7 @@ op ppi_tab[] =
     "if (Sy <= 16)",
     "  res = Sx << Sy;",
     "else if (Sy >= 128 - 16)",
-    "  res = (unsigned) Sx >> 128 - Sy;	/* no sign extension */",
+    "  res = (unsigned) Sx >> (128 - Sy);	/* no sign extension */",
     "else",
     "  {",
     "    RAISE_EXCEPTION (SIGILL);",
@@ -2153,7 +2171,7 @@ op ppi_tab[] =
     "    else",
     "      {",
     "        res = Sx << Sy;",
-    "        res_grd = Sx_grd << Sy | (unsigned) Sx >> 32 - Sy;",
+    "        res_grd = Sx_grd << Sy | (unsigned) Sx >> (32 - Sy);",
     "      }",
     "    res_grd = SEXT (res_grd);",
     "    carry = res_grd & 1;",
@@ -2168,7 +2186,7 @@ op ppi_tab[] =
     "      }",
     "    else",
     "      {",
-    "        res = Sx >> Sy | Sx_grd << 32 - Sy;",
+    "        res = Sx >> Sy | Sx_grd << (32 - Sy);",
     "        res_grd = Sx_grd >> Sy;",
     "      }",
     "    carry = Sx >> (Sy - 1) & 1;",
@@ -2248,7 +2266,7 @@ op ppi_tab[] =
     "int Sx_grd = GET_DSP_GRD (x);",
     "",
     "res = Sx - 0x10000;",
-    "carry = res > Sx;",
+    "carry = Sx < (INT_MIN + 0x10000);",
     "res_grd = Sx_grd - carry;",
     "COMPUTE_OVERFLOW;",
     "ADD_SUB_GE;",
@@ -2259,7 +2277,7 @@ op ppi_tab[] =
     "int Sx_grd = GET_DSP_GRD (x);",
     "",
     "res = Sx + 0x10000;",
-    "carry = res < Sx;",
+    "carry = Sx > (INT_MAX - 0x10000);",
     "res_grd = Sx_grd + carry;",
     "COMPUTE_OVERFLOW;",
     "ADD_SUB_GE;",
@@ -2270,7 +2288,7 @@ op ppi_tab[] =
     "int Sy_grd = SIGN32 (Sy);",
     "",
     "res = Sy - 0x10000;",
-    "carry = res > Sy;",
+    "carry = Sy < (INT_MIN + 0x10000);",
     "res_grd = Sy_grd - carry;",
     "COMPUTE_OVERFLOW;",
     "ADD_SUB_GE;",
@@ -2281,7 +2299,7 @@ op ppi_tab[] =
     "int Sy_grd = SIGN32 (Sy);",
     "",
     "res = Sy + 0x10000;",
-    "carry = res < Sy;",
+    "carry = Sy > (INT_MAX - 0x10000);",
     "res_grd = Sy_grd + carry;",
     "COMPUTE_OVERFLOW;",
     "ADD_SUB_GE;",
@@ -2345,7 +2363,7 @@ op ppi_tab[] =
   },
   { "","", "(if cc) pdmsb Sy,Dz",	"101111cc..yyzzzz",
     "unsigned Sy = DSP_R (y);",
-    "int i;",
+    "int i = 16;",
     "",
     "if (Sy < 0)",
     "  Sy = ~Sy;",
@@ -2449,7 +2467,8 @@ op ppi_tab[] =
 };
 
 /* Tables of things to put into enums for sh-opc.h */
-static char *nibble_type_list[] =
+static
+const char * const nibble_type_list[] =
 {
   "HEX_0",
   "HEX_1",
@@ -2484,7 +2503,7 @@ static char *nibble_type_list[] =
   0
 };
 static
-char *arg_type_list[] =
+const char * const arg_type_list[] =
 {
   "A_END",
   "A_BDISP12",
@@ -2517,27 +2536,11 @@ char *arg_type_list[] =
   0,
 };
 
-static void
-make_enum_list (name, s)
-     char *name;
-     char **s;
-{
-  int i = 1;
-  printf ("typedef enum {\n");
-  while (*s)
-    {
-      printf ("\t%s,\n", *s);
-      s++;
-      i++;
-    }
-  printf ("} %s;\n", name);
-}
-
 static int
-qfunc (a, b)
-     op *a;
-     op *b;
+qfunc (const void *va, const void *vb)
 {
+  const op *a = va;
+  const op *b = vb;
   char bufa[9];
   char bufb[9];
   int diff;
@@ -2556,7 +2559,7 @@ qfunc (a, b)
 }
 
 static void
-sorttab ()
+sorttab (void)
 {
   op *p = tab;
   int len = 0;
@@ -2570,7 +2573,7 @@ sorttab ()
 }
 
 static void
-gengastab ()
+gengastab (void)
 {
   op *p;
   sorttab ();
@@ -2585,9 +2588,7 @@ static unsigned short table[1 << 16];
 static int warn_conflicts = 0;
 
 static void
-conflict_warn (val, i)
-     int val;
-     int i;
+conflict_warn (int val, int i)
 {
   int ix, key;
   int j = table[val];
@@ -2595,7 +2596,7 @@ conflict_warn (val, i)
   fprintf (stderr, "Warning: opcode table conflict: 0x%04x (idx %d && %d)\n",
 	   val, i, table[val]);
 
-  for (ix = sizeof (tab) / sizeof (tab[0]); ix >= 0; ix--)
+  for (ix = ARRAY_SIZE (tab); ix >= 0; ix--)
     if (tab[ix].index == i || tab[ix].index == j)
       {
 	key = ((tab[ix].code[0] - '0') << 3) + 
@@ -2607,7 +2608,7 @@ conflict_warn (val, i)
 	  fprintf (stderr, "  %s -- %s\n", tab[ix].code, tab[ix].name);
       }
 
-  for (ix = sizeof (movsxy_tab) / sizeof (movsxy_tab[0]); ix >= 0; ix--)
+  for (ix = ARRAY_SIZE (movsxy_tab); ix >= 0; ix--)
     if (movsxy_tab[ix].index == i || movsxy_tab[ix].index == j)
       {
 	key = ((movsxy_tab[ix].code[0] - '0') << 3) + 
@@ -2620,7 +2621,7 @@ conflict_warn (val, i)
 		   movsxy_tab[ix].code, movsxy_tab[ix].name);
       }
 
-  for (ix = sizeof (ppi_tab) / sizeof (ppi_tab[0]); ix >= 0; ix--)
+  for (ix = ARRAY_SIZE (ppi_tab); ix >= 0; ix--)
     if (ppi_tab[ix].index == i || ppi_tab[ix].index == j)
       {
 	key = ((ppi_tab[ix].code[0] - '0') << 3) + 
@@ -2638,10 +2639,7 @@ conflict_warn (val, i)
    right entries in 'table' with the opcode index.  */
 
 static void
-expand_opcode (val, i, s)
-     int val;
-     int i;
-     char *s;
+expand_opcode (int val, int i, const char *s)
 {
   if (*s == 0)
     {
@@ -2766,10 +2764,7 @@ expand_opcode (val, i, s)
    statement entry.  */
 
 static void
-dumptable (name, size, start)
-     char *name;
-     int size;
-     int start;
+dumptable (const char *name, int size, int start)
 {
   int lump = 256;
   int online = 16;
@@ -2804,8 +2799,7 @@ dumptable (name, size, start)
 
 
 static void
-filltable (p)
-     op *p;
+filltable (op *p)
 {
   static int index = 1;
 
@@ -2822,7 +2816,7 @@ filltable (p)
    processing insns (ppi) for code 0xf800 (ppi nopx nopy).  Copy the
    latter tag to represent all combinations of ppi with ddt.  */
 static void
-expand_ppi_movxy ()
+expand_ppi_movxy (void)
 {
   int i;
 
@@ -2832,8 +2826,7 @@ expand_ppi_movxy ()
 }
 
 static void
-gensim_caselist (p)
-     op *p;
+gensim_caselist (op *p)
 {
   for (; p->name; p++)
     {
@@ -2841,8 +2834,7 @@ gensim_caselist (p)
       int sextbit = -1;
       int needm = 0;
       int needn = 0;
-      
-      char *s = p->code;
+      const char *s = p->code;
 
       printf ("  /* %s %s */\n", p->name, p->code);
       printf ("  case %d:      \n", p->index);
@@ -3025,7 +3017,7 @@ gensim_caselist (p)
 
       {
 	/* Do the refs.  */
-	char *r;
+	const char *r;
 	for (r = p->refs; *r; r++)
 	  {
 	    if (*r == 'f') printf ("      CREF (15);\n");
@@ -3067,7 +3059,7 @@ gensim_caselist (p)
 
       {
 	/* Do the defs.  */
-	char *r;
+	const char *r;
 	for (r = p->defs; *r; r++) 
 	  {
 	    if (*r == 'f') printf ("      CDEF (15);\n");
@@ -3101,7 +3093,7 @@ gensim_caselist (p)
 }
 
 static void
-gensim ()
+gensim (void)
 {
   printf ("{\n");
   printf ("/* REG_xy = [r4, r5, r0, r1].  */\n");
@@ -3130,19 +3122,17 @@ gensim ()
 }
 
 static void
-gendefines ()
+gendefines (void)
 {
   op *p;
   filltable (tab);
   for (p = tab; p->name; p++)
     {
-      char *s = p->name;
+      const char *s = p->name;
       printf ("#define OPC_");
       while (*s) {
-	if (isupper (*s)) 
-	  *s = tolower (*s);
 	if (isalpha (*s))
-	  printf ("%c", *s);
+	  printf ("%c", tolower (*s));
 	if (*s == ' ')
 	  printf ("_");
 	if (*s == '@')
@@ -3162,10 +3152,7 @@ static int ppi_index;
    NOTE: tail recursion optimization removed for simplicity.  */
 
 static void
-expand_ppi_code (val, i, s)
-     int val;
-     int i;
-     char *s;
+expand_ppi_code (int val, int i, const char *s)
 {
   int j;
 
@@ -3210,7 +3197,7 @@ expand_ppi_code (val, i, s)
 }
 
 static void
-ppi_filltable ()
+ppi_filltable (void)
 {
   op *p;
   ppi_index = 1;
@@ -3223,7 +3210,7 @@ ppi_filltable ()
 }
 
 static void
-ppi_gensim ()
+ppi_gensim (void)
 {
   op *p = ppi_tab;
 
@@ -3254,21 +3241,20 @@ ppi_gensim ()
   printf ("  (greater_equal = ~(overflow << 3 & res_grd) & DSR_MASK_G)\n");
   printf ("\n");
   printf ("static void\n");
-  printf ("ppi_insn (iword)\n");
-  printf ("     int iword;\n");
+  printf ("ppi_insn (int iword)\n");
   printf ("{\n");
   printf ("  /* 'ee' = [x0, x1, y0, a1] */\n");
-  printf ("  static char e_tab[] = { 8,  9, 10,  5};\n");
+  printf ("  static char const e_tab[] = { 8,  9, 10,  5};\n");
   printf ("  /* 'ff' = [y0, y1, x0, a1] */\n");
-  printf ("  static char f_tab[] = {10, 11,  8,  5};\n");
+  printf ("  static char const f_tab[] = {10, 11,  8,  5};\n");
   printf ("  /* 'xx' = [x0, x1, a0, a1]  */\n");
-  printf ("  static char x_tab[] = { 8,  9,  7,  5};\n");
+  printf ("  static char const x_tab[] = { 8,  9,  7,  5};\n");
   printf ("  /* 'yy' = [y0, y1, m0, m1]  */\n");
-  printf ("  static char y_tab[] = {10, 11, 12, 14};\n");
+  printf ("  static char const y_tab[] = {10, 11, 12, 14};\n");
   printf ("  /* 'gg' = [m0, m1, a0, a1]  */\n");
-  printf ("  static char g_tab[] = {12, 14,  7,  5};\n");
+  printf ("  static char const g_tab[] = {12, 14,  7,  5};\n");
   printf ("  /* 'uu' = [x0, y0, a0, a1]  */\n");
-  printf ("  static char u_tab[] = { 8, 10,  7,  5};\n");
+  printf ("  static char const u_tab[] = { 8, 10,  7,  5};\n");
   printf ("\n");
   printf ("  int z;\n");
   printf ("  int res, res_grd;\n");
@@ -3281,8 +3267,7 @@ ppi_gensim ()
       int shift, j;
       int cond = 0;
       int havedecl = 0;
-      
-      char *s = p->code;
+      const char *s = p->code;
 
       printf ("  /* %s %s */\n", p->name, p->code);
       printf ("  case %d:      \n", p->index);
@@ -3362,7 +3347,7 @@ ppi_gensim ()
   printf ("  }\n");
   printf ("  DSR &= ~0xf1;\n");
   printf ("  if (res || res_grd)\n");
-  printf ("    DSR |= greater_equal | res_grd >> 2 & DSR_MASK_N | overflow;\n");
+  printf ("    DSR |= greater_equal | (res_grd >> 2 & DSR_MASK_N) | overflow;\n");
   printf ("  else\n");
   printf ("    DSR |= DSR_MASK_Z | overflow;\n");
   printf (" assign_dc:\n");
@@ -3374,11 +3359,11 @@ ppi_gensim ()
   printf ("      DSR |= res_grd >> 7 & 1;\n");
   printf ("    case 2: /* Zero Value Mode */\n");
   printf ("      DSR |= DSR >> 6 & 1;\n");
-  printf ("    case 3: /* Overflow mode\n");
+  printf ("    case 3: /* Overflow mode */\n");
   printf ("      DSR |= overflow >> 4;\n");
   printf ("    case 4: /* Signed Greater Than Mode */\n");
   printf ("      DSR |= DSR >> 7 & 1;\n");
-  printf ("    case 4: /* Signed Greater Than Or Equal Mode */\n");
+  printf ("    case 5: /* Signed Greater Than Or Equal Mode */\n");
   printf ("      DSR |= greater_equal >> 7;\n");
   printf ("    }\n");
   printf (" assign_z:\n");
@@ -3393,9 +3378,7 @@ ppi_gensim ()
 }
 
 int
-main (ac, av)
-     int ac;
-     char **av;
+main (int ac, char *av[])
 {
   /* Verify the table before anything else.  */
   {
@@ -3405,7 +3388,7 @@ main (ac, av)
 	/* Check that the code field contains 16 bits.  */
 	if (strlen (p->code) != 16)
 	  {
-	    fprintf (stderr, "Code `%s' length wrong (%d) for `%s'\n",
+	    fprintf (stderr, "Code `%s' length wrong (%zu) for `%s'\n",
 		     p->code, strlen (p->code), p->name);
 	    abort ();
 	  }

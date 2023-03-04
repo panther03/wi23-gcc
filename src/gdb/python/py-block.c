@@ -1,6 +1,6 @@
 /* Python interface to blocks.
 
-   Copyright (C) 2008-2013 Free Software Foundation, Inc.
+   Copyright (C) 2008-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -23,9 +23,8 @@
 #include "symtab.h"
 #include "python-internal.h"
 #include "objfiles.h"
-#include "symtab.h"
 
-typedef struct blpy_block_object {
+struct block_object {
   PyObject_HEAD
   /* The GDB block structure that represents a frame's code block.  */
   const struct block *block;
@@ -35,11 +34,11 @@ typedef struct blpy_block_object {
   struct objfile *objfile;
   /* Keep track of all blocks with a doubly-linked list.  Needed for
      block invalidation if the source object file has been freed.  */
-  struct blpy_block_object *prev;
-  struct blpy_block_object *next;
-} block_object;
+  block_object *prev;
+  block_object *next;
+};
 
-typedef struct {
+struct block_syms_iterator_object {
   PyObject_HEAD
   /* The block.  */
   const struct block *block;
@@ -50,8 +49,8 @@ typedef struct {
   /* Pointer back to the original source block object.  Needed to
      check if the block is still valid, and has not been invalidated
      when an object file has been freed.  */
-  struct blpy_block_object *source;
-} block_syms_iterator_object;
+  block_object *source;
+};
 
 /* Require a valid block.  All access to block_object->block should be
    gated by this call.  */
@@ -78,9 +77,33 @@ typedef struct {
       }									\
   } while (0)
 
-static PyTypeObject block_syms_iterator_object_type
+/* This is called when an objfile is about to be freed.
+   Invalidate the block as further actions on the block would result
+   in bad data.  All access to obj->symbol should be gated by
+   BLPY_REQUIRE_VALID which will raise an exception on invalid
+   blocks.  */
+struct blpy_deleter
+{
+  void operator() (block_object *obj)
+  {
+    while (obj)
+      {
+	block_object *next = obj->next;
+
+	obj->block = NULL;
+	obj->objfile = NULL;
+	obj->next = NULL;
+	obj->prev = NULL;
+
+	obj = next;
+      }
+  }
+};
+
+extern PyTypeObject block_syms_iterator_object_type
     CPYCHECKER_TYPE_OBJECT_FOR_TYPEDEF ("block_syms_iterator_object");
-static const struct objfile_data *blpy_objfile_data_key;
+static const registry<objfile>::key<block_object, blpy_deleter>
+     blpy_objfile_data_key;
 
 static PyObject *
 blpy_iter (PyObject *self)
@@ -110,7 +133,7 @@ blpy_get_start (PyObject *self, void *closure)
 
   BLPY_REQUIRE_VALID (self, block);
 
-  return gdb_py_object_from_ulongest (BLOCK_START (block));
+  return gdb_py_object_from_ulongest (block->start ()).release ();
 }
 
 static PyObject *
@@ -120,7 +143,7 @@ blpy_get_end (PyObject *self, void *closure)
 
   BLPY_REQUIRE_VALID (self, block);
 
-  return gdb_py_object_from_ulongest (BLOCK_END (block));
+  return gdb_py_object_from_ulongest (block->end ()).release ();
 }
 
 static PyObject *
@@ -131,7 +154,7 @@ blpy_get_function (PyObject *self, void *closure)
 
   BLPY_REQUIRE_VALID (self, block);
 
-  sym = BLOCK_FUNCTION (block);
+  sym = block->function ();
   if (sym)
     return symbol_to_symbol_object (sym);
 
@@ -147,7 +170,7 @@ blpy_get_superblock (PyObject *self, void *closure)
 
   BLPY_REQUIRE_VALID (self, block);
 
-  super_block = BLOCK_SUPERBLOCK (block);
+  super_block = block->superblock ();
   if (super_block)
     return block_to_block_object (super_block, self_obj->objfile);
 
@@ -165,7 +188,7 @@ blpy_get_global_block (PyObject *self, void *closure)
 
   BLPY_REQUIRE_VALID (self, block);
 
-  global_block = block_global_block (block);
+  global_block = block->global_block ();
 
   return block_to_block_object (global_block,
 				self_obj->objfile);
@@ -184,10 +207,10 @@ blpy_get_static_block (PyObject *self, void *closure)
 
   BLPY_REQUIRE_VALID (self, block);
 
-  if (BLOCK_SUPERBLOCK (block) == NULL)
+  if (block->superblock () == NULL)
     Py_RETURN_NONE;
 
-  static_block = block_static_block (block);
+  static_block = block->static_block ();
 
   return block_to_block_object (static_block, self_obj->objfile);
 }
@@ -202,7 +225,7 @@ blpy_is_global (PyObject *self, void *closure)
 
   BLPY_REQUIRE_VALID (self, block);
 
-  if (BLOCK_SUPERBLOCK (block))
+  if (block->superblock ())
     Py_RETURN_FALSE;
 
   Py_RETURN_TRUE;
@@ -218,11 +241,42 @@ blpy_is_static (PyObject *self, void *closure)
 
   BLPY_REQUIRE_VALID (self, block);
 
-  if (BLOCK_SUPERBLOCK (block) != NULL
-     && BLOCK_SUPERBLOCK (BLOCK_SUPERBLOCK (block)) == NULL)
+  if (block->superblock () != NULL
+     && block->superblock ()->superblock () == NULL)
     Py_RETURN_TRUE;
 
   Py_RETURN_FALSE;
+}
+
+/* Given a string, returns the gdb.Symbol representing that symbol in this
+   block.  If such a symbol does not exist, returns NULL with a Python
+   exception.  */
+
+static PyObject *
+blpy_getitem (PyObject *self, PyObject *key)
+{
+  const struct block *block;
+
+  BLPY_REQUIRE_VALID (self, block);
+
+  gdb::unique_xmalloc_ptr<char> name = python_string_to_host_string (key);
+  if (name == nullptr)
+    return nullptr;
+
+  lookup_name_info lookup_name (name.get(), symbol_name_match_type::FULL);
+
+  /* We use an iterator instead of block_lookup_symbol so that we can
+     look up symbols irrespective of the domain, matching the
+     iterator. It would be confusing if the iterator returns symbols
+     you can't find via getitem.  */
+  for (struct symbol *sym : block_iterator_range (block, &lookup_name))
+    {
+      /* Just stop at the first match */
+      return symbol_to_symbol_object (sym);
+    }
+
+  PyErr_SetObject (PyExc_KeyError, key);
+  return nullptr;
 }
 
 static void
@@ -233,13 +287,11 @@ blpy_dealloc (PyObject *obj)
   if (block->prev)
     block->prev->next = block->next;
   else if (block->objfile)
-    {
-      set_objfile_data (block->objfile, blpy_objfile_data_key,
-			block->next);
-    }
+    blpy_objfile_data_key.set (block->objfile, block->next);
   if (block->next)
     block->next->prev = block->prev;
   block->block = NULL;
+  Py_TYPE (obj)->tp_free (obj);
 }
 
 /* Given a block, and a block_object that has previously been
@@ -256,10 +308,10 @@ set_block (block_object *obj, const struct block *block,
   if (objfile)
     {
       obj->objfile = objfile;
-      obj->next = objfile_data (objfile, blpy_objfile_data_key);
+      obj->next = blpy_objfile_data_key.get (objfile);
       if (obj->next)
 	obj->next->prev = obj;
-      set_objfile_data (objfile, blpy_objfile_data_key, obj);
+      blpy_objfile_data_key.set (objfile, obj);
     }
   else
     obj->next = NULL;
@@ -333,6 +385,7 @@ blpy_block_syms_dealloc (PyObject *obj)
   block_syms_iterator_object *iter_obj = (block_syms_iterator_object *) obj;
 
   Py_XDECREF (iter_obj->source);
+  Py_TYPE (obj)->tp_free (obj);
 }
 
 /* Implementation of gdb.Block.is_valid (self) -> Boolean.
@@ -365,66 +418,6 @@ blpy_iter_is_valid (PyObject *self, PyObject *args)
   Py_RETURN_TRUE;
 }
 
-/* Return the innermost lexical block containing the specified pc value,
-   or 0 if there is none.  */
-PyObject *
-gdbpy_block_for_pc (PyObject *self, PyObject *args)
-{
-  gdb_py_ulongest pc;
-  struct block *block = NULL;
-  struct obj_section *section = NULL;
-  struct symtab *symtab = NULL;
-  volatile struct gdb_exception except;
-
-  if (!PyArg_ParseTuple (args, GDB_PY_LLU_ARG, &pc))
-    return NULL;
-
-  TRY_CATCH (except, RETURN_MASK_ALL)
-    {
-      section = find_pc_mapped_section (pc);
-      symtab = find_pc_sect_symtab (pc, section);
-
-      if (symtab != NULL && symtab->objfile != NULL)
-	block = block_for_pc (pc);
-    }
-  GDB_PY_HANDLE_EXCEPTION (except);
-
-  if (!symtab || symtab->objfile == NULL)
-    {
-      PyErr_SetString (PyExc_RuntimeError,
-		       _("Cannot locate object file for block."));
-      return NULL;
-    }
-
-  if (block)
-    return block_to_block_object (block, symtab->objfile);
-
-  Py_RETURN_NONE;
-}
-
-/* This function is called when an objfile is about to be freed.
-   Invalidate the block as further actions on the block would result
-   in bad data.  All access to obj->symbol should be gated by
-   BLPY_REQUIRE_VALID which will raise an exception on invalid
-   blocks.  */
-static void
-del_objfile_blocks (struct objfile *objfile, void *datum)
-{
-  block_object *obj = datum;
-
-  while (obj)
-    {
-      block_object *next = obj->next;
-
-      obj->block = NULL;
-      obj->objfile = NULL;
-      obj->next = NULL;
-      obj->prev = NULL;
-
-      obj = next;
-    }
-}
-
 int
 gdbpy_initialize_blocks (void)
 {
@@ -435,12 +428,6 @@ gdbpy_initialize_blocks (void)
   block_syms_iterator_object_type.tp_new = PyType_GenericNew;
   if (PyType_Ready (&block_syms_iterator_object_type) < 0)
     return -1;
-
-  /* Register an objfile "free" callback so we can properly
-     invalidate blocks when an object file is about to be
-     deleted.  */
-  blpy_objfile_data_key
-    = register_objfile_data_with_cleanup (NULL, del_objfile_blocks);
 
   if (gdb_pymodule_addobject (gdb_module, "Block",
 			      (PyObject *) &block_object_type) < 0)
@@ -459,7 +446,7 @@ Return true if this block is valid, false if not." },
   {NULL}  /* Sentinel */
 };
 
-static PyGetSetDef block_object_getset[] = {
+static gdb_PyGetSetDef block_object_getset[] = {
   { "start", blpy_get_start, NULL, "Start address of the block.", NULL },
   { "end", blpy_get_end, NULL, "End address of the block.", NULL },
   { "function", blpy_get_function, NULL,
@@ -477,6 +464,12 @@ static PyGetSetDef block_object_getset[] = {
   { NULL }  /* Sentinel */
 };
 
+static PyMappingMethods block_object_as_mapping = {
+  NULL,
+  blpy_getitem,
+  NULL
+};
+
 PyTypeObject block_object_type = {
   PyVarObject_HEAD_INIT (NULL, 0)
   "gdb.Block",			  /*tp_name*/
@@ -490,14 +483,14 @@ PyTypeObject block_object_type = {
   0,				  /*tp_repr*/
   0,				  /*tp_as_number*/
   0,				  /*tp_as_sequence*/
-  0,				  /*tp_as_mapping*/
+  &block_object_as_mapping,	  /*tp_as_mapping*/
   0,				  /*tp_hash */
   0,				  /*tp_call*/
   0,				  /*tp_str*/
   0,				  /*tp_getattro*/
   0,				  /*tp_setattro*/
   0,				  /*tp_as_buffer*/
-  Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_ITER,  /*tp_flags*/
+  Py_TPFLAGS_DEFAULT,		  /*tp_flags*/
   "GDB block object",		  /* tp_doc */
   0,				  /* tp_traverse */
   0,				  /* tp_clear */
@@ -517,7 +510,7 @@ Return true if this block iterator is valid, false if not." },
   {NULL}  /* Sentinel */
 };
 
-static PyTypeObject block_syms_iterator_object_type = {
+PyTypeObject block_syms_iterator_object_type = {
   PyVarObject_HEAD_INIT (NULL, 0)
   "gdb.BlockIterator",		  /*tp_name*/
   sizeof (block_syms_iterator_object),	      /*tp_basicsize*/
@@ -537,7 +530,7 @@ static PyTypeObject block_syms_iterator_object_type = {
   0,				  /*tp_getattro*/
   0,				  /*tp_setattro*/
   0,				  /*tp_as_buffer*/
-  Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_ITER,  /*tp_flags*/
+  Py_TPFLAGS_DEFAULT,		  /*tp_flags*/
   "GDB block syms iterator object",	      /*tp_doc */
   0,				  /*tp_traverse */
   0,				  /*tp_clear */

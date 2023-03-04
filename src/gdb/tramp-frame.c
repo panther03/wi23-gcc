@@ -1,6 +1,6 @@
 /* Signal trampoline unwinder, for GDB the GNU Debugger.
 
-   Copyright (C) 2004-2013 Free Software Foundation, Inc.
+   Copyright (C) 2004-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -26,7 +26,6 @@
 #include "target.h"
 #include "trad-frame.h"
 #include "frame-base.h"
-#include "gdb_assert.h"
 
 struct frame_data
 {
@@ -41,10 +40,11 @@ struct tramp_frame_cache
 };
 
 static struct trad_frame_cache *
-tramp_frame_cache (struct frame_info *this_frame,
+tramp_frame_cache (frame_info_ptr this_frame,
 		   void **this_cache)
 {
-  struct tramp_frame_cache *tramp_cache = (*this_cache);
+  struct tramp_frame_cache *tramp_cache
+    = (struct tramp_frame_cache *) *this_cache;
 
   if (tramp_cache->trad_cache == NULL)
     {
@@ -58,7 +58,7 @@ tramp_frame_cache (struct frame_info *this_frame,
 }
 
 static void
-tramp_frame_this_id (struct frame_info *this_frame,
+tramp_frame_this_id (frame_info_ptr this_frame,
 		     void **this_cache,
 		     struct frame_id *this_id)
 {
@@ -69,7 +69,7 @@ tramp_frame_this_id (struct frame_info *this_frame,
 }
 
 static struct value *
-tramp_frame_prev_register (struct frame_info *this_frame,
+tramp_frame_prev_register (frame_info_ptr this_frame,
 			   void **this_cache,
 			   int prev_regnum)
 {
@@ -81,11 +81,15 @@ tramp_frame_prev_register (struct frame_info *this_frame,
 
 static CORE_ADDR
 tramp_frame_start (const struct tramp_frame *tramp,
-		   struct frame_info *this_frame, CORE_ADDR pc)
+		   frame_info_ptr this_frame, CORE_ADDR pc)
 {
   struct gdbarch *gdbarch = get_frame_arch (this_frame);
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   int ti;
+
+  /* Check if we can use this trampoline.  */
+  if (tramp->validate && !tramp->validate (tramp, this_frame, &pc))
+    return 0;
 
   /* Search through the trampoline for one that matches the
      instruction sequence around PC.  */
@@ -98,14 +102,15 @@ tramp_frame_start (const struct tramp_frame *tramp,
 	{
 	  gdb_byte buf[sizeof (tramp->insn[0])];
 	  ULONGEST insn;
+	  size_t insn_size = tramp->insn_size;
 
 	  if (tramp->insn[i].bytes == TRAMP_SENTINEL_INSN)
 	    return func;
 	  if (!safe_frame_unwind_memory (this_frame,
-					 func + i * tramp->insn_size,
-					 buf, tramp->insn_size))
+					 func + i * insn_size,
+					 {buf, insn_size}))
 	    break;
-	  insn = extract_unsigned_integer (buf, tramp->insn_size, byte_order);
+	  insn = extract_unsigned_integer (buf, insn_size, byte_order);
 	  if (tramp->insn[i].bytes != (insn & tramp->insn[i].mask))
 	    break;
 	}
@@ -116,7 +121,7 @@ tramp_frame_start (const struct tramp_frame *tramp,
 
 static int
 tramp_frame_sniffer (const struct frame_unwind *self,
-		     struct frame_info *this_frame,
+		     frame_info_ptr this_frame,
 		     void **this_cache)
 {
   const struct tramp_frame *tramp = self->unwind_data->tramp_frame;

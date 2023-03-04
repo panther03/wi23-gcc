@@ -1,6 +1,6 @@
 /* Generic code for supporting multiple C++ ABI's
 
-   Copyright (C) 2001-2013 Free Software Foundation, Inc.
+   Copyright (C) 2001-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -18,15 +18,12 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 #include "defs.h"
+#include "language.h"
 #include "value.h"
 #include "cp-abi.h"
 #include "command.h"
-#include "exceptions.h"
 #include "gdbcmd.h"
 #include "ui-out.h"
-#include "gdb_assert.h"
-#include "gdb_string.h"
-
 static struct cp_abi_ops *find_cp_abi (const char *short_name);
 
 static struct cp_abi_ops current_cp_abi = { "", NULL };
@@ -70,29 +67,30 @@ is_operator_name (const char *name)
 
 int
 baseclass_offset (struct type *type, int index, const gdb_byte *valaddr,
-		  int embedded_offset, CORE_ADDR address,
+		  LONGEST embedded_offset, CORE_ADDR address,
 		  const struct value *val)
 {
-  volatile struct gdb_exception ex;
   int res = 0;
 
   gdb_assert (current_cp_abi.baseclass_offset != NULL);
 
-  TRY_CATCH (ex, RETURN_MASK_ERROR)
+  try
     {
       res = (*current_cp_abi.baseclass_offset) (type, index, valaddr,
 						embedded_offset,
 						address, val);
     }
+  catch (const gdb_exception_error &ex)
+    {
+      if (ex.error != NOT_AVAILABLE_ERROR)
+	throw;
 
-  if (ex.reason < 0 && ex.error == NOT_AVAILABLE_ERROR)
-    throw_error (NOT_AVAILABLE_ERROR,
-		 _("Cannot determine virtual baseclass offset "
-		   "of incomplete object"));
-  else if (ex.reason < 0)
-    throw_exception (ex);
-  else
-    return res;
+      throw_error (NOT_AVAILABLE_ERROR,
+		   _("Cannot determine virtual baseclass offset "
+		     "of incomplete object"));
+    }
+
+  return res;
 }
 
 struct value *
@@ -108,19 +106,22 @@ value_virtual_fn_field (struct value **arg1p,
 
 struct type *
 value_rtti_type (struct value *v, int *full,
-		 int *top, int *using_enc)
+		 LONGEST *top, int *using_enc)
 {
   struct type *ret = NULL;
-  volatile struct gdb_exception e;
 
-  if ((current_cp_abi.rtti_type) == NULL)
+  if ((current_cp_abi.rtti_type) == NULL
+      || !HAVE_CPLUS_STRUCT (check_typedef (v->type ())))
     return NULL;
-  TRY_CATCH (e, RETURN_MASK_ERROR)
+  try
     {
       ret = (*current_cp_abi.rtti_type) (v, full, top, using_enc);
     }
-  if (e.reason < 0)
-    return NULL;
+  catch (const gdb_exception_error &e)
+    {
+      return NULL;
+    }
+
   return ret;
 }
 
@@ -152,7 +153,7 @@ cplus_make_method_ptr (struct type *type, gdb_byte *contents,
 }
 
 CORE_ADDR
-cplus_skip_trampoline (struct frame_info *frame,
+cplus_skip_trampoline (frame_info_ptr frame,
 		       CORE_ADDR stop_pc)
 {
   if (current_cp_abi.skip_trampoline == NULL)
@@ -211,7 +212,7 @@ cplus_type_from_type_info (struct value *value)
 
 /* See cp-abi.h.  */
 
-char *
+std::string
 cplus_typename_from_type_info (struct value *value)
 {
   if (current_cp_abi.get_typename_from_type_info == NULL)
@@ -220,11 +221,13 @@ cplus_typename_from_type_info (struct value *value)
   return (*current_cp_abi.get_typename_from_type_info) (value);
 }
 
-int
+/* See cp-abi.h.  */
+
+struct language_pass_by_ref_info
 cp_pass_by_reference (struct type *type)
 {
   if ((current_cp_abi.pass_by_reference) == NULL)
-    return 0;
+    return {};
   return (*current_cp_abi.pass_by_reference) (type);
 }
 
@@ -249,8 +252,7 @@ int
 register_cp_abi (struct cp_abi_ops *abi)
 {
   if (num_cp_abis == CP_ABI_MAX)
-    internal_error (__FILE__, __LINE__,
-		    _("Too many C++ ABIs, please increase "
+    internal_error (_("Too many C++ ABIs, please increase "
 		      "CP_ABI_MAX in cp-abi.c"));
 
   cp_abis[num_cp_abis++] = abi;
@@ -263,28 +265,22 @@ register_cp_abi (struct cp_abi_ops *abi)
 void
 set_cp_abi_as_auto_default (const char *short_name)
 {
-  char *new_longname, *new_doc;
   struct cp_abi_ops *abi = find_cp_abi (short_name);
 
   if (abi == NULL)
-    internal_error (__FILE__, __LINE__,
-		    _("Cannot find C++ ABI \"%s\" to set it as auto default."),
+    internal_error (_("Cannot find C++ ABI \"%s\" to set it as auto default."),
 		    short_name);
 
-  if (auto_cp_abi.longname != NULL)
-    xfree ((char *) auto_cp_abi.longname);
-  if (auto_cp_abi.doc != NULL)
-    xfree ((char *) auto_cp_abi.doc);
+  xfree ((char *) auto_cp_abi.longname);
+  xfree ((char *) auto_cp_abi.doc);
 
   auto_cp_abi = *abi;
 
   auto_cp_abi.shortname = "auto";
-  new_longname = xstrprintf ("currently \"%s\"", abi->shortname);
-  auto_cp_abi.longname = new_longname;
-
-  new_doc = xstrprintf ("Automatically selected; currently \"%s\"",
-	     abi->shortname);
-  auto_cp_abi.doc = new_doc;
+  auto_cp_abi.longname = xstrprintf ("currently \"%s\"",
+				     abi->shortname).release ();
+  auto_cp_abi.doc = xstrprintf ("Automatically selected; currently \"%s\"",
+				abi->shortname).release ();
 
   /* Since we copy the current ABI into current_cp_abi instead of
      using a pointer, if auto is currently the default, we need to
@@ -313,37 +309,34 @@ static void
 list_cp_abis (int from_tty)
 {
   struct ui_out *uiout = current_uiout;
-  struct cleanup *cleanup_chain;
   int i;
 
-  ui_out_text (uiout, "The available C++ ABIs are:\n");
-  cleanup_chain = make_cleanup_ui_out_tuple_begin_end (uiout,
-						       "cp-abi-list");
+  uiout->text ("The available C++ ABIs are:\n");
+  ui_out_emit_tuple tuple_emitter (uiout, "cp-abi-list");
   for (i = 0; i < num_cp_abis; i++)
     {
       char pad[14];
       int padcount;
 
-      ui_out_text (uiout, "  ");
-      ui_out_field_string (uiout, "cp-abi", cp_abis[i]->shortname);
+      uiout->text ("  ");
+      uiout->field_string ("cp-abi", cp_abis[i]->shortname);
 
       padcount = 16 - 2 - strlen (cp_abis[i]->shortname);
       pad[padcount] = 0;
       while (padcount > 0)
 	pad[--padcount] = ' ';
-      ui_out_text (uiout, pad);
+      uiout->text (pad);
 
-      ui_out_field_string (uiout, "doc", cp_abis[i]->doc);
-      ui_out_text (uiout, "\n");
+      uiout->field_string ("doc", cp_abis[i]->doc);
+      uiout->text ("\n");
     }
-  do_cleanups (cleanup_chain);
 }
 
 /* Set the current C++ ABI, or display the list of options if no
    argument is given.  */
 
 static void
-set_cp_abi_cmd (char *args, int from_tty)
+set_cp_abi_cmd (const char *args, int from_tty)
 {
   if (args == NULL)
     {
@@ -357,8 +350,9 @@ set_cp_abi_cmd (char *args, int from_tty)
 
 /* A completion function for "set cp-abi".  */
 
-static VEC (char_ptr) *
+static void
 cp_abi_completer (struct cmd_list_element *ignore,
+		  completion_tracker &tracker,
 		  const char *text, const char *word)
 {
   static const char **cp_abi_names;
@@ -373,28 +367,27 @@ cp_abi_completer (struct cmd_list_element *ignore,
       cp_abi_names[i] = NULL;
     }
 
-  return complete_on_enum (cp_abi_names, text, word);
+  complete_on_enum (tracker, cp_abi_names, text, word);
 }
 
 /* Show the currently selected C++ ABI.  */
 
 static void
-show_cp_abi_cmd (char *args, int from_tty)
+show_cp_abi_cmd (const char *args, int from_tty)
 {
   struct ui_out *uiout = current_uiout;
 
-  ui_out_text (uiout, "The currently selected C++ ABI is \"");
+  uiout->text ("The currently selected C++ ABI is \"");
 
-  ui_out_field_string (uiout, "cp-abi", current_cp_abi.shortname);
-  ui_out_text (uiout, "\" (");
-  ui_out_field_string (uiout, "longname", current_cp_abi.longname);
-  ui_out_text (uiout, ").\n");
+  uiout->field_string ("cp-abi", current_cp_abi.shortname);
+  uiout->text ("\" (");
+  uiout->field_string ("longname", current_cp_abi.longname);
+  uiout->text (").\n");
 }
 
-extern initialize_file_ftype _initialize_cp_abi; /* -Wmissing-prototypes */
-
+void _initialize_cp_abi ();
 void
-_initialize_cp_abi (void)
+_initialize_cp_abi ()
 {
   struct cmd_list_element *c;
 

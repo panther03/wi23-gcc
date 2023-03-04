@@ -25,12 +25,11 @@
 
 STATIC_INLINE_OPTIONS\
 (const char *)
-options_byte_order (int order)
+options_byte_order (enum bfd_endian order)
 {
   switch (order) {
-  case 0:		return "0";
-  case BIG_ENDIAN:	return "BIG_ENDIAN";
-  case LITTLE_ENDIAN:	return "LITTLE_ENDIAN";
+  case BFD_ENDIAN_BIG:		return "BIG_ENDIAN";
+  case BFD_ENDIAN_LITTLE:	return "LITTLE_ENDIAN";
   }
 
   return "UNKNOWN";
@@ -98,10 +97,10 @@ options_inline (int in)
   case /*1*/ REVEAL_MODULE:			return "REVEAL_MODULE";
   case /*2*/ INLINE_MODULE:			return "INLINE_MODULE";
   case /*3*/ REVEAL_MODULE|INLINE_MODULE:	return "REVEAL_MODULE|INLINE_MODULE";
-  case /*4*/ PSIM_INLINE_LOCALS:		return "PSIM_LOCALS_INLINE";
-  case /*5*/ PSIM_INLINE_LOCALS|REVEAL_MODULE:	return "PSIM_INLINE_LOCALS|REVEAL_MODULE";
-  case /*6*/ PSIM_INLINE_LOCALS|INLINE_MODULE:	return "PSIM_INLINE_LOCALS|INLINE_MODULE";
-  case /*7*/ ALL_INLINE:			return "ALL_INLINE";
+  case /*4*/ INLINE_LOCALS:			return "INLINE_LOCALS";
+  case /*5*/ INLINE_LOCALS|REVEAL_MODULE:	return "INLINE_LOCALS|REVEAL_MODULE";
+  case /*6*/ INLINE_LOCALS|INLINE_MODULE:	return "INLINE_LOCALS|INLINE_MODULE";
+  case /*7*/ ALL_C_INLINE:			return "ALL_C_INLINE";
   }
   return "0";
 }
@@ -111,18 +110,10 @@ INLINE_OPTIONS\
 (void)
 print_options (void)
 {
-#if defined(_GNUC_) && defined(__VERSION__)
-  printf_filtered ("Compiled by GCC %s on %s %s\n", __VERSION__, __DATE__, __TIME__);
-#else
-  printf_filtered ("Compiled on %s %s\n", __DATE__, __TIME__);
-#endif
-
-  printf_filtered ("WITH_HOST_BYTE_ORDER     = %s\n", options_byte_order (WITH_HOST_BYTE_ORDER));
+  printf_filtered ("HOST_BYTE_ORDER          = %s\n", options_byte_order (HOST_BYTE_ORDER));
   printf_filtered ("WITH_TARGET_BYTE_ORDER   = %s\n", options_byte_order (WITH_TARGET_BYTE_ORDER));
   printf_filtered ("WITH_XOR_ENDIAN          = %d\n", WITH_XOR_ENDIAN);
-  printf_filtered ("WITH_BSWAP               = %d\n", WITH_BSWAP);
   printf_filtered ("WITH_SMP                 = %d\n", WITH_SMP);
-  printf_filtered ("WITH_HOST_WORD_BITSIZE   = %d\n", WITH_HOST_WORD_BITSIZE);
   printf_filtered ("WITH_TARGET_WORD_BITSIZE = %d\n", WITH_TARGET_WORD_BITSIZE);
   printf_filtered ("WITH_ENVIRONMENT         = %s\n", options_env(WITH_ENVIRONMENT));
   printf_filtered ("WITH_EVENTS              = %d\n", WITH_EVENTS);
@@ -138,8 +129,6 @@ print_options (void)
   printf_filtered ("WITH_MODEL_ISSUE         = %d\n", WITH_MODEL_ISSUE);
   printf_filtered ("WITH_RESERVED_BITS       = %d\n", WITH_RESERVED_BITS);
   printf_filtered ("WITH_STDIO               = %d\n", WITH_STDIO);
-  printf_filtered ("WITH_REGPARM             = %d\n", WITH_REGPARM);
-  printf_filtered ("WITH_STDCALL             = %d\n", WITH_STDCALL);
   printf_filtered ("DEFAULT_INLINE           = %s\n", options_inline (DEFAULT_INLINE));
   printf_filtered ("SIM_ENDIAN_INLINE        = %s\n", options_inline (SIM_ENDIAN_INLINE));
   printf_filtered ("BITS_INLINE              = %s\n", options_inline (BITS_INLINE));
@@ -164,10 +153,6 @@ print_options (void)
 
 #ifdef IGEN_FLAGS
   printf_filtered ("IGEN_FLAGS               = %s\n", IGEN_FLAGS);
-#endif
-
-#ifdef DGEN_FLAGS
-  printf_filtered ("DGEN_FLAGS               = %s\n", DGEN_FLAGS);
 #endif
 
   {
@@ -209,17 +194,13 @@ print_options (void)
 #ifdef HAVE_TERMIO_STRUCTURE
       "HAVE_TERMIO_STRUCTURE",
 #endif
-
-#ifdef HAVE_DEVZERO
-      "HAVE_DEVZERO",
-#endif
     };
 
     int i;
     int max_len = 0;
     int cols;
 
-    for (i = 0; i < sizeof (defines) / sizeof (defines[0]); i++) {
+    for (i = 0; i < ARRAY_SIZE (defines); i++) {
       int len = strlen (defines[i]);
       if (len > max_len)
 	max_len = len;
@@ -230,13 +211,13 @@ print_options (void)
       cols = 1;
 
     printf_filtered ("\n#defines:");
-    for (i = 0; i < sizeof (defines) / sizeof (defines[0]); i++) {
+    for (i = 0; i < ARRAY_SIZE (defines); i++) {
       const char *const prefix = ((i % cols) == 0) ? "\n" : "";
       printf_filtered ("%s  %s%*s", prefix, defines[i],
-		       (((i == (sizeof (defines) / sizeof (defines[0])) - 1)
+		       (((i == ARRAY_SIZE (defines) - 1)
 			 || (((i + 1) % cols) == 0))
 			? 0
-			: max_len + 4 - strlen (defines[i])),
+			: max_len + 4 - (int)strlen (defines[i])),
 		       "");
     }
     printf_filtered ("\n");

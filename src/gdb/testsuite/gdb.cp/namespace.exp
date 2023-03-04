@@ -1,4 +1,4 @@
-# Copyright 1997-2013 Free Software Foundation, Inc.
+# Copyright 1997-2023 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -25,13 +25,9 @@
 
 
 
-if { [skip_cplus_tests] } { continue }
+require allow_cplus_tests
 
 standard_testfile .cc namespace1.cc
-
-if [get_compiler_info c++] {
-    return -1
-}
 
 set xfail_class_types 0
 if {[test_compiler_info {gcc-[0-3]-*}]
@@ -40,7 +36,7 @@ if {[test_compiler_info {gcc-[0-3]-*}]
     set xfail_class_types 1
 }
 
-if {[prepare_for_testing $testfile.exp $testfile \
+if {[prepare_for_testing "failed to prepare" $testfile \
 	 [list $srcfile $srcfile2] {debug c++}]} {
     return -1
 }
@@ -50,14 +46,12 @@ gdb_test "show lang" "auto; currently c\\+\\+.*"
 #
 # set it up at a breakpoint so we can play with the variable values
 #
-if ![runto_main] then {
-    perror "couldn't run to breakpoint"
-    continue
+if {![runto_main]} {
+    return
 }
 
-if ![runto 'marker1'] then {
-    perror "couldn't run to marker1"
-    continue
+if {![runto 'marker1']} {
+    return
 }
 
 gdb_test "up" ".*main.*" "up from marker1"
@@ -71,12 +65,10 @@ gdb_test "up" ".*main.*" "up from marker1"
 # shouldn't work with quotes, I'm only including one version.
 
 gdb_test "print 'AAA::c'" \
-    "\\$\[0-9\]* = 0 '\\\\(0|000)'" \
-    "print 'AAA::c'"
+    "\\$\[0-9\]* = 0 '\\\\(0|000)'"
 
 gdb_test "print AAA::c" \
-    "\\$\[0-9\]* = 0 '\\\\(0|000)'" \
-    "print AAA::c"
+    "\\$\[0-9\]* = 0 '\\\\(0|000)'"
 
 # An object declared using "using".
 
@@ -95,10 +87,10 @@ gdb_test_multiple "ptype ina" "ptype ina" {
 
 setup_xfail hppa*-*-*11* CLLbs14869
 gdb_test_multiple "info func xyzq" "info func xyzq" {
-    -re "All functions.*File.*namespace.cc:\r\nint AAA::A_xyzq\\(int\\);\r\nint BBB::B_xyzq\\(int\\);\r\nchar AAA::xyzq\\(char\\);\r\nchar BBB::xyzq\\(char\\);\r\nchar BBB::CCC::xyzq\\(char\\);\r\nchar BBB::Class::xyzq\\(char\\);\r\n$gdb_prompt $" {
+    -re "All functions.*File.*namespace.cc:\r\n.*\tint AAA::A_xyzq\\(int\\);\r\n.*\tint BBB::B_xyzq\\(int\\);\r\n.*\tchar AAA::xyzq\\(char\\);\r\n.*\tchar BBB::xyzq\\(char\\);\r\n.*\tchar BBB::CCC::xyzq\\(char\\);\r\n.*\tchar BBB::Class::xyzq\\(char\\);\r\n$gdb_prompt $" {
 	pass "info func xyzq"
     }    
-    -re "All functions.*File.*namespace.cc:\r\nint AAA::A_xyzq\\(int\\);\r\nchar AAA::xyzq\\(char\\);\r\nint BBB::B_xyzq\\(int\\);\r\nchar BBB::CCC::xyzq\\(char\\);\r\nchar BBB::Class::xyzq\\(char\\);\r\nchar BBB::xyzq\\(char\\);\r\n$gdb_prompt $" {
+    -re "All functions.*File.*namespace.cc:\r\n.*\tint AAA::A_xyzq\\(int\\);\r\n.*\tchar AAA::xyzq\\(char\\);\r\n.*\tint BBB::B_xyzq\\(int\\);\r\n.*\tchar BBB::CCC::xyzq\\(char\\);\r\n.*\tchar BBB::Class::xyzq\\(char\\);\r\n.*\tchar BBB::xyzq\\(char\\);\r\n$gdb_prompt $" {
 	pass "info func xyzq"
     }    
 }
@@ -106,13 +98,11 @@ gdb_test_multiple "info func xyzq" "info func xyzq" {
 # Call a function in a namespace
 
 gdb_test "print 'AAA::xyzq'('x')" \
-    "\\$\[0-9\]* = 97 'a'" \
-    "print 'AAA::xyzq'('x')"
+    "\\$\[0-9\]* = 97 'a'"
 
 gdb_test "print AAA::xyzq('x')" \
-    "\\$\[0-9\]* = 97 'a'" \
-    "print AAA::xyzq('x')"
-       
+    "\\$\[0-9\]* = 97 'a'"
+
 # Break on a function in a namespace
 
 gdb_test "break AAA::xyzq" \
@@ -120,18 +110,16 @@ gdb_test "break AAA::xyzq" \
 
 # Break on a function in the global namespace.
 
-gdb_test "break ::ensureOtherRefs" \
+gdb_test "break -qualified ::ensureOtherRefs" \
     "Breakpoint.*at $hex: file.*$srcfile2, line $decimal\\."
 
 # Call a function in a nested namespace
 
 gdb_test "print 'BBB::CCC::xyzq'('x')" \
-    "\\$\[0-9\]* = 122 'z'" \
-    "print 'BBB::CCC::xyzq'('x')"
+    "\\$\[0-9\]* = 122 'z'"
 
 gdb_test "print BBB::CCC::xyzq('x')" \
-    "\\$\[0-9\]* = 122 'z'" \
-    "print BBB::CCC::xyzq('x')"
+    "\\$\[0-9\]* = 122 'z'"
        
 # Break on a function in a nested namespace
 
@@ -146,12 +134,10 @@ gdb_test "break ::BBB::CCC::xyzq" \
 # Print address of a function in a class in a namespace
 
 gdb_test "print 'BBB::Class::xyzq'" \
-    "\\$\[0-9\]* = \{char \\((BBB::|)Class \\*( const|), (char|int)\\)\} $hex <BBB::Class::xyzq\\(char\\)>" \
-    "print 'BBB::Class::xyzq'"
+    "\\$\[0-9\]* = \{char \\((BBB::|)Class \\*( const|), (char|int)\\)\} $hex <BBB::Class::xyzq\\(char\\)>"
 
 gdb_test "print BBB::Class::xyzq" \
-    "\\$\[0-9\]* = \{char \\((BBB::|)Class \\*( const|), (char|int)\\)\} $hex <BBB::Class::xyzq\\(char\\)>" \
-    "print BBB::Class::xyzq"
+    "\\$\[0-9\]* = \{char \\((BBB::|)Class \\*( const|), (char|int)\\)\} $hex <BBB::Class::xyzq\\(char\\)>"
 
 # Break on a function in a class in a namespace
 
@@ -204,9 +190,8 @@ gdb_test_multiple $test $test {
 # to print out stuff from within a function defined within a
 # namespace.
 
-if ![runto "C::D::marker2"] then {
-    perror "couldn't run to marker2"
-    continue
+if {![runto "C::D::marker2"]} {
+    return
 }
 
 gdb_test "print c" "\\$\[0-9\].* = 1"

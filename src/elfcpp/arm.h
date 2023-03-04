@@ -1,6 +1,6 @@
 // arm.h -- ELF definitions specific to EM_ARM  -*- C++ -*-
 
-// Copyright 2009, 2012 Free Software Foundation, Inc.
+// Copyright (C) 2009-2023 Free Software Foundation, Inc.
 // Written by Doug Kwan <dougkwan@google.com>.
 
 // This file is part of elfcpp.
@@ -192,11 +192,17 @@ enum
   R_ARM_PRIVATE_14 = 126,
   R_ARM_PRIVATE_15 = 127,
   R_ARM_ME_TOO = 128,		// Obsolete
-  R_ARM_THM_TLS_DESCSEQ16 = 129,// Static	Thumb16	
+  R_ARM_THM_TLS_DESCSEQ16 = 129,// Static	Thumb16
   R_ARM_THM_TLS_DESCSEQ32 = 130,// Static	Thumb32
-  // 131 - 139			Unallocated
+  // 131 - 135			Unallocated
+  // Relocations for Armv8.1-M Mainline (BF/BFL)
+  R_ARM_THM_BF16 = 136,		// Static       Thumb32 ((S + A) | T) – P
+  R_ARM_THM_BF12 = 137,		// Static       Thumb32 ((S + A) | T) – P
+  R_ARM_THM_BF18 = 138,		// Static       Thumb32 ((S + A) | T) – P
+  // 139			Unallocated
   // 140 - 159			Dynamic		Reserved for future allocation
-  // 160 - 255			Unallocated
+  R_ARM_IRELATIVE = 160,	// Dynamic
+  // 161 - 255			Unallocated
 };
 
 // e_flags values used for ARM.  We only support flags defined in AAELF.
@@ -247,7 +253,16 @@ enum
   TAG_CPU_ARCH_V6_M,
   TAG_CPU_ARCH_V6S_M,
   TAG_CPU_ARCH_V7E_M,
-  MAX_TAG_CPU_ARCH = TAG_CPU_ARCH_V7E_M,
+  TAG_CPU_ARCH_V8,
+  TAG_CPU_ARCH_V8R,
+  TAG_CPU_ARCH_V8M_BASE,
+  TAG_CPU_ARCH_V8M_MAIN,
+  TAG_CPU_ARCH_8_1A,
+  TAG_CPU_ARCH_8_2A,
+  TAG_CPU_ARCH_8_3A,
+  TAG_CPU_ARCH_V8_1M_MAIN,
+  TAG_CPU_ARCH_V9,
+  MAX_TAG_CPU_ARCH = TAG_CPU_ARCH_V9,
   // Pseudo-architecture to allow objects to be compatible with the subset of
   // armv4t and armv6-m.  This value should never be stored in object files.
   TAG_CPU_ARCH_V4T_PLUS_V6_M = (MAX_TAG_CPU_ARCH + 1)
@@ -298,6 +313,11 @@ enum
   Tag_MPextension_use = 42,
   Tag_undefined43 = 43,
   Tag_DIV_use = 44,
+  Tag_MVE_arch = 48,
+  Tag_PAC_extension = 50,
+  Tag_BTI_extension = 52,
+  Tag_BTI_use = 74,
+  Tag_PACRET_use = 76,
   Tag_nodefaults = 64,
   Tag_also_compatible_with = 65,
   Tag_T2EE_use = 66,
@@ -338,6 +358,24 @@ enum
   AEABI_enum_short = 1,
   AEABI_enum_wide = 2,
   AEABI_enum_forced_wide = 3
+};
+
+// Values for Tag_ABI_FP_number_model.
+enum
+{
+  AEABI_FP_number_model_none = 0,
+  AEABI_FP_number_model_ieee754_number = 1,
+  AEABI_FP_number_model_rtabi = 2,
+  AEABI_FP_number_model_ieee754_all = 3
+};
+
+// Values for Tag_ABI_VFP_args.
+enum
+{
+  AEABI_VFP_args_base = 0,
+  AEABI_VFP_args_vfp = 1,
+  AEABI_VFP_args_toolchain = 2,
+  AEABI_VFP_args_compatible = 3
 };
 
 // For Exception Index Table. (Exception handling ABI for the ARM

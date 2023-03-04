@@ -5,7 +5,7 @@
  * Redistribution and use in source and binary forms are permitted
  * provided that the above copyright notice and this paragraph are
  * duplicated in all such forms and that any documentation,
- * advertising materials, and other materials related to such
+ * and/or other materials related to such
  * distribution and use acknowledge that the software was developed
  * by the University of California, Berkeley.  The name of the
  * University may not be used to endorse or promote products derived
@@ -31,11 +31,10 @@ static char sccsid[] = "%W% (Berkeley) %G%";
 #include "local.h"
 
 int
-_DEFUN(_vswprintf_r, (ptr, str, size, fmt, ap),
-       struct _reent *ptr _AND
-       wchar_t *str          _AND
-       size_t size        _AND
-       const wchar_t *fmt   _AND
+_vswprintf_r (struct _reent *ptr,
+       wchar_t *str,
+       size_t size,
+       const wchar_t *fmt,
        va_list ap)
 {
   int ret;
@@ -43,7 +42,7 @@ _DEFUN(_vswprintf_r, (ptr, str, size, fmt, ap),
 
   if (size > INT_MAX / sizeof (wchar_t))
     {
-      ptr->_errno = EOVERFLOW;	/* POSIX extension */
+      _REENT_ERRNO(ptr) = EOVERFLOW;	/* POSIX extension */
       return EOF;
     }
   f._flags = __SWR | __SSTR;
@@ -61,7 +60,7 @@ _DEFUN(_vswprintf_r, (ptr, str, size, fmt, ap),
     /* _svfwprintf_r() returns how many wide characters it would have printed
      * if there were enough space.  Return an error if too big to fit in str,
      * unlike snprintf, which returns the size needed.  */
-    ptr->_errno = EOVERFLOW;	/* POSIX extension */
+    _REENT_ERRNO(ptr) = EOVERFLOW;	/* POSIX extension */
     ret = -1;
   }
   return ret;
@@ -70,10 +69,9 @@ _DEFUN(_vswprintf_r, (ptr, str, size, fmt, ap),
 #ifndef _REENT_ONLY
 
 int
-_DEFUN(vswprintf, (str, size, fmt, ap),
-       wchar_t *__restrict str        _AND
-       size_t size      _AND
-       const wchar_t *__restrict fmt _AND
+vswprintf (wchar_t *__restrict str,
+       size_t size,
+       const wchar_t *__restrict fmt,
        va_list ap)
 {
   return _vswprintf_r (_REENT, str, size, fmt, ap);

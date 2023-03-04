@@ -1,6 +1,6 @@
 /* srcdest.c --- decoding M32C addressing modes.
 
-Copyright (C) 2005-2013 Free Software Foundation, Inc.
+Copyright (C) 2005-2023 Free Software Foundation, Inc.
 Contributed by Red Hat, Inc.
 
 This file is part of the GNU simulators.
@@ -18,10 +18,13 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
+/* This must come before any other includes.  */
+#include "defs.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "libiberty.h"
 #include "cpu.h"
 #include "mem.h"
 
@@ -31,7 +34,7 @@ static int src_addend = 0;
 static int dest_addend = 0;
 
 static int
-disp8 ()
+disp8 (void)
 {
   int rv;
   int tsave = trace;
@@ -45,7 +48,7 @@ disp8 ()
 }
 
 static int
-disp16 ()
+disp16 (void)
 {
   int rv;
   int tsave = trace;
@@ -59,7 +62,7 @@ disp16 ()
 }
 
 static int
-disp24 ()
+disp24 (void)
 {
   int rv;
   int tsave = trace;
@@ -73,7 +76,7 @@ disp24 ()
 }
 
 static int
-disp20 ()
+disp20 (void)
 {
   return disp24 () & 0x000fffff;
 }
@@ -117,14 +120,15 @@ srcdest
 decode_srcdest4 (int destcode, int bw)
 {
   srcdest sd;
-  sd.bytes = bw ? 2 : 1;
-  sd.mem = (destcode >= 6) ? 1 : 0;
   static const char *dc_wnames[16] = { "r0", "r1", "r2", "r3",
     "a0", "a1", "[a0]", "[a1]",
     "disp8[a0]", "disp8[a1]", "disp8[sb]", "disp8[fb]",
     "disp16[a0]", "disp16[a1]", "disp16[sb]", "disp16"
   };
   static const char *dc_bnames[4] = { "r0l", "r0h", "r1l", "r1h" };;
+
+  sd.bytes = bw ? 2 : 1;
+  sd.mem = (destcode >= 6) ? 1 : 0;
 
   if (trace)
     {
@@ -199,14 +203,15 @@ srcdest
 decode_jumpdest (int destcode, int w)
 {
   srcdest sd;
-  sd.bytes = w ? 2 : 3;
-  sd.mem = (destcode >= 6) ? 1 : 0;
   static const char *dc_wnames[16] = { "r0", "r1", "r2", "r3",
     "a0", "a1", "[a0]", "[a1]",
     "disp8[a0]", "disp8[a1]", "disp8[sb]", "disp8[fb]",
     "disp20[a0]", "disp20[a1]", "disp16[sb]", "abs16"
   };
   static const char *dc_anames[4] = { "r0l", "r0h", "r1l", "r1h" };
+
+  sd.bytes = w ? 2 : 3;
+  sd.mem = (destcode >= 6) ? 1 : 0;
 
   if (trace)
     {
@@ -352,7 +357,7 @@ decode_sd23 (int bbb, int bb, int bytes, int ind, int add)
   srcdest sd;
   int code = (bbb << 2) | bb;
 
-  if (code >= sizeof (modes23) / sizeof (modes23[0]))
+  if (code >= ARRAY_SIZE (modes23))
     abort ();
 
   if (trace)

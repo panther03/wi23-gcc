@@ -1,6 +1,5 @@
 # Expect script for ld-weak tests
-#   Copyright 2001, 2002, 2003, 2004, 2005, 2007, 2010, 2012
-#   Free Software Foundation, Inc.
+#   Copyright (C) 2001-2023 Free Software Foundation, Inc.
 #
 # This file is part of the GNU Binutils.
 #
@@ -23,8 +22,15 @@
 #	     Eric Youngdale (eric@andante.jic.com)
 #
 
-# This test can only be run if ld generates native executables.
-if ![isnative] then {return}
+# Check to see if the C compiler works
+if { ![check_compiler_available] } {
+    return
+}
+
+# Skip targets where -shared is not supported
+if { ![check_shared_lib_support] } {
+    return
+}
 
 # This test can only be run on a couple of ELF platforms.
 # Square bracket expressions seem to confuse istarget.
@@ -33,8 +39,6 @@ if {    ![istarget alpha*-*-linux*]
      && ![istarget arm*-*-linux*]
      && ![istarget hppa*64*-*-hpux*]
      && ![istarget hppa*-*-linux*]
-     && ![istarget i?86-*-sysv4*]
-     && ![istarget i?86-*-unixware]
      && ![istarget i?86-*-elf*]
      && ![istarget i?86-*-linux*]
      && ![istarget i?86-*-gnu*]
@@ -55,32 +59,11 @@ if {    ![istarget alpha*-*-linux*]
     return
 }
 
-if { [istarget *-*-linux*aout*]
-     || [istarget *-*-linux*oldld*] } {
-    return
-}
-
-if { [istarget rs6000*-*-aix*] || [istarget powerpc*-*-aix*] } {
-    return
-}
-
 set diff diff
 set tmpdir tmpdir
 set DOBJDUMP_FLAGS --dynamic-syms
 set SOBJDUMP_FLAGS --syms
 set shared "--shared -Wl,--no-as-needed"
-
-
-# <http://www.gnu.org/software/hurd/open_issues/binutils.html#weak>
-proc setup_xfail_gnu_hurd {} {
-    global target_triplet
-    # Be cautious to not XFAIL for *-*-linux-gnu*, *-*-kfreebsd-gnu*, etc.
-    switch -regexp $target_triplet {
-	^\[^-\]*-\[^-\]*-gnu.*$ {
-	    setup_xfail "*-*-*"
-	}
-    }
-}
 
 #
 # objdump_symstuff
@@ -94,9 +77,9 @@ proc objdump_symstuff { objdump object expectfile } {
 
     if ![info exists SOBJDUMP_FLAGS] { set SOBJDUMP_FLAGS "" }
 
-    verbose -log "$objdump $SOBJDUMP_FLAGS $object | grep foo$  > $tmpdir/objdump.out"
-
-    catch "exec $objdump $SOBJDUMP_FLAGS $object | grep foo$  > $tmpdir/objdump.out" exec_output
+    set cmd "$objdump $SOBJDUMP_FLAGS $object | sed -n {s/^\\(\[0-9a-f\]* *\\)\\(\[gw\]\\)\\( *\\)\\(\[FO\]\\)/\\1\\2\\4\\3/;/foo$/p} > $tmpdir/objdump.out"
+    verbose -log $cmd
+    catch "exec $cmd" exec_output
     set exec_output [prune_warnings $exec_output]
     if [string match "" $exec_output] then {
 
@@ -123,7 +106,8 @@ proc objdump_symstuff { objdump object expectfile } {
 	verbose "# Diff'ing: $expectfile $tmpdir/objdump.out" 2
 
 	set eof -1
-	set differences 0
+	set list_a {}
+	set list_b {}
 
 	while { [gets $file_a line] != $eof } {
 	    if [regexp "^#.*$" $line] then {
@@ -135,7 +119,8 @@ proc objdump_symstuff { objdump object expectfile } {
 	close $file_a
 
 	while { [gets $file_b line] != $eof } {
-	    if [regexp "^#.*$" $line] then {
+	    if [regexp {\.text.* \.[^ ]*$} $line] then {
+		# Discard defined powerpc64 dot-symbols
 		continue
 	    } else {
 		lappend list_b $line
@@ -146,7 +131,6 @@ proc objdump_symstuff { objdump object expectfile } {
 	for { set i 0 } { $i < [llength $list_a] } { incr i } {
 	    set line_a [lindex $list_a $i]
 	    set line_b [lindex $list_b $i]
-
 
 	    verbose "\t$expectfile: $i: $line_a" 3
 	    verbose "\t/tmp/objdump.out: $i: $line_b" 3
@@ -164,17 +148,12 @@ proc objdump_symstuff { objdump object expectfile } {
 	    verbose -log "Line count"
 	    return 0
 	}
+	return 1
 
-	if $differences<1 then {
-	    return 1
-	}
-
-	return 0
     } else {
 	verbose -log "$exec_output"
 	return 0
     }
-
 }
 
 #
@@ -189,9 +168,9 @@ proc objdump_dynsymstuff { objdump object expectfile } {
 
     if ![info exists DOBJDUMP_FLAGS] { set DOBJDUMP_FLAGS "" }
 
-    verbose -log "$objdump $DOBJDUMP_FLAGS $object | grep foo$ > $tmpdir/objdump.out"
-
-    catch "exec $objdump $DOBJDUMP_FLAGS $object | grep foo$ > $tmpdir/objdump.out" exec_output
+    set cmd "$objdump $DOBJDUMP_FLAGS $object | grep foo$ > $tmpdir/objdump.out"
+    verbose -log $cmd
+    catch "exec $cmd" exec_output
     set exec_output [prune_warnings $exec_output]
     if [string match "" $exec_output] then {
 
@@ -218,7 +197,8 @@ proc objdump_dynsymstuff { objdump object expectfile } {
 	verbose "# Diff'ing: $expectfile $tmpdir/objdump.out" 2
 
 	set eof -1
-	set differences 0
+	set list_a {}
+	set list_b {}
 
 	while { [gets $file_a line] != $eof } {
 	    if [regexp "^#.*$" $line] then {
@@ -230,7 +210,8 @@ proc objdump_dynsymstuff { objdump object expectfile } {
 	close $file_a
 
 	while { [gets $file_b line] != $eof } {
-	    if [regexp "^#.*$" $line] then {
+	    if [regexp {\.text.* \.[^ ]*$} $line] then {
+		# Discard defined powerpc64 dot-symbols
 		continue
 	    } else {
 		lappend list_b $line
@@ -274,33 +255,30 @@ proc objdump_dynsymstuff { objdump object expectfile } {
 	    verbose -log "Line count"
 	    return 0
 	}
+	return 1
 
-	if $differences<1 then {
-	    return 1
-	}
-
-	return 0
     } else {
 	verbose -log "$exec_output"
 	return 0
     }
-
 }
 
 proc build_lib {test libname objs dynsymexp} {
-    global CC
+    global CC_FOR_TARGET
     global objdump
     global tmpdir
     global shared
     global srcdir
     global subdir
+    global NOSANITIZE_CFLAGS
+    global NOLTO_CFLAGS
 
     set files ""
     foreach obj $objs {
       set files "$files $tmpdir/$obj"
     }
 
-    if {![ld_simple_link $CC $tmpdir/$libname.so "$shared $files"]} {
+    if {![ld_link "$CC_FOR_TARGET $NOSANITIZE_CFLAGS $NOLTO_CFLAGS" $tmpdir/$libname.so "$shared $files"]} {
 	fail $test
 	return
     }
@@ -314,19 +292,21 @@ proc build_lib {test libname objs dynsymexp} {
 }
 
 proc build_exec { test execname objs flags dat dynsymexp symexp} {
-    global CC
+    global CC_FOR_TARGET
     global objdump
     global tmpdir
     global srcdir
     global subdir
     global exec_output
+    global NOSANITIZE_CFLAGS
+    global NOLTO_CFLAGS
 
     set files ""
     foreach obj $objs {
       set files "$files $tmpdir/$obj"
     }
 
-    if {![ld_simple_link $CC $tmpdir/$execname "$flags $files"]} {
+    if {![ld_link $CC_FOR_TARGET $tmpdir/$execname "$flags $NOSANITIZE_CFLAGS $NOLTO_CFLAGS $files"]} {
 	fail "$test"
 	return
     }
@@ -345,6 +325,10 @@ proc build_exec { test execname objs flags dat dynsymexp symexp} {
 	}
     }
 
+    if ![isnative] {
+	unsupported $test
+	return
+    }
     # Run the resulting program
     send_log "$tmpdir/$execname >$tmpdir/$execname.out\n"
     verbose "$tmpdir/$execname >$tmpdir/$execname.out"
@@ -371,6 +355,16 @@ proc build_exec { test execname objs flags dat dynsymexp symexp} {
     pass $test
 }
 
+# Disable LTO for these tests.
+set cc_cmd "$CC_FOR_TARGET"
+if {[check_lto_available]} {
+   append cc_cmd " -fno-lto"
+}
+
+# Disable all sanitizers and LTO.
+set saved_CFLAGS "$CFLAGS_FOR_TARGET"
+append CFLAGS_FOR_TARGET " $NOSANITIZE_CFLAGS $NOLTO_CFLAGS"
+
 # Old version of GCC for MIPS default to enabling -fpic
 # and get confused if it is used on the command line.
 if { [istarget mips*-*-*] && ! [at_least_gcc_version 4 3] } then {
@@ -379,145 +373,83 @@ if { [istarget mips*-*-*] && ! [at_least_gcc_version 4 3] } then {
     # Unfortunately, the gcc argument is -fpic and the cc argument is
     # -KPIC.  We have to try both.
     set picflag "-fpic"
-    send_log "$CC $picflag\n"
-    verbose "$CC $picflag"
-    catch "exec $CC $picflag" exec_output
+    send_log "$CC_FOR_TARGET $picflag\n"
+    verbose "$CC_FOR_TARGET $picflag"
+    catch "exec $CC_FOR_TARGET $picflag" exec_output
     send_log "$exec_output\n"
     verbose "--" "$exec_output"
     if { [string match "*illegal option*" $exec_output]
 	 || [string match "*option ignored*" $exec_output]
 	 || [string match "*unrecognized option*" $exec_output]
 	 || [string match "*passed to ld*" $exec_output] } {
-	if [istarget *-*-sunos4*] {
-	    set picflag "-pic"
-	} else {
-	    set picflag "-KPIC"
-	}
+	set picflag "-KPIC"
     }
 }
 verbose "Using $picflag to compile PIC code"
 
-if ![ld_compile "$CC $CFLAGS $picflag" $srcdir/$subdir/foo.c $tmpdir/foo.o] {
-    unresolved "ELF weak"
-    return
-}
-
-if ![ld_compile "$CC $CFLAGS $picflag" $srcdir/$subdir/bar.c $tmpdir/bar.o] {
-    unresolved "ELF weak"
-    return
-}
-
-if ![ld_compile "$CC $CFLAGS" $srcdir/$subdir/main.c $tmpdir/main.o] {
-    unresolved "ELF weak"
-    return
-}
-
-if {![ld_simple_link $CC $tmpdir/libbar.so "$shared $tmpdir/bar.o"]} {
+if {![ld_compile "$cc_cmd $picflag" $srcdir/$subdir/foo.c $tmpdir/foo.o]
+    || ![ld_compile "$cc_cmd $picflag" $srcdir/$subdir/bar.c $tmpdir/bar.o]
+    || ![ld_compile "$cc_cmd" $srcdir/$subdir/main.c $tmpdir/main.o]
+    || ![ld_link $cc_cmd $tmpdir/libbar.so "$shared $tmpdir/bar.o"]
+    || ![ld_compile "$cc_cmd $picflag" $srcdir/$subdir/foo1a.c $tmpdir/foo1a.o]
+    || ![ld_compile "$cc_cmd $picflag" $srcdir/$subdir/foo1b.c $tmpdir/foo1b.o]
+    || ![ld_compile "$cc_cmd $picflag" $srcdir/$subdir/bar1a.c $tmpdir/bar1a.o]
+    || ![ld_compile "$cc_cmd $picflag" $srcdir/$subdir/bar1b.c $tmpdir/bar1b.o]
+    || ![ld_compile "$cc_cmd $picflag" $srcdir/$subdir/bar1c.c $tmpdir/bar1c.o]
+    || ![ld_compile "$cc_cmd $picflag" $srcdir/$subdir/main1.c $tmpdir/main1.o]} then {
+    unsupported "ELF weak"
+} elseif {![ld_link $cc_cmd $tmpdir/libfoo1a.so "$shared $tmpdir/foo1a.o"]
+	  || ![ld_link $cc_cmd $tmpdir/libfoo1b.so "$shared $tmpdir/foo1b.o"]
+	  || ![ld_link $cc_cmd $tmpdir/libbar1a.so "$shared $tmpdir/bar1a.o $tmpdir/libfoo1a.so"]} then {
     fail "ELF weak"
-    return
+} else {
+    build_lib "ELF DSO weak func first" libfoo "foo.o bar.o" dso.dsym
+    build_lib "ELF DSO weak func last" libfoo "bar.o foo.o" dso.dsym
+    build_lib "ELF DSO weak func first DSO" libfoo "foo.o libbar.so" dsow.dsym
+    build_lib "ELF DSO weak func last DSO" libfoo "libbar.so foo.o" dsow.dsym
+    build_exec "ELF weak func first" foo "main.o bar.o" "" strong "" strong.sym
+    build_exec "ELF weak func last" foo "bar.o main.o" "" strong "" strong.sym
+    build_exec "ELF weak func first DSO" foo "main.o libbar.so" "-Wl,-rpath,.,--no-as-needed" weak weak.dsym ""
+    build_exec "ELF weak func last DSO" foo "libbar.so main.o" "-Wl,-rpath,.,--no-as-needed" weak weak.dsym ""
+    build_lib "ELF DSO weak data first" libfoo "bar1a.o foo1a.o" dsodata.dsym
+    build_lib "ELF DSO weak data last" libfoo "foo1a.o bar1a.o" dsodata.dsym
+    build_lib "ELF DSO weak data first DSO" libfoo "main1.o libfoo1a.so" dsowdata.dsym
+    build_lib "ELF DSO weak data last DSO" libfoo "libfoo1a.so main1.o" dsowdata.dsym
+    build_lib "ELF DSO weak data first DSO common" libfoo "main1.o libfoo1b.so" dsowdata.dsym
+    build_lib "ELF DSO weak data last DSO common" libfoo "libfoo1b.so main1.o" dsowdata.dsym
+    build_exec "ELF weak data first" foo "main1.o bar1a.o foo1a.o" "" strongdata "" strongdata.sym
+    build_exec "ELF weak data last" foo "foo1a.o main1.o bar1a.o" "" strongdata "" strongdata.sym
+    build_exec "ELF weak data first common" foo "main1.o bar1a.o foo1b.o" "" strongdata "" strongcomm.sym
+    build_exec "ELF weak data last common" foo "foo1b.o main1.o bar1a.o" "" strongdata "" strongcomm.sym
+    build_exec "ELF weak data first DSO" foo "main1.o libbar1a.so libfoo1a.so" "-Wl,-rpath,.,--no-as-needed" weakdata weakdata.dsym ""
+    build_exec "ELF weak data last DSO" foo "libfoo1a.so main1.o libbar1a.so" "-Wl,-rpath,.,--no-as-needed" weakdata weakdata.dsym ""
+    build_exec "ELF weak data first DSO common" foo "main1.o libbar1a.so libfoo1b.so" "-Wl,--no-as-needed,-rpath,.,-rpath-link,." weakdata weakdata.dsym ""
+    build_exec "ELF weak data last DSO common" foo "libfoo1b.so main1.o libbar1a.so" "-Wl,--no-as-needed,-rpath,.,-rpath-link,." weakdata weakdata.dsym ""
 }
 
-if ![ld_compile "$CC $CFLAGS $picflag" $srcdir/$subdir/foo1a.c $tmpdir/foo1a.o] {
-    unresolved "ELF weak"
-    return
+if {![ld_compile "$cc_cmd $picflag" $srcdir/$subdir/size_foo.c $tmpdir/size_foo.o]
+    || ![ld_compile "$cc_cmd $picflag" $srcdir/$subdir/size_bar.c $tmpdir/size_bar_s.o]
+    || ![ld_compile "$cc_cmd $picflag -DSIZE_BIG" $srcdir/$subdir/size_bar.c $tmpdir/size_bar.o]
+    || ![ld_compile "$cc_cmd" $srcdir/$subdir/size_main.c $tmpdir/size_main.o]} then {
+    unsupported "ELF weak (size)"
+} else {
+    build_lib "ELF DSO small bar (size)" libsize_bar_s "size_bar_s.o" ""
+    build_lib "ELF DSO foo with small bar (size)" libsize_foo "size_foo.o libsize_bar_s.so" ""
+    build_lib "ELF DSO big bar (size)" libsize_bar "size_bar.o" ""
+    build_exec "ELF weak size" size_main "size_main.o libsize_foo.so libsize_bar.so" "-Wl,-rpath=.,-rpath-link=.,--no-as-needed" size "" ""
 }
-
-if ![ld_compile "$CC $CFLAGS $picflag" $srcdir/$subdir/foo1b.c $tmpdir/foo1b.o] {
-    unresolved "ELF weak"
-    return
-}
-
-if ![ld_compile "$CC $CFLAGS $picflag" $srcdir/$subdir/bar1a.c $tmpdir/bar1a.o] {
-    unresolved "ELF weak"
-    return
-}
-
-if ![ld_compile "$CC $CFLAGS $picflag" $srcdir/$subdir/bar1b.c $tmpdir/bar1b.o] {
-    unresolved "ELF weak"
-    return
-}
-
-if ![ld_compile "$CC $CFLAGS $picflag" $srcdir/$subdir/bar1c.c $tmpdir/bar1c.o] {
-    unresolved "ELF weak"
-    return
-}
-
-if ![ld_compile "$CC $CFLAGS $picflag" $srcdir/$subdir/main1.c $tmpdir/main1.o] {
-    unresolved "ELF weak"
-    return
-}
-
-if {![ld_simple_link $CC $tmpdir/libfoo1a.so "$shared $tmpdir/foo1a.o"]} {
-    fail "ELF weak"
-    return
-}
-
-if {![ld_simple_link $CC $tmpdir/libfoo1b.so "$shared $tmpdir/foo1b.o"]} {
-    fail "ELF weak"
-    return
-}
-
-if {![ld_simple_link $CC $tmpdir/libbar1a.so "$shared $tmpdir/bar1a.o $tmpdir/libfoo1a.so"]} {
-    fail "ELF weak"
-    return
-}
-
-build_lib "ELF DSO weak func first" libfoo "foo.o bar.o" dso.dsym
-build_lib "ELF DSO weak func last" libfoo "bar.o foo.o" dso.dsym
-build_lib "ELF DSO weak func first DSO" libfoo "foo.o libbar.so" dsow.dsym
-build_lib "ELF DSO weak func last DSO" libfoo "libbar.so foo.o" dsow.dsym
-build_exec "ELF weak func first" foo "main.o bar.o" "" strong "" strong.sym
-build_exec "ELF weak func last" foo "bar.o main.o" "" strong "" strong.sym
-setup_xfail_gnu_hurd
-build_exec "ELF weak func first DSO" foo "main.o libbar.so" "-Wl,-rpath,.,--no-as-needed" weak weak.dsym ""
-setup_xfail_gnu_hurd
-build_exec "ELF weak func last DSO" foo "libbar.so main.o" "-Wl,-rpath,.,--no-as-needed" weak weak.dsym ""
-
-build_lib "ELF DSO weak data first" libfoo "bar1a.o foo1a.o" dsodata.dsym
-build_lib "ELF DSO weak data last" libfoo "foo1a.o bar1a.o" dsodata.dsym
-build_lib "ELF DSO weak data first DSO" libfoo "main1.o libfoo1a.so" dsowdata.dsym
-build_lib "ELF DSO weak data last DSO" libfoo "libfoo1a.so main1.o" dsowdata.dsym
-build_lib "ELF DSO weak data first DSO common" libfoo "main1.o libfoo1b.so" dsowdata.dsym
-build_lib "ELF DSO weak data last DSO common" libfoo "libfoo1b.so main1.o" dsowdata.dsym
-build_exec "ELF weak data first" foo "main1.o bar1a.o foo1a.o" "" strongdata "" strongdata.sym
-build_exec "ELF weak data last" foo "foo1a.o main1.o bar1a.o" "" strongdata "" strongdata.sym
-build_exec "ELF weak data first common" foo "main1.o bar1a.o foo1b.o" "" strongdata "" strongcomm.sym
-build_exec "ELF weak data last common" foo "foo1b.o main1.o bar1a.o" "" strongdata "" strongcomm.sym
-setup_xfail_gnu_hurd
-build_exec "ELF weak data first DSO" foo "main1.o libbar1a.so libfoo1a.so" "-Wl,-rpath,.,--no-as-needed" weakdata weakdata.dsym ""
-setup_xfail_gnu_hurd
-build_exec "ELF weak data last DSO" foo "libfoo1a.so main1.o libbar1a.so" "-Wl,-rpath,.,--no-as-needed" weakdata weakdata.dsym ""
-setup_xfail_gnu_hurd
-build_exec "ELF weak data first DSO common" foo "main1.o libbar1a.so libfoo1b.so" "-Wl,-rpath,.,--no-as-needed" weakdata weakdata.dsym ""
-setup_xfail_gnu_hurd
-build_exec "ELF weak data last DSO common" foo "libfoo1b.so main1.o libbar1a.so" "-Wl,-rpath,.,--no-as-needed" weakdata weakdata.dsym ""
-
-if ![ld_compile "$CC $CFLAGS $picflag" $srcdir/$subdir/size_foo.c $tmpdir/size_foo.o] {
-    unresolved "ELF weak (size)"
-    return
-}
-
-if ![ld_compile "$CC $CFLAGS $picflag" $srcdir/$subdir/size_bar.c $tmpdir/size_bar.o] {
-    unresolved "ELF weak (size)"
-    return
-}
-
-build_lib "ELF DSO small bar (size)" libsize_bar "size_bar.o" ""
-build_lib "ELF DSO foo with small bar (size)" libsize_foo "size_foo.o libsize_bar.so" ""
-
-if ![ld_compile "$CC $CFLAGS $picflag -DSIZE_BIG" $srcdir/$subdir/size_bar.c $tmpdir/size_bar.o] {
-    unresolved "ELF weak (size)"
-    return
-}
-
-build_lib "ELF DSO big bar (size)" libsize_bar "size_bar.o" ""
-
-if ![ld_compile "$CC $CFLAGS" $srcdir/$subdir/size_main.c $tmpdir/size_main.o] {
-    unresolved "ELF weak (size)"
-    return
-}
-
-build_exec "ELF weak size" size_main "size_main.o libsize_foo.so libsize_bar.so" "-Wl,-rpath,.,--no-as-needed" size "" ""
 
 verbose "size2"
 run_dump_test $srcdir/$subdir/size2
+
+if {![ld_compile "$cc_cmd $picflag" $srcdir/$subdir/alias.c $tmpdir/alias.o]
+    || ![ld_link $cc_cmd $tmpdir/alias.so "$shared $tmpdir/alias.o"]
+    || ![ld_compile $cc_cmd $srcdir/$subdir/aliasmain.c $tmpdir/aliasmain.o]
+    || ![ld_compile $cc_cmd $srcdir/$subdir/weakref1.c $tmpdir/weakref1.o]
+    || ![ld_compile $cc_cmd $srcdir/$subdir/weakref2.c $tmpdir/weakref2.o]} then {
+    unsupported "ELF weak (alias)"
+} else {
+    build_exec "ELF weak (alias)" alias "aliasmain.o weakref1.o weakref2.o alias.so" "-Wl,-rpath=.,--no-as-needed" alias "" ""
+}
+
+set CFLAGS_FOR_TARGET "$saved_CFLAGS"

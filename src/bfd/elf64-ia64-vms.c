@@ -1,6 +1,5 @@
 /* IA-64 support for OpenVMS
-   Copyright 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007,
-   2008, 2009, 2010, 2012  Free Software Foundation, Inc.
+   Copyright (C) 1998-2023 Free Software Foundation, Inc.
 
    This file is part of BFD, the Binary File Descriptor library.
 
@@ -171,15 +170,16 @@ struct elf64_ia64_allocate_data
 };
 
 #define elf64_ia64_hash_table(p) \
-  (elf_hash_table_id ((struct elf_link_hash_table *) ((p)->hash)) \
-  == IA64_ELF_DATA ? ((struct elf64_ia64_link_hash_table *) ((p)->hash)) : NULL)
+  ((is_elf_hash_table ((p)->hash)					\
+    && elf_hash_table_id (elf_hash_table (p)) == IA64_ELF_DATA)		\
+   ? (struct elf64_ia64_link_hash_table *) (p)->hash : NULL)
 
 struct elf64_ia64_vms_obj_tdata
 {
   struct elf_obj_tdata root;
 
   /* Ident for shared library.  */
-  bfd_uint64_t ident;
+  uint64_t ident;
 
   /* Used only during link: offset in the .fixups section for this bfd.  */
   bfd_vma fixups_off;
@@ -216,22 +216,22 @@ typedef struct
 static struct elf64_ia64_dyn_sym_info * get_dyn_sym_info
   (struct elf64_ia64_link_hash_table *,
    struct elf_link_hash_entry *,
-   bfd *, const Elf_Internal_Rela *, bfd_boolean);
-static bfd_boolean elf64_ia64_dynamic_symbol_p
+   bfd *, const Elf_Internal_Rela *, bool);
+static bool elf64_ia64_dynamic_symbol_p
   (struct elf_link_hash_entry *);
-static bfd_boolean elf64_ia64_choose_gp
-  (bfd *, struct bfd_link_info *, bfd_boolean);
+static bool elf64_ia64_choose_gp
+  (bfd *, struct bfd_link_info *, bool);
 static void elf64_ia64_dyn_sym_traverse
   (struct elf64_ia64_link_hash_table *,
-   bfd_boolean (*) (struct elf64_ia64_dyn_sym_info *, void *),
+   bool (*) (struct elf64_ia64_dyn_sym_info *, void *),
    void *);
-static bfd_boolean allocate_global_data_got
+static bool allocate_global_data_got
   (struct elf64_ia64_dyn_sym_info *, void *);
-static bfd_boolean allocate_global_fptr_got
+static bool allocate_global_fptr_got
   (struct elf64_ia64_dyn_sym_info *, void *);
-static bfd_boolean allocate_local_got
+static bool allocate_local_got
   (struct elf64_ia64_dyn_sym_info *, void *);
-static bfd_boolean allocate_dynrel_entries
+static bool allocate_dynrel_entries
   (struct elf64_ia64_dyn_sym_info *, void *);
 static asection *get_pltoff
   (bfd *, struct elf64_ia64_link_hash_table *);
@@ -241,13 +241,24 @@ static asection *get_got
 
 /* Given a ELF reloc, return the matching HOWTO structure.  */
 
-static void
+static bool
 elf64_ia64_info_to_howto (bfd *abfd ATTRIBUTE_UNUSED,
 			  arelent *bfd_reloc,
 			  Elf_Internal_Rela *elf_reloc)
 {
-  bfd_reloc->howto
-    = ia64_elf_lookup_howto ((unsigned int) ELF64_R_TYPE (elf_reloc->r_info));
+  unsigned int r_type = ELF32_R_TYPE (elf_reloc->r_info);
+
+  bfd_reloc->howto = ia64_elf_lookup_howto (r_type);
+  if (bfd_reloc->howto == NULL)
+    {
+      /* xgettext:c-format */
+      _bfd_error_handler (_("%pB: unsupported relocation type %#x"),
+			  abfd, r_type);
+      bfd_set_error (bfd_error_bad_value);
+      return false;
+    }
+
+  return true;
 }
 
 
@@ -255,18 +266,18 @@ elf64_ia64_info_to_howto (bfd *abfd ATTRIBUTE_UNUSED,
 
 static const bfd_byte plt_full_entry[PLT_FULL_ENTRY_SIZE] =
 {
-  0x0b, 0x78, 0x00, 0x02, 0x00, 0x24,  /*   [MMI]       addl r15=0,r1;;   */
-  0x00, 0x41, 0x3c, 0x70, 0x29, 0xc0,  /*               ld8.acq r16=[r15],8*/
-  0x01, 0x08, 0x00, 0x84,              /*               mov r14=r1;;      */
-  0x11, 0x08, 0x00, 0x1e, 0x18, 0x10,  /*   [MIB]       ld8 r1=[r15]      */
-  0x60, 0x80, 0x04, 0x80, 0x03, 0x00,  /*               mov b6=r16        */
-  0x60, 0x00, 0x80, 0x00               /*               br.few b6;;       */
+  0x0b, 0x78, 0x00, 0x02, 0x00, 0x24,  /*   [MMI]	addl r15=0,r1;;	  */
+  0x00, 0x41, 0x3c, 0x70, 0x29, 0xc0,  /*		ld8.acq r16=[r15],8*/
+  0x01, 0x08, 0x00, 0x84,	       /*		mov r14=r1;;	  */
+  0x11, 0x08, 0x00, 0x1e, 0x18, 0x10,  /*   [MIB]	ld8 r1=[r15]	  */
+  0x60, 0x80, 0x04, 0x80, 0x03, 0x00,  /*		mov b6=r16	  */
+  0x60, 0x00, 0x80, 0x00	       /*		br.few b6;;	  */
 };
 
 static const bfd_byte oor_brl[16] =
 {
-  0x05, 0x00, 0x00, 0x00, 0x01, 0x00,  /*  [MLX]        nop.m 0           */
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  /*               brl.sptk.few tgt;;*/
+  0x05, 0x00, 0x00, 0x00, 0x01, 0x00,  /*  [MLX]	nop.m 0		  */
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  /*		brl.sptk.few tgt;;*/
   0x00, 0x00, 0x00, 0xc0
 };
 
@@ -319,10 +330,10 @@ elf64_ia64_update_short_info (asection *sec, bfd_vma offset,
    the other relaxations are done.
 */
 
-static bfd_boolean
+static bool
 elf64_ia64_relax_section (bfd *abfd, asection *sec,
 			  struct bfd_link_info *link_info,
-			  bfd_boolean *again)
+			  bool *again)
 {
   struct one_fixup
     {
@@ -339,35 +350,36 @@ elf64_ia64_relax_section (bfd *abfd, asection *sec,
   Elf_Internal_Sym *isymbuf = NULL;
   struct elf64_ia64_link_hash_table *ia64_info;
   struct one_fixup *fixups = NULL;
-  bfd_boolean changed_contents = FALSE;
-  bfd_boolean changed_relocs = FALSE;
-  bfd_boolean skip_relax_pass_0 = TRUE;
-  bfd_boolean skip_relax_pass_1 = TRUE;
+  bool changed_contents = false;
+  bool changed_relocs = false;
+  bool skip_relax_pass_0 = true;
+  bool skip_relax_pass_1 = true;
   bfd_vma gp = 0;
 
   /* Assume we're not going to change any sizes, and we'll only need
      one pass.  */
-  *again = FALSE;
+  *again = false;
 
-  if (link_info->relocatable)
+  if (bfd_link_relocatable (link_info))
     (*link_info->callbacks->einfo)
       (_("%P%F: --relax and -r may not be used together\n"));
 
   /* Don't even try to relax for non-ELF outputs.  */
   if (!is_elf_hash_table (link_info->hash))
-    return FALSE;
+    return false;
 
   /* Nothing to do if there are no relocations or there is no need for
      the current pass.  */
-  if ((sec->flags & SEC_RELOC) == 0
-      || sec->reloc_count == 0
+  if (sec->reloc_count == 0
+      || (sec->flags & SEC_RELOC) == 0
+      || (sec->flags & SEC_HAS_CONTENTS) == 0
       || (link_info->relax_pass == 0 && sec->skip_relax_pass_0)
       || (link_info->relax_pass == 1 && sec->skip_relax_pass_1))
-    return TRUE;
+    return true;
 
   ia64_info = elf64_ia64_hash_table (link_info);
   if (ia64_info == NULL)
-    return FALSE;
+    return false;
 
   symtab_hdr = &elf_tdata (abfd)->symtab_hdr;
 
@@ -376,7 +388,7 @@ elf64_ia64_relax_section (bfd *abfd, asection *sec,
 		     (abfd, sec, NULL, (Elf_Internal_Rela *) NULL,
 		      link_info->keep_memory));
   if (internal_relocs == NULL)
-    return FALSE;
+    return false;
 
   irelend = internal_relocs + sec->reloc_count;
 
@@ -396,7 +408,7 @@ elf64_ia64_relax_section (bfd *abfd, asection *sec,
       asection *tsec;
       struct one_fixup *f;
       bfd_size_type amt;
-      bfd_boolean is_branch;
+      bool is_branch;
       struct elf64_ia64_dyn_sym_info *dyn_i;
 
       switch (r_type)
@@ -408,8 +420,8 @@ elf64_ia64_relax_section (bfd *abfd, asection *sec,
 	  /* In pass 1, all br relaxations are done. We can skip it. */
 	  if (link_info->relax_pass == 1)
 	    continue;
-	  skip_relax_pass_0 = FALSE;
-	  is_branch = TRUE;
+	  skip_relax_pass_0 = false;
+	  is_branch = true;
 	  break;
 
 	case R_IA64_PCREL60B:
@@ -417,10 +429,10 @@ elf64_ia64_relax_section (bfd *abfd, asection *sec,
 	     will increase the code size. Defer it to pass 1.  */
 	  if (link_info->relax_pass == 0)
 	    {
-	      skip_relax_pass_1 = FALSE;
+	      skip_relax_pass_1 = false;
 	      continue;
 	    }
-	  is_branch = TRUE;
+	  is_branch = true;
 	  break;
 
 	case R_IA64_GPREL22:
@@ -432,10 +444,10 @@ elf64_ia64_relax_section (bfd *abfd, asection *sec,
 	     increase the code size. Defer it to pass 1.  */
 	  if (link_info->relax_pass == 0)
 	    {
-	      skip_relax_pass_1 = FALSE;
+	      skip_relax_pass_1 = false;
 	      continue;
 	    }
-	  is_branch = FALSE;
+	  is_branch = false;
 	  break;
 
 	default:
@@ -473,7 +485,7 @@ elf64_ia64_relax_section (bfd *abfd, asection *sec,
 	    tsec = bfd_section_from_elf_index (abfd, isym->st_shndx);
 
 	  toff = isym->st_value;
-	  dyn_i = get_dyn_sym_info (ia64_info, NULL, abfd, irel, FALSE);
+	  dyn_i = get_dyn_sym_info (ia64_info, NULL, abfd, irel, false);
 	}
       else
 	{
@@ -488,7 +500,7 @@ elf64_ia64_relax_section (bfd *abfd, asection *sec,
 		 || h->root.type == bfd_link_hash_warning)
 	    h = (struct elf_link_hash_entry *) h->root.u.i.link;
 
-	  dyn_i = get_dyn_sym_info (ia64_info, h, abfd, irel, FALSE);
+	  dyn_i = get_dyn_sym_info (ia64_info, h, abfd, irel, false);
 
 	  /* For branches to dynamic symbols, we're interested instead
 	     in a branch to the PLT entry.  */
@@ -556,7 +568,7 @@ elf64_ia64_relax_section (bfd *abfd, asection *sec,
 		  ia64_elf_relax_brl (contents, roff);
 
 		  irel->r_info = ELF64_R_INFO (ELF64_R_SYM (irel->r_info),
-                                               R_IA64_PCREL21B);
+					       R_IA64_PCREL21B);
 
 		  /* If the original relocation offset points to slot
 		     1, change it to slot 2.  */
@@ -571,7 +583,7 @@ elf64_ia64_relax_section (bfd *abfd, asection *sec,
 	  else if (ia64_elf_relax_br (contents, roff))
 	    {
 	      irel->r_info = ELF64_R_INFO (ELF64_R_SYM (irel->r_info),
-                                           R_IA64_PCREL60B);
+					   R_IA64_PCREL60B);
 
 	      /* Make the relocation offset point to slot 1.  */
 	      irel->r_offset = (irel->r_offset & ~((bfd_vma) 0x3)) + 1;
@@ -583,9 +595,11 @@ elf64_ia64_relax_section (bfd *abfd, asection *sec,
 	  if (strcmp (sec->output_section->name, ".init") == 0
 	      || strcmp (sec->output_section->name, ".fini") == 0)
 	    {
-	      (*_bfd_error_handler)
-		(_("%B: Can't relax br at 0x%lx in section `%A'. Please use brl or indirect branch."),
-		 sec->owner, sec, (unsigned long) roff);
+	      _bfd_error_handler
+		/* xgettext:c-format */
+		(_("%pB: can't relax br at %#" PRIx64 " in section `%pA';"
+		   " please use brl or indirect branch"),
+		 sec->owner, (uint64_t) roff, sec);
 	      bfd_set_error (bfd_error_bad_value);
 	      goto error_return;
 	    }
@@ -641,10 +655,10 @@ elf64_ia64_relax_section (bfd *abfd, asection *sec,
 		}
 	      else
 		{
-                  memcpy (contents + trampoff, oor_brl, size);
-                  irel->r_info = ELF64_R_INFO (ELF64_R_SYM (irel->r_info),
-                                               R_IA64_PCREL60B);
-                  irel->r_offset = trampoff + 2;
+		  memcpy (contents + trampoff, oor_brl, size);
+		  irel->r_info = ELF64_R_INFO (ELF64_R_SYM (irel->r_info),
+					       R_IA64_PCREL60B);
+		  irel->r_offset = trampoff + 2;
 		}
 
 	      /* Record the fixup so we don't do it again this section.  */
@@ -673,8 +687,8 @@ elf64_ia64_relax_section (bfd *abfd, asection *sec,
 	      != bfd_reloc_ok)
 	    goto error_return;
 
-	  changed_contents = TRUE;
-	  changed_relocs = TRUE;
+	  changed_contents = true;
+	  changed_relocs = true;
 	}
       else
 	{
@@ -685,7 +699,7 @@ elf64_ia64_relax_section (bfd *abfd, asection *sec,
 	      gp = _bfd_get_gp_value (obfd);
 	      if (gp == 0)
 		{
-		  if (!elf64_ia64_choose_gp (obfd, link_info, FALSE))
+		  if (!elf64_ia64_choose_gp (obfd, link_info, false))
 		    goto error_return;
 		  gp = _bfd_get_gp_value (obfd);
 		}
@@ -702,13 +716,13 @@ elf64_ia64_relax_section (bfd *abfd, asection *sec,
 					  ia64_info);
 	  else if (r_type == R_IA64_LTOFF22X)
 	    {
-              /* Can't deal yet correctly with ABS symbols.  */
-              if (bfd_is_abs_section (tsec))
-                continue;
+	      /* Can't deal yet correctly with ABS symbols.  */
+	      if (bfd_is_abs_section (tsec))
+		continue;
 
 	      irel->r_info = ELF64_R_INFO (ELF64_R_SYM (irel->r_info),
 					   R_IA64_GPREL22);
-	      changed_relocs = TRUE;
+	      changed_relocs = true;
 
 	      elf64_ia64_update_short_info (tsec->output_section,
 					    tsec->output_offset + toff,
@@ -718,8 +732,8 @@ elf64_ia64_relax_section (bfd *abfd, asection *sec,
 	    {
 	      ia64_elf_relax_ldxmov (contents, roff);
 	      irel->r_info = ELF64_R_INFO (0, R_IA64_NONE);
-	      changed_contents = TRUE;
-	      changed_relocs = TRUE;
+	      changed_contents = true;
+	      changed_relocs = true;
 	    }
 	}
     }
@@ -777,30 +791,28 @@ elf64_ia64_relax_section (bfd *abfd, asection *sec,
     }
 
   *again = changed_contents || changed_relocs;
-  return TRUE;
+  return true;
 
  error_return:
-  if (isymbuf != NULL && (unsigned char *) isymbuf != symtab_hdr->contents)
+  if ((unsigned char *) isymbuf != symtab_hdr->contents)
     free (isymbuf);
-  if (contents != NULL
-      && elf_section_data (sec)->this_hdr.contents != contents)
+  if (elf_section_data (sec)->this_hdr.contents != contents)
     free (contents);
-  if (internal_relocs != NULL
-      && elf_section_data (sec)->relocs != internal_relocs)
+  if (elf_section_data (sec)->relocs != internal_relocs)
     free (internal_relocs);
-  return FALSE;
+  return false;
 }
 #undef skip_relax_pass_0
 #undef skip_relax_pass_1
 
 /* Return TRUE if NAME is an unwind table section name.  */
 
-static inline bfd_boolean
+static inline bool
 is_unwind_section_name (bfd *abfd ATTRIBUTE_UNUSED, const char *name)
 {
-  return ((CONST_STRNEQ (name, ELF_STRING_ia64_unwind)
-	   && ! CONST_STRNEQ (name, ELF_STRING_ia64_unwind_info))
-	  || CONST_STRNEQ (name, ELF_STRING_ia64_unwind_once));
+  return ((startswith (name, ELF_STRING_ia64_unwind)
+	   && ! startswith (name, ELF_STRING_ia64_unwind_info))
+	  || startswith (name, ELF_STRING_ia64_unwind_once));
 }
 
 
@@ -809,26 +821,25 @@ is_unwind_section_name (bfd *abfd ATTRIBUTE_UNUSED, const char *name)
 /* ??? There is no bfd internal flag equivalent to the SHF_IA_64_NORECOV
    flag.  */
 
-static bfd_boolean
-elf64_ia64_section_flags (flagword *flags,
-			  const Elf_Internal_Shdr *hdr)
+static bool
+elf64_ia64_section_flags (const Elf_Internal_Shdr *hdr)
 {
   if (hdr->sh_flags & SHF_IA_64_SHORT)
-    *flags |= SEC_SMALL_DATA;
+    hdr->bfd_section->flags |= SEC_SMALL_DATA;
 
-  return TRUE;
+  return true;
 }
 
 /* Set the correct type for an IA-64 ELF section.  We do this by the
    section name, which is a hack, but ought to work.  */
 
-static bfd_boolean
+static bool
 elf64_ia64_fake_sections (bfd *abfd, Elf_Internal_Shdr *hdr,
 			  asection *sec)
 {
   const char *name;
 
-  name = bfd_get_section_name (abfd, sec);
+  name = bfd_section_name (sec);
 
   if (is_unwind_section_name (abfd, name))
     {
@@ -843,13 +854,13 @@ elf64_ia64_fake_sections (bfd *abfd, Elf_Internal_Shdr *hdr,
   if (sec->flags & SEC_SMALL_DATA)
     hdr->sh_flags |= SHF_IA_64_SHORT;
 
-  return TRUE;
+  return true;
 }
 
 /* Hook called by the linker routine which adds symbols from an object
    file.  We use it to put .comm items in .sbss, and not .bss.  */
 
-static bfd_boolean
+static bool
 elf64_ia64_add_symbol_hook (bfd *abfd,
 			    struct bfd_link_info *info,
 			    Elf_Internal_Sym *sym,
@@ -859,7 +870,7 @@ elf64_ia64_add_symbol_hook (bfd *abfd,
 			    bfd_vma *valp)
 {
   if (sym->st_shndx == SHN_COMMON
-      && !info->relocatable
+      && !bfd_link_relocatable (info)
       && sym->st_size <= elf_gp_size (abfd))
     {
       /* Common symbols less than or equal to -G nn bytes are
@@ -872,22 +883,23 @@ elf64_ia64_add_symbol_hook (bfd *abfd,
 	  scomm = bfd_make_section_with_flags (abfd, ".scommon",
 					       (SEC_ALLOC
 						| SEC_IS_COMMON
+						| SEC_SMALL_DATA
 						| SEC_LINKER_CREATED));
 	  if (scomm == NULL)
-	    return FALSE;
+	    return false;
 	}
 
       *secp = scomm;
       *valp = sym->st_size;
     }
 
-  return TRUE;
+  return true;
 }
 
 /* According to the Tahoe assembler spec, all labels starting with a
    '.' are local.  */
 
-static bfd_boolean
+static bool
 elf64_ia64_is_local_label_name (bfd *abfd ATTRIBUTE_UNUSED,
 				const char *name)
 {
@@ -896,7 +908,7 @@ elf64_ia64_is_local_label_name (bfd *abfd ATTRIBUTE_UNUSED,
 
 /* Should we do dynamic things to this symbol?  */
 
-static bfd_boolean
+static bool
 elf64_ia64_dynamic_symbol_p (struct elf_link_hash_entry *h)
 {
   return h != NULL && h->def_dynamic;
@@ -933,7 +945,7 @@ elf64_ia64_new_elf_hash_entry (struct bfd_hash_entry *entry,
 static void
 elf64_ia64_hash_hide_symbol (struct bfd_link_info *info,
 			     struct elf_link_hash_entry *xh,
-			     bfd_boolean force_local)
+			     bool force_local)
 {
   struct elf64_ia64_link_hash_entry *h;
   struct elf64_ia64_dyn_sym_info *dyn_i;
@@ -976,6 +988,65 @@ elf64_ia64_local_htab_eq (const void *ptr1, const void *ptr2)
   return entry1->id == entry2->id && entry1->r_sym == entry2->r_sym;
 }
 
+/* Free the global elf64_ia64_dyn_sym_info array.  */
+
+static bool
+elf64_ia64_global_dyn_info_free (struct elf_link_hash_entry *xentry,
+				 void * unused ATTRIBUTE_UNUSED)
+{
+  struct elf64_ia64_link_hash_entry *entry
+    = (struct elf64_ia64_link_hash_entry *) xentry;
+
+  if (entry->root.root.type == bfd_link_hash_warning)
+    entry = (struct elf64_ia64_link_hash_entry *) entry->root.root.u.i.link;
+
+  free (entry->info);
+  entry->info = NULL;
+  entry->count = 0;
+  entry->sorted_count = 0;
+  entry->size = 0;
+
+  return true;
+}
+
+/* Free the local elf64_ia64_dyn_sym_info array.  */
+
+static int
+elf64_ia64_local_dyn_info_free (void **slot,
+				void * unused ATTRIBUTE_UNUSED)
+{
+  struct elf64_ia64_local_hash_entry *entry
+    = (struct elf64_ia64_local_hash_entry *) *slot;
+
+  free (entry->info);
+  entry->info = NULL;
+  entry->count = 0;
+  entry->sorted_count = 0;
+  entry->size = 0;
+
+  return true;
+}
+
+/* Destroy IA-64 linker hash table.  */
+
+static void
+elf64_ia64_link_hash_table_free (bfd *obfd)
+{
+  struct elf64_ia64_link_hash_table *ia64_info
+    = (struct elf64_ia64_link_hash_table *) obfd->link.hash;
+  if (ia64_info->loc_hash_table)
+    {
+      htab_traverse (ia64_info->loc_hash_table,
+		     elf64_ia64_local_dyn_info_free, NULL);
+      htab_delete (ia64_info->loc_hash_table);
+    }
+  if (ia64_info->loc_hash_memory)
+    objalloc_free ((struct objalloc *) ia64_info->loc_hash_memory);
+  elf_link_hash_traverse (&ia64_info->root,
+			  elf64_ia64_global_dyn_info_free, NULL);
+  _bfd_elf_link_hash_table_free (obfd);
+}
+
 /* Create the derived linker hash table.  The IA-64 ELF port uses this
    derived hash table to keep information specific to the IA-64 ElF
    linker (without using static variables).  */
@@ -1003,88 +1074,24 @@ elf64_ia64_hash_table_create (bfd *abfd)
   ret->loc_hash_memory = objalloc_create ();
   if (!ret->loc_hash_table || !ret->loc_hash_memory)
     {
-      free (ret);
+      elf64_ia64_link_hash_table_free (abfd);
       return NULL;
     }
+  ret->root.root.hash_table_free = elf64_ia64_link_hash_table_free;
 
   return &ret->root.root;
-}
-
-/* Free the global elf64_ia64_dyn_sym_info array.  */
-
-static bfd_boolean
-elf64_ia64_global_dyn_info_free (void **xentry,
-				 void * unused ATTRIBUTE_UNUSED)
-{
-  struct elf64_ia64_link_hash_entry *entry
-    = (struct elf64_ia64_link_hash_entry *) xentry;
-
-  if (entry->root.root.type == bfd_link_hash_warning)
-    entry = (struct elf64_ia64_link_hash_entry *) entry->root.root.u.i.link;
-
-  if (entry->info)
-    {
-      free (entry->info);
-      entry->info = NULL;
-      entry->count = 0;
-      entry->sorted_count = 0;
-      entry->size = 0;
-    }
-
-  return TRUE;
-}
-
-/* Free the local elf64_ia64_dyn_sym_info array.  */
-
-static bfd_boolean
-elf64_ia64_local_dyn_info_free (void **slot,
-				void * unused ATTRIBUTE_UNUSED)
-{
-  struct elf64_ia64_local_hash_entry *entry
-    = (struct elf64_ia64_local_hash_entry *) *slot;
-
-  if (entry->info)
-    {
-      free (entry->info);
-      entry->info = NULL;
-      entry->count = 0;
-      entry->sorted_count = 0;
-      entry->size = 0;
-    }
-
-  return TRUE;
-}
-
-/* Destroy IA-64 linker hash table.  */
-
-static void
-elf64_ia64_hash_table_free (struct bfd_link_hash_table *hash)
-{
-  struct elf64_ia64_link_hash_table *ia64_info
-    = (struct elf64_ia64_link_hash_table *) hash;
-  if (ia64_info->loc_hash_table)
-    {
-      htab_traverse (ia64_info->loc_hash_table,
-		     elf64_ia64_local_dyn_info_free, NULL);
-      htab_delete (ia64_info->loc_hash_table);
-    }
-  if (ia64_info->loc_hash_memory)
-    objalloc_free ((struct objalloc *) ia64_info->loc_hash_memory);
-  elf_link_hash_traverse (&ia64_info->root,
-			  elf64_ia64_global_dyn_info_free, NULL);
-  _bfd_elf_link_hash_table_free (hash);
 }
 
 /* Traverse both local and global hash tables.  */
 
 struct elf64_ia64_dyn_sym_traverse_data
 {
-  bfd_boolean (*func) (struct elf64_ia64_dyn_sym_info *, void *);
+  bool (*func) (struct elf64_ia64_dyn_sym_info *, void *);
   void * data;
 };
 
-static bfd_boolean
-elf64_ia64_global_dyn_sym_thunk (struct bfd_hash_entry *xentry,
+static bool
+elf64_ia64_global_dyn_sym_thunk (struct elf_link_hash_entry *xentry,
 				 void * xdata)
 {
   struct elf64_ia64_link_hash_entry *entry
@@ -1101,11 +1108,11 @@ elf64_ia64_global_dyn_sym_thunk (struct bfd_hash_entry *xentry,
        count != 0;
        count--, dyn_i++)
     if (! (*data->func) (dyn_i, data->data))
-      return FALSE;
-  return TRUE;
+      return false;
+  return true;
 }
 
-static bfd_boolean
+static int
 elf64_ia64_local_dyn_sym_thunk (void **slot, void * xdata)
 {
   struct elf64_ia64_local_hash_entry *entry
@@ -1119,13 +1126,13 @@ elf64_ia64_local_dyn_sym_thunk (void **slot, void * xdata)
        count != 0;
        count--, dyn_i++)
     if (! (*data->func) (dyn_i, data->data))
-      return FALSE;
-  return TRUE;
+      return false;
+  return true;
 }
 
 static void
 elf64_ia64_dyn_sym_traverse (struct elf64_ia64_link_hash_table *ia64_info,
-			     bfd_boolean (*func) (struct elf64_ia64_dyn_sym_info *, void *),
+			     bool (*func) (struct elf64_ia64_dyn_sym_info *, void *),
 			     void * data)
 {
   struct elf64_ia64_dyn_sym_traverse_data xdata;
@@ -1141,9 +1148,9 @@ elf64_ia64_dyn_sym_traverse (struct elf64_ia64_link_hash_table *ia64_info,
 
 #define NOTE_NAME "IPF/VMS"
 
-static bfd_boolean
+static bool
 create_ia64_vms_notes (bfd *abfd, struct bfd_link_info *info,
-                       unsigned int time_hi, unsigned int time_lo)
+		       unsigned int time_hi, unsigned int time_lo)
 {
 #define NBR_NOTES 7
   Elf_Internal_Note notes[NBR_NOTES];
@@ -1160,7 +1167,7 @@ create_ia64_vms_notes (bfd *abfd, struct bfd_link_info *info,
 
   ia64_info = elf64_ia64_hash_table (info);
 
-  module_name = vms_get_module_name (bfd_get_filename (abfd), TRUE);
+  module_name = vms_get_module_name (bfd_get_filename (abfd), true);
   module_name_len = strlen (module_name) + 1;
 
   bfd_putl32 (time_lo, cur_time + 0);
@@ -1196,7 +1203,7 @@ create_ia64_vms_notes (bfd *abfd, struct bfd_link_info *info,
   orig_dyn_size = (sizeof (*orig_dyn) + sizeof (IMG_ID) - 1 + 7) & ~7;
   orig_dyn = bfd_zalloc (abfd, orig_dyn_size);
   if (orig_dyn == NULL)
-    return FALSE;
+    return false;
   bfd_putl32 (1, orig_dyn->major_id);
   bfd_putl32 (3, orig_dyn->minor_id);
   memcpy (orig_dyn->manipulation_date, cur_time, sizeof (cur_time));
@@ -1222,7 +1229,7 @@ create_ia64_vms_notes (bfd *abfd, struct bfd_link_info *info,
   /* Malloc a temporary buffer large enough for most notes */
   note_contents = (unsigned char *) bfd_zalloc (abfd, note_size);
   if (note_contents == NULL)
-    return FALSE;
+    return false;
   noteptr = note_contents;
 
   /* Fill notes.  */
@@ -1246,10 +1253,10 @@ create_ia64_vms_notes (bfd *abfd, struct bfd_link_info *info,
 
   free (module_name);
 
-  return TRUE;
+  return true;
 }
 
-static bfd_boolean
+static bool
 elf64_ia64_create_dynamic_sections (bfd *abfd,
 				    struct bfd_link_info *info)
 {
@@ -1260,10 +1267,10 @@ elf64_ia64_create_dynamic_sections (bfd *abfd,
 
   ia64_info = elf64_ia64_hash_table (info);
   if (ia64_info == NULL)
-    return FALSE;
+    return false;
 
   if (elf_hash_table (info)->dynamic_sections_created)
-    return TRUE;
+    return true;
 
   abfd = elf_hash_table (info)->dynobj;
   bed = get_elf_backend_data (abfd);
@@ -1273,20 +1280,20 @@ elf64_ia64_create_dynamic_sections (bfd *abfd,
   s = bfd_make_section_anyway_with_flags (abfd, ".dynamic",
 					  flags | SEC_READONLY);
   if (s == NULL
-      || ! bfd_set_section_alignment (abfd, s, bed->s->log_file_align))
-    return FALSE;
+      || !bfd_set_section_alignment (s, bed->s->log_file_align))
+    return false;
 
   s = bfd_make_section_anyway_with_flags (abfd, ".plt", flags | SEC_READONLY);
   if (s == NULL
-      || ! bfd_set_section_alignment (abfd, s, bed->plt_alignment))
-    return FALSE;
+      || !bfd_set_section_alignment (s, bed->plt_alignment))
+    return false;
   ia64_info->root.splt = s;
 
   if (!get_got (abfd, ia64_info))
-    return FALSE;
+    return false;
 
   if (!get_pltoff (abfd, ia64_info))
-    return FALSE;
+    return false;
 
   s = bfd_make_section_anyway_with_flags (abfd, ".vmsdynstr",
 					  (SEC_ALLOC
@@ -1294,8 +1301,8 @@ elf64_ia64_create_dynamic_sections (bfd *abfd,
 					   | SEC_IN_MEMORY
 					   | SEC_LINKER_CREATED));
   if (s == NULL
-      || !bfd_set_section_alignment (abfd, s, 0))
-    return FALSE;
+      || !bfd_set_section_alignment (s, 0))
+    return false;
 
   /* Create a fixup section.  */
   s = bfd_make_section_anyway_with_flags (abfd, ".fixups",
@@ -1304,8 +1311,8 @@ elf64_ia64_create_dynamic_sections (bfd *abfd,
 					   | SEC_IN_MEMORY
 					   | SEC_LINKER_CREATED));
   if (s == NULL
-      || !bfd_set_section_alignment (abfd, s, 3))
-    return FALSE;
+      || !bfd_set_section_alignment (s, 3))
+    return false;
   ia64_info->fixups_sec = s;
 
   /* Create the transfer fixup section.  */
@@ -1315,31 +1322,31 @@ elf64_ia64_create_dynamic_sections (bfd *abfd,
 					   | SEC_IN_MEMORY
 					   | SEC_LINKER_CREATED));
   if (s == NULL
-      || !bfd_set_section_alignment (abfd, s, 3))
-    return FALSE;
+      || !bfd_set_section_alignment (s, 3))
+    return false;
   s->size = sizeof (struct elf64_vms_transfer);
   ia64_info->transfer_sec = s;
 
   /* Create note section.  */
   s = bfd_make_section_anyway_with_flags (abfd, ".vms.note",
-                                          (SEC_LINKER_CREATED
-                                           | SEC_HAS_CONTENTS
-                                           | SEC_IN_MEMORY
-                                           | SEC_READONLY));
+					  (SEC_LINKER_CREATED
+					   | SEC_HAS_CONTENTS
+					   | SEC_IN_MEMORY
+					   | SEC_READONLY));
   if (s == NULL
-      || !bfd_set_section_alignment (abfd, s, 3))
-    return FALSE;
+      || !bfd_set_section_alignment (s, 3))
+    return false;
   ia64_info->note_sec = s;
 
-  elf_hash_table (info)->dynamic_sections_created = TRUE;
-  return TRUE;
+  elf_hash_table (info)->dynamic_sections_created = true;
+  return true;
 }
 
 /* Find and/or create a hash entry for local symbol.  */
 static struct elf64_ia64_local_hash_entry *
 get_local_sym_hash (struct elf64_ia64_link_hash_table *ia64_info,
 		    bfd *abfd, const Elf_Internal_Rela *rel,
-		    bfd_boolean create)
+		    bool create)
 {
   struct elf64_ia64_local_hash_entry e, *ret;
   asection *sec = abfd->sections;
@@ -1569,7 +1576,7 @@ sort_dyn_sym_info (struct elf64_ia64_dyn_sym_info *info,
 static struct elf64_ia64_dyn_sym_info *
 get_dyn_sym_info (struct elf64_ia64_link_hash_table *ia64_info,
 		  struct elf_link_hash_entry *h, bfd *abfd,
-		  const Elf_Internal_Rela *rel, bfd_boolean create)
+		  const Elf_Internal_Rela *rel, bool create)
 {
   struct elf64_ia64_dyn_sym_info **info_p, *info, *dyn_i, key;
   unsigned int *count_p, *sorted_count_p, *size_p;
@@ -1611,7 +1618,7 @@ get_dyn_sym_info (struct elf64_ia64_link_hash_table *ia64_info,
   if (create)
     {
       /* When we create the array, we don't check for duplicates,
-         except in the previously sorted section if one exists, and
+	 except in the previously sorted section if one exists, and
 	 against the last inserted entry.  This allows insertions to
 	 be fast.  */
       if (info)
@@ -1661,7 +1668,7 @@ get_dyn_sym_info (struct elf64_ia64_link_hash_table *ia64_info,
       *size_p = size;
       *info_p = info;
 
-has_space:
+    has_space:
       /* Append the new one to the array.  */
       dyn_i = info + count;
       memset (dyn_i, 0, sizeof (*dyn_i));
@@ -1725,8 +1732,8 @@ get_got (bfd *abfd, struct elf64_ia64_link_hash_table *ia64_info)
       got = bfd_make_section_anyway_with_flags (dynobj, ".got",
 						flags | SEC_SMALL_DATA);
       if (got == NULL
-          || !bfd_set_section_alignment (dynobj, got, 3))
-        return NULL;
+	  || !bfd_set_section_alignment (got, 3))
+	return NULL;
       ia64_info->root.sgot = got;
     }
 
@@ -1757,11 +1764,11 @@ get_fptr (bfd *abfd, struct bfd_link_info *info,
 						  | SEC_LOAD
 						  | SEC_HAS_CONTENTS
 						  | SEC_IN_MEMORY
-						  | (info->pie ? 0
+						  | (bfd_link_pie (info) ? 0
 						     : SEC_READONLY)
 						  | SEC_LINKER_CREATED));
       if (!fptr
-	  || !bfd_set_section_alignment (dynobj, fptr, 4))
+	  || !bfd_set_section_alignment (fptr, 4))
 	{
 	  BFD_ASSERT (0);
 	  return NULL;
@@ -1769,7 +1776,7 @@ get_fptr (bfd *abfd, struct bfd_link_info *info,
 
       ia64_info->fptr_sec = fptr;
 
-      if (info->pie)
+      if (bfd_link_pie (info))
 	{
 	  asection *fptr_rel;
 	  fptr_rel = bfd_make_section_anyway_with_flags (dynobj, ".rela.opd",
@@ -1779,7 +1786,7 @@ get_fptr (bfd *abfd, struct bfd_link_info *info,
 							  | SEC_LINKER_CREATED
 							  | SEC_READONLY));
 	  if (fptr_rel == NULL
-	      || !bfd_set_section_alignment (dynobj, fptr_rel, 3))
+	      || !bfd_set_section_alignment (fptr_rel, 3))
 	    {
 	      BFD_ASSERT (0);
 	      return NULL;
@@ -1814,7 +1821,7 @@ get_pltoff (bfd *abfd, struct elf64_ia64_link_hash_table *ia64_info)
 						    | SEC_SMALL_DATA
 						    | SEC_LINKER_CREATED));
       if (!pltoff
-	  || !bfd_set_section_alignment (dynobj, pltoff, 4))
+	  || !bfd_set_section_alignment (pltoff, 4))
 	{
 	  BFD_ASSERT (0);
 	  return NULL;
@@ -1829,7 +1836,7 @@ get_pltoff (bfd *abfd, struct elf64_ia64_link_hash_table *ia64_info)
 static asection *
 get_reloc_section (bfd *abfd,
 		   struct elf64_ia64_link_hash_table *ia64_info,
-		   asection *sec, bfd_boolean create)
+		   asection *sec, bool create)
 {
   const char *srel_name;
   asection *srel;
@@ -1841,12 +1848,10 @@ get_reloc_section (bfd *abfd,
   if (srel_name == NULL)
     return NULL;
 
-  BFD_ASSERT ((CONST_STRNEQ (srel_name, ".rela")
-	       && strcmp (bfd_get_section_name (abfd, sec),
-			  srel_name+5) == 0)
-	      || (CONST_STRNEQ (srel_name, ".rel")
-		  && strcmp (bfd_get_section_name (abfd, sec),
-			     srel_name+4) == 0));
+  BFD_ASSERT ((startswith (srel_name, ".rela")
+	       && strcmp (bfd_section_name (sec), srel_name+5) == 0)
+	      || (startswith (srel_name, ".rel")
+		  && strcmp (bfd_section_name (sec), srel_name+4) == 0));
 
   dynobj = ia64_info->root.dynobj;
   if (!dynobj)
@@ -1862,14 +1867,14 @@ get_reloc_section (bfd *abfd,
 						  | SEC_LINKER_CREATED
 						  | SEC_READONLY));
       if (srel == NULL
-	  || !bfd_set_section_alignment (dynobj, srel, 3))
+	  || !bfd_set_section_alignment (srel, 3))
 	return NULL;
     }
 
   return srel;
 }
 
-static bfd_boolean
+static bool
 count_dyn_reloc (bfd *abfd, struct elf64_ia64_dyn_sym_info *dyn_i,
 		 asection *srel, int type)
 {
@@ -1884,7 +1889,7 @@ count_dyn_reloc (bfd *abfd, struct elf64_ia64_dyn_sym_info *dyn_i,
       rent = ((struct elf64_ia64_dyn_reloc_entry *)
 	      bfd_alloc (abfd, (bfd_size_type) sizeof (*rent)));
       if (!rent)
-	return FALSE;
+	return false;
 
       rent->next = dyn_i->reloc_entries;
       rent->srel = srel;
@@ -1894,10 +1899,10 @@ count_dyn_reloc (bfd *abfd, struct elf64_ia64_dyn_sym_info *dyn_i,
     }
   rent->count++;
 
-  return TRUE;
+  return true;
 }
 
-static bfd_boolean
+static bool
 elf64_ia64_check_relocs (bfd *abfd, struct bfd_link_info *info,
 			 asection *sec,
 			 const Elf_Internal_Rela *relocs)
@@ -1920,15 +1925,15 @@ elf64_ia64_check_relocs (bfd *abfd, struct bfd_link_info *info,
   int need_entry;
   struct elf_link_hash_entry *h;
   unsigned long r_symndx;
-  bfd_boolean maybe_dynamic;
+  bool maybe_dynamic;
 
-  if (info->relocatable)
-    return TRUE;
+  if (bfd_link_relocatable (info))
+    return true;
 
   symtab_hdr = &elf_tdata (abfd)->symtab_hdr;
   ia64_info = elf64_ia64_hash_table (info);
   if (ia64_info == NULL)
-    return FALSE;
+    return false;
 
   got = fptr = srel = pltoff = NULL;
 
@@ -1955,7 +1960,7 @@ elf64_ia64_check_relocs (bfd *abfd, struct bfd_link_info *info,
 	 locally or externally defined, as not all of the input files
 	 have yet been processed.  Do something with what we know, as
 	 this may help reduce memory usage and processing time later.  */
-      maybe_dynamic = (h && ((!info->executable
+      maybe_dynamic = (h && ((!bfd_link_executable (info)
 			      && (!SYMBOLIC_BIND (info, h)
 				  || info->unresolved_syms_in_shared_libs == RM_IGNORE))
 			     || !h->def_regular
@@ -1975,12 +1980,12 @@ elf64_ia64_check_relocs (bfd *abfd, struct bfd_link_info *info,
 	case R_IA64_DTPMOD64MSB:
 	case R_IA64_DTPMOD64LSB:
 	case R_IA64_LTOFF_DTPMOD22:
-          abort ();
+	  abort ();
 	  break;
 
 	case R_IA64_IPLTMSB:
 	case R_IA64_IPLTLSB:
-          break;
+	  break;
 
 	case R_IA64_LTOFF_FPTR22:
 	case R_IA64_LTOFF_FPTR64I:
@@ -1996,7 +2001,7 @@ elf64_ia64_check_relocs (bfd *abfd, struct bfd_link_info *info,
 	case R_IA64_FPTR32LSB:
 	case R_IA64_FPTR64MSB:
 	case R_IA64_FPTR64LSB:
-	  if (info->shared || h)
+	  if (bfd_link_pic (info) || h)
 	    need_entry = NEED_FPTR | NEED_DYNREL;
 	  else
 	    need_entry = NEED_FPTR;
@@ -2030,7 +2035,7 @@ elf64_ia64_check_relocs (bfd *abfd, struct bfd_link_info *info,
 	  break;
 
 	case R_IA64_PCREL21B:
-        case R_IA64_PCREL60B:
+	case R_IA64_PCREL60B:
 	  /* Depending on where this symbol is defined, we may or may not
 	     need a full plt entry.  Only skip if we know we'll not need
 	     the entry -- static or symbolic, and the symbol definition
@@ -2047,7 +2052,7 @@ elf64_ia64_check_relocs (bfd *abfd, struct bfd_link_info *info,
 	case R_IA64_DIR64MSB:
 	case R_IA64_DIR64LSB:
 	  /* Shared objects will always need at least a REL relocation.  */
-	  if (info->shared || maybe_dynamic)
+	  if (bfd_link_pic (info) || maybe_dynamic)
 	    need_entry = NEED_DYNREL;
 	  break;
 
@@ -2073,8 +2078,8 @@ elf64_ia64_check_relocs (bfd *abfd, struct bfd_link_info *info,
 	     abfd, 0, (bfd_vma) 0);
 	}
 
-      if (get_dyn_sym_info (ia64_info, h, abfd, rel, TRUE) == NULL)
-	return FALSE;
+      if (get_dyn_sym_info (ia64_info, h, abfd, rel, true) == NULL)
+	return false;
     }
 
   /* Now, we only do lookup without insertion, which is very fast
@@ -2097,7 +2102,6 @@ elf64_ia64_check_relocs (bfd *abfd, struct bfd_link_info *info,
 
 	  /* PR15323, ref flags aren't set for references in the same
 	     object.  */
-	  h->root.non_ir_ref = 1;
 	  h->ref_regular = 1;
 	}
       else
@@ -2107,7 +2111,7 @@ elf64_ia64_check_relocs (bfd *abfd, struct bfd_link_info *info,
 	 locally or externally defined, as not all of the input files
 	 have yet been processed.  Do something with what we know, as
 	 this may help reduce memory usage and processing time later.  */
-      maybe_dynamic = (h && ((!info->executable
+      maybe_dynamic = (h && ((!bfd_link_executable (info)
 			      && (!SYMBOLIC_BIND (info, h)
 				  || info->unresolved_syms_in_shared_libs == RM_IGNORE))
 			     || !h->def_regular
@@ -2127,7 +2131,7 @@ elf64_ia64_check_relocs (bfd *abfd, struct bfd_link_info *info,
 	case R_IA64_DTPMOD64MSB:
 	case R_IA64_DTPMOD64LSB:
 	case R_IA64_LTOFF_DTPMOD22:
-          abort ();
+	  abort ();
 	  break;
 
 	case R_IA64_LTOFF_FPTR22:
@@ -2144,7 +2148,7 @@ elf64_ia64_check_relocs (bfd *abfd, struct bfd_link_info *info,
 	case R_IA64_FPTR32LSB:
 	case R_IA64_FPTR64MSB:
 	case R_IA64_FPTR64LSB:
-	  if (info->shared || h)
+	  if (bfd_link_pic (info) || h)
 	    need_entry = NEED_FPTR | NEED_DYNREL;
 	  else
 	    need_entry = NEED_FPTR;
@@ -2173,7 +2177,7 @@ elf64_ia64_check_relocs (bfd *abfd, struct bfd_link_info *info,
 	  break;
 
 	case R_IA64_PCREL21B:
-        case R_IA64_PCREL60B:
+	case R_IA64_PCREL60B:
 	  /* Depending on where this symbol is defined, we may or may not
 	     need a full plt entry.  Only skip if we know we'll not need
 	     the entry -- static or symbolic, and the symbol definition
@@ -2190,7 +2194,7 @@ elf64_ia64_check_relocs (bfd *abfd, struct bfd_link_info *info,
 	case R_IA64_DIR64MSB:
 	case R_IA64_DIR64LSB:
 	  /* Shared objects will always need at least a REL relocation.  */
-	  if (info->shared || maybe_dynamic)
+	  if (bfd_link_pic (info) || maybe_dynamic)
 	    need_entry = NEED_DYNREL;
 	  dynrel_type = R_IA64_DIR64LSB;
 	  break;
@@ -2214,7 +2218,7 @@ elf64_ia64_check_relocs (bfd *abfd, struct bfd_link_info *info,
       if (!need_entry)
 	continue;
 
-      dyn_i = get_dyn_sym_info (ia64_info, h, abfd, rel, FALSE);
+      dyn_i = get_dyn_sym_info (ia64_info, h, abfd, rel, false);
 
       /* Record whether or not this is a local symbol.  */
       dyn_i->h = h;
@@ -2226,7 +2230,7 @@ elf64_ia64_check_relocs (bfd *abfd, struct bfd_link_info *info,
 	    {
 	      got = get_got (abfd, ia64_info);
 	      if (!got)
-		return FALSE;
+		return false;
 	    }
 	  if (need_entry & NEED_GOT)
 	    dyn_i->want_got = 1;
@@ -2235,12 +2239,12 @@ elf64_ia64_check_relocs (bfd *abfd, struct bfd_link_info *info,
 	}
       if (need_entry & NEED_FPTR)
 	{
-          /* Create the .opd section.  */
+	  /* Create the .opd section.  */
 	  if (!fptr)
 	    {
 	      fptr = get_fptr (abfd, info, ia64_info);
 	      if (!fptr)
-		return FALSE;
+		return false;
 	    }
 	  dyn_i->want_fptr = 1;
 	}
@@ -2248,7 +2252,7 @@ elf64_ia64_check_relocs (bfd *abfd, struct bfd_link_info *info,
 	dyn_i->want_ltoff_fptr = 1;
       if (need_entry & (NEED_MIN_PLT | NEED_FULL_PLT))
 	{
-          if (!ia64_info->root.dynobj)
+	  if (!ia64_info->root.dynobj)
 	    ia64_info->root.dynobj = abfd;
 	  h->needs_plt = 1;
 	  dyn_i->want_plt = 1;
@@ -2263,7 +2267,7 @@ elf64_ia64_check_relocs (bfd *abfd, struct bfd_link_info *info,
 	    {
 	      pltoff = get_pltoff (abfd, ia64_info);
 	      if (!pltoff)
-		return FALSE;
+		return false;
 	    }
 
 	  dyn_i->want_pltoff = 1;
@@ -2272,22 +2276,22 @@ elf64_ia64_check_relocs (bfd *abfd, struct bfd_link_info *info,
 	{
 	  if (!srel)
 	    {
-	      srel = get_reloc_section (abfd, ia64_info, sec, TRUE);
+	      srel = get_reloc_section (abfd, ia64_info, sec, true);
 	      if (!srel)
-		return FALSE;
+		return false;
 	    }
 	  if (!count_dyn_reloc (abfd, dyn_i, srel, dynrel_type))
-	    return FALSE;
+	    return false;
 	}
     }
 
-  return TRUE;
+  return true;
 }
 
 /* For cleanliness, and potentially faster dynamic loading, allocate
    external GOT entries first.  */
 
-static bfd_boolean
+static bool
 allocate_global_data_got (struct elf64_ia64_dyn_sym_info *dyn_i,
 			  void * data)
 {
@@ -2301,12 +2305,12 @@ allocate_global_data_got (struct elf64_ia64_dyn_sym_info *dyn_i,
        dyn_i->got_offset = x->ofs;
        x->ofs += 8;
      }
-  return TRUE;
+  return true;
 }
 
 /* Next, allocate all the GOT entries used by LTOFF_FPTR relocs.  */
 
-static bfd_boolean
+static bool
 allocate_global_fptr_got (struct elf64_ia64_dyn_sym_info *dyn_i,
 			  void * data)
 {
@@ -2319,12 +2323,12 @@ allocate_global_fptr_got (struct elf64_ia64_dyn_sym_info *dyn_i,
       dyn_i->got_offset = x->ofs;
       x->ofs += 8;
     }
-  return TRUE;
+  return true;
 }
 
 /* Lastly, allocate all the GOT entries for local data.  */
 
-static bfd_boolean
+static bool
 allocate_local_got (struct elf64_ia64_dyn_sym_info *dyn_i,
 		    void * data)
 {
@@ -2336,13 +2340,13 @@ allocate_local_got (struct elf64_ia64_dyn_sym_info *dyn_i,
       dyn_i->got_offset = x->ofs;
       x->ofs += 8;
     }
-  return TRUE;
+  return true;
 }
 
 /* Allocate function descriptors.  We can do these for every function
    in a main executable that is not exported.  */
 
-static bfd_boolean
+static bool
 allocate_fptr (struct elf64_ia64_dyn_sym_info *dyn_i, void * data)
 {
   struct elf64_ia64_allocate_data *x = (struct elf64_ia64_allocate_data *) data;
@@ -2358,19 +2362,19 @@ allocate_fptr (struct elf64_ia64_dyn_sym_info *dyn_i, void * data)
 
       if (h == NULL || !h->def_dynamic)
 	{
-          /*  A non dynamic symbol.  */
+	  /*  A non dynamic symbol.  */
 	  dyn_i->fptr_offset = x->ofs;
 	  x->ofs += 16;
 	}
       else
 	dyn_i->want_fptr = 0;
     }
-  return TRUE;
+  return true;
 }
 
 /* Allocate all the minimal PLT entries.  */
 
-static bfd_boolean
+static bool
 allocate_plt_entries (struct elf64_ia64_dyn_sym_info *dyn_i,
 		      void * data ATTRIBUTE_UNUSED)
 {
@@ -2394,12 +2398,12 @@ allocate_plt_entries (struct elf64_ia64_dyn_sym_info *dyn_i,
 	  dyn_i->want_plt2 = 0;
 	}
     }
-  return TRUE;
+  return true;
 }
 
 /* Allocate all the full PLT entries.  */
 
-static bfd_boolean
+static bool
 allocate_plt2_entries (struct elf64_ia64_dyn_sym_info *dyn_i,
 		       void * data)
 {
@@ -2418,7 +2422,7 @@ allocate_plt2_entries (struct elf64_ia64_dyn_sym_info *dyn_i,
 	h = (struct elf_link_hash_entry *) h->root.u.i.link;
       dyn_i->h->plt.offset = ofs;
     }
-  return TRUE;
+  return true;
 }
 
 /* Allocate all the PLTOFF entries requested by relocations and
@@ -2426,7 +2430,7 @@ allocate_plt2_entries (struct elf64_ia64_dyn_sym_info *dyn_i,
    because the latter are not necessarily addressable by the GP.
    ??? Relaxation might be able to determine that they are.  */
 
-static bfd_boolean
+static bool
 allocate_pltoff_entries (struct elf64_ia64_dyn_sym_info *dyn_i,
 			 void * data)
 {
@@ -2437,30 +2441,30 @@ allocate_pltoff_entries (struct elf64_ia64_dyn_sym_info *dyn_i,
       dyn_i->pltoff_offset = x->ofs;
       x->ofs += 16;
     }
-  return TRUE;
+  return true;
 }
 
 /* Allocate dynamic relocations for those symbols that turned out
    to be dynamic.  */
 
-static bfd_boolean
+static bool
 allocate_dynrel_entries (struct elf64_ia64_dyn_sym_info *dyn_i,
 			 void * data)
 {
   struct elf64_ia64_allocate_data *x = (struct elf64_ia64_allocate_data *)data;
   struct elf64_ia64_link_hash_table *ia64_info;
   struct elf64_ia64_dyn_reloc_entry *rent;
-  bfd_boolean dynamic_symbol, shared, resolved_zero;
+  bool dynamic_symbol, shared, resolved_zero;
   struct elf64_ia64_link_hash_entry *h_ia64;
 
   ia64_info = elf64_ia64_hash_table (x->info);
   if (ia64_info == NULL)
-    return FALSE;
+    return false;
 
   /* Note that this can't be used in relation to FPTR relocs below.  */
   dynamic_symbol = elf64_ia64_dynamic_symbol_p (dyn_i->h);
 
-  shared = x->info->shared;
+  shared = bfd_link_pic (x->info);
   resolved_zero = (dyn_i->h
 		   && ELF_ST_VISIBILITY (dyn_i->h->other)
 		   && dyn_i->h->root.type == bfd_link_hash_undefweak);
@@ -2476,13 +2480,13 @@ allocate_dynrel_entries (struct elf64_ia64_dyn_sym_info *dyn_i,
     {
       /* VMS: FIX64.  */
       if (dyn_i->h != NULL && dyn_i->h->def_dynamic)
-        {
-          h_ia64 = (struct elf64_ia64_link_hash_entry *) dyn_i->h;
-          elf_ia64_vms_tdata (h_ia64->shl)->fixups_off +=
-            sizeof (Elf64_External_VMS_IMAGE_FIXUP);
-          ia64_info->fixups_sec->size +=
-            sizeof (Elf64_External_VMS_IMAGE_FIXUP);
-        }
+	{
+	  h_ia64 = (struct elf64_ia64_link_hash_entry *) dyn_i->h;
+	  elf_ia64_vms_tdata (h_ia64->shl)->fixups_off +=
+	    sizeof (Elf64_External_VMS_IMAGE_FIXUP);
+	  ia64_info->fixups_sec->size +=
+	    sizeof (Elf64_External_VMS_IMAGE_FIXUP);
+	}
     }
 
   if (ia64_info->rel_fptr_sec && dyn_i->want_fptr)
@@ -2496,21 +2500,19 @@ allocate_dynrel_entries (struct elf64_ia64_dyn_sym_info *dyn_i,
     {
       /* VMS: FIXFD.  */
       if (dyn_i->h != NULL && dyn_i->h->def_dynamic)
-        {
-          h_ia64 = (struct elf64_ia64_link_hash_entry *) dyn_i->h;
-          elf_ia64_vms_tdata (h_ia64->shl)->fixups_off +=
-            sizeof (Elf64_External_VMS_IMAGE_FIXUP);
-          ia64_info->fixups_sec->size +=
-            sizeof (Elf64_External_VMS_IMAGE_FIXUP);
-        }
+	{
+	  h_ia64 = (struct elf64_ia64_link_hash_entry *) dyn_i->h;
+	  elf_ia64_vms_tdata (h_ia64->shl)->fixups_off +=
+	    sizeof (Elf64_External_VMS_IMAGE_FIXUP);
+	  ia64_info->fixups_sec->size +=
+	    sizeof (Elf64_External_VMS_IMAGE_FIXUP);
+	}
     }
 
   /* Take care of the normal data relocations.  */
 
   for (rent = dyn_i->reloc_entries; rent; rent = rent->next)
     {
-      int count = rent->count;
-
       switch (rent->type)
 	{
 	case R_IA64_FPTR32LSB:
@@ -2519,7 +2521,7 @@ allocate_dynrel_entries (struct elf64_ia64_dyn_sym_info *dyn_i,
 	     will be true only if we're actually allocating one statically
 	     in the main executable.  Position independent executables
 	     need a relative reloc.  */
-	  if (dyn_i->want_fptr && !x->info->pie)
+	  if (dyn_i->want_fptr && !bfd_link_pie (x->info))
 	    continue;
 	  break;
 	case R_IA64_PCREL32LSB:
@@ -2535,10 +2537,6 @@ allocate_dynrel_entries (struct elf64_ia64_dyn_sym_info *dyn_i,
 	case R_IA64_IPLTLSB:
 	  if (!dynamic_symbol && !shared)
 	    continue;
-	  /* Use two REL relocations for IPLT relocations
-	     against local symbols.  */
-	  if (!dynamic_symbol)
-	    count *= 2;
 	  break;
 	case R_IA64_DTPREL32LSB:
 	case R_IA64_TPREL64LSB:
@@ -2551,19 +2549,19 @@ allocate_dynrel_entries (struct elf64_ia64_dyn_sym_info *dyn_i,
 
       /* Add a fixup.  */
       if (!dynamic_symbol)
-        abort ();
+	abort ();
 
       h_ia64 = (struct elf64_ia64_link_hash_entry *) dyn_i->h;
       elf_ia64_vms_tdata (h_ia64->shl)->fixups_off +=
-        sizeof (Elf64_External_VMS_IMAGE_FIXUP);
+	sizeof (Elf64_External_VMS_IMAGE_FIXUP);
       ia64_info->fixups_sec->size +=
-        sizeof (Elf64_External_VMS_IMAGE_FIXUP);
+	sizeof (Elf64_External_VMS_IMAGE_FIXUP);
     }
 
-  return TRUE;
+  return true;
 }
 
-static bfd_boolean
+static bool
 elf64_ia64_adjust_dynamic_symbol (struct bfd_link_info *info ATTRIBUTE_UNUSED,
 				  struct elf_link_hash_entry *h)
 {
@@ -2573,13 +2571,13 @@ elf64_ia64_adjust_dynamic_symbol (struct bfd_link_info *info ATTRIBUTE_UNUSED,
   /* If this is a weak symbol, and there is a real definition, the
      processor independent code will have arranged for us to see the
      real definition first, and we can just use the same value.  */
-  if (h->u.weakdef != NULL)
+  if (h->is_weakalias)
     {
-      BFD_ASSERT (h->u.weakdef->root.type == bfd_link_hash_defined
-                  || h->u.weakdef->root.type == bfd_link_hash_defweak);
-      h->root.u.def.section = h->u.weakdef->root.u.def.section;
-      h->root.u.def.value = h->u.weakdef->root.u.def.value;
-      return TRUE;
+      struct elf_link_hash_entry *def = weakdef (h);
+      BFD_ASSERT (def->root.type == bfd_link_hash_defined);
+      h->root.u.def.section = def->root.u.def.section;
+      h->root.u.def.value = def->root.u.def.value;
+      return true;
     }
 
   /* If this is a reference to a symbol defined by a dynamic object which
@@ -2589,10 +2587,10 @@ elf64_ia64_adjust_dynamic_symbol (struct bfd_link_info *info ATTRIBUTE_UNUSED,
      But IA-64 code is canonically PIC, so as a rule we can avoid this sort
      of hackery.  */
 
-  return TRUE;
+  return true;
 }
 
-static bfd_boolean
+static bool
 elf64_ia64_size_dynamic_sections (bfd *output_bfd ATTRIBUTE_UNUSED,
 				  struct bfd_link_info *info)
 {
@@ -2606,7 +2604,7 @@ elf64_ia64_size_dynamic_sections (bfd *output_bfd ATTRIBUTE_UNUSED,
   dynobj = hash_table->dynobj;
   ia64_info = elf64_ia64_hash_table (info);
   if (ia64_info == NULL)
-    return FALSE;
+    return false;
   BFD_ASSERT(dynobj != NULL);
   data.info = info;
 
@@ -2673,7 +2671,7 @@ elf64_ia64_size_dynamic_sections (bfd *output_bfd ATTRIBUTE_UNUSED,
      Allocate memory for them.  */
   for (sec = dynobj->sections; sec != NULL; sec = sec->next)
     {
-      bfd_boolean strip;
+      bool strip;
 
       if (!(sec->flags & SEC_LINKER_CREATED))
 	continue;
@@ -2689,7 +2687,7 @@ elf64_ia64_size_dynamic_sections (bfd *output_bfd ATTRIBUTE_UNUSED,
       strip = (sec->size == 0);
 
       if (sec == ia64_info->root.sgot)
-	strip = FALSE;
+	strip = false;
       else if (sec == ia64_info->root.srelgot)
 	{
 	  if (strip)
@@ -2725,24 +2723,24 @@ elf64_ia64_size_dynamic_sections (bfd *output_bfd ATTRIBUTE_UNUSED,
 	}
       else if (sec == ia64_info->fixups_sec)
 	{
-          if (strip)
-            ia64_info->fixups_sec = NULL;
+	  if (strip)
+	    ia64_info->fixups_sec = NULL;
 	}
       else if (sec == ia64_info->transfer_sec)
-        {
-          ;
-        }
+	{
+	  ;
+	}
       else
 	{
 	  const char *name;
 
 	  /* It's OK to base decisions on the section name, because none
 	     of the dynobj section names depend upon the input files.  */
-	  name = bfd_get_section_name (dynobj, sec);
+	  name = bfd_section_name (sec);
 
 	  if (strcmp (name, ".got.plt") == 0)
-	    strip = FALSE;
-	  else if (CONST_STRNEQ (name, ".rel"))
+	    strip = false;
+	  else if (startswith (name, ".rel"))
 	    {
 	      if (!strip)
 		{
@@ -2762,7 +2760,7 @@ elf64_ia64_size_dynamic_sections (bfd *output_bfd ATTRIBUTE_UNUSED,
 	  /* Allocate memory for the section contents.  */
 	  sec->contents = (bfd_byte *) bfd_zalloc (dynobj, sec->size);
 	  if (sec->contents == NULL && sec->size != 0)
-	    return FALSE;
+	    return false;
 	}
     }
 
@@ -2792,138 +2790,138 @@ elf64_ia64_size_dynamic_sections (bfd *output_bfd ATTRIBUTE_UNUSED,
       vms_get_time (&time_hi, &time_lo);
 
       if (!_bfd_elf_add_dynamic_entry (info, DT_IA_64_VMS_IDENT, 0))
-        return FALSE;
+	return false;
       if (!_bfd_elf_add_dynamic_entry (info, DT_IA_64_VMS_LINKTIME,
-                                       (((bfd_uint64_t)time_hi) << 32)
-                                       + time_lo))
-        return FALSE;
+				       ((uint64_t) time_hi << 32)
+				       + time_lo))
+	return false;
 
       /* Strtab.  */
       strdyn_off = dynsec->size;
       if (!_bfd_elf_add_dynamic_entry (info, DT_IA_64_VMS_STRTAB_OFFSET, 0))
-        return FALSE;
+	return false;
       if (!_bfd_elf_add_dynamic_entry (info, DT_STRSZ, 0))
-        return FALSE;
+	return false;
 
       /* PLTGOT  */
       if (!_bfd_elf_add_dynamic_entry (info, DT_IA_64_VMS_PLTGOT_SEG, 0))
-        return FALSE;
+	return false;
       if (!_bfd_elf_add_dynamic_entry (info, DT_IA_64_VMS_PLTGOT_OFFSET, 0))
-        return FALSE;
+	return false;
 
       /* Misc.  */
       if (!_bfd_elf_add_dynamic_entry (info, DT_IA_64_VMS_FPMODE, 0x9800000))
-        return FALSE;
+	return false;
       if (!_bfd_elf_add_dynamic_entry (info, DT_IA_64_VMS_LNKFLAGS,
-                                       VMS_LF_IMGSTA | VMS_LF_MAIN))
-        return FALSE;
+				       VMS_LF_IMGSTA | VMS_LF_MAIN))
+	return false;
 
       /* Add entries for shared libraries.  */
-      for (abfd = info->input_bfds; abfd; abfd = abfd->link_next)
-        {
-          char *soname;
-          size_t soname_len;
-          bfd_size_type strindex;
-          bfd_byte *newcontents;
-          bfd_vma fixups_shl_off;
+      for (abfd = info->input_bfds; abfd; abfd = abfd->link.next)
+	{
+	  char *soname;
+	  size_t soname_len;
+	  bfd_size_type strindex;
+	  bfd_byte *newcontents;
+	  bfd_vma fixups_shl_off;
 
-          if (!(abfd->flags & DYNAMIC))
-            continue;
-          BFD_ASSERT (abfd->xvec == output_bfd->xvec);
+	  if (!(abfd->flags & DYNAMIC))
+	    continue;
+	  BFD_ASSERT (abfd->xvec == output_bfd->xvec);
 
-          if (!_bfd_elf_add_dynamic_entry (info, DT_IA_64_VMS_NEEDED_IDENT,
-                                           elf_ia64_vms_ident (abfd)))
-            return FALSE;
+	  if (!_bfd_elf_add_dynamic_entry (info, DT_IA_64_VMS_NEEDED_IDENT,
+					   elf_ia64_vms_ident (abfd)))
+	    return false;
 
-          soname = vms_get_module_name (abfd->filename, TRUE);
-          if (soname == NULL)
-            return FALSE;
-          strindex = dynstrsec->size;
-          soname_len = strlen (soname) + 1;
-          newcontents = (bfd_byte *) bfd_realloc (dynstrsec->contents,
-                                                  strindex + soname_len);
-          if (newcontents == NULL)
-            return FALSE;
-          memcpy (newcontents + strindex, soname, soname_len);
-          dynstrsec->size += soname_len;
-          dynstrsec->contents = newcontents;
+	  soname = vms_get_module_name (bfd_get_filename (abfd), true);
+	  if (soname == NULL)
+	    return false;
+	  strindex = dynstrsec->size;
+	  soname_len = strlen (soname) + 1;
+	  newcontents = (bfd_byte *) bfd_realloc (dynstrsec->contents,
+						  strindex + soname_len);
+	  if (newcontents == NULL)
+	    return false;
+	  memcpy (newcontents + strindex, soname, soname_len);
+	  dynstrsec->size += soname_len;
+	  dynstrsec->contents = newcontents;
 
-          if (!_bfd_elf_add_dynamic_entry (info, DT_NEEDED, strindex))
-            return FALSE;
+	  if (!_bfd_elf_add_dynamic_entry (info, DT_NEEDED, strindex))
+	    return false;
 
-          if (!_bfd_elf_add_dynamic_entry (info, DT_IA_64_VMS_FIXUP_NEEDED,
-                                           shl_num))
-            return FALSE;
-          shl_num++;
+	  if (!_bfd_elf_add_dynamic_entry (info, DT_IA_64_VMS_FIXUP_NEEDED,
+					   shl_num))
+	    return false;
+	  shl_num++;
 
-          /* The fixups_off was in fact containing the size of the fixup
-             section.  Remap into the offset.  */
-          fixups_shl_off = elf_ia64_vms_tdata (abfd)->fixups_off;
-          elf_ia64_vms_tdata (abfd)->fixups_off = fixups_off;
+	  /* The fixups_off was in fact containing the size of the fixup
+	     section.  Remap into the offset.  */
+	  fixups_shl_off = elf_ia64_vms_tdata (abfd)->fixups_off;
+	  elf_ia64_vms_tdata (abfd)->fixups_off = fixups_off;
 
-          if (!_bfd_elf_add_dynamic_entry
-              (info, DT_IA_64_VMS_FIXUP_RELA_CNT,
-               fixups_shl_off / sizeof (Elf64_External_VMS_IMAGE_FIXUP)))
-            return FALSE;
-          if (!_bfd_elf_add_dynamic_entry (info, DT_IA_64_VMS_FIXUP_RELA_OFF,
-                                           fixups_off))
-            return FALSE;
-          fixups_off += fixups_shl_off;
-        }
+	  if (!_bfd_elf_add_dynamic_entry
+	      (info, DT_IA_64_VMS_FIXUP_RELA_CNT,
+	       fixups_shl_off / sizeof (Elf64_External_VMS_IMAGE_FIXUP)))
+	    return false;
+	  if (!_bfd_elf_add_dynamic_entry (info, DT_IA_64_VMS_FIXUP_RELA_OFF,
+					   fixups_off))
+	    return false;
+	  fixups_off += fixups_shl_off;
+	}
 
       /* Unwind.  */
       if (!_bfd_elf_add_dynamic_entry (info, DT_IA_64_VMS_UNWINDSZ, 0))
-        return FALSE;
+	return false;
       if (!_bfd_elf_add_dynamic_entry (info, DT_IA_64_VMS_UNWIND_CODSEG, 0))
-        return FALSE;
+	return false;
       if (!_bfd_elf_add_dynamic_entry (info, DT_IA_64_VMS_UNWIND_INFOSEG, 0))
-        return FALSE;
+	return false;
       if (!_bfd_elf_add_dynamic_entry (info, DT_IA_64_VMS_UNWIND_OFFSET, 0))
-        return FALSE;
+	return false;
       if (!_bfd_elf_add_dynamic_entry (info, DT_IA_64_VMS_UNWIND_SEG, 0))
-        return FALSE;
+	return false;
 
       if (!_bfd_elf_add_dynamic_entry (info, DT_NULL, 0xdead))
-            return FALSE;
+	    return false;
 
       /* Fix the strtab entries.  */
       bed = get_elf_backend_data (hash_table->dynobj);
 
       if (dynstrsec->size > 1)
-        dynstrsec->contents[0] = 0;
+	dynstrsec->contents[0] = 0;
       else
-        dynstrsec->size = 0;
+	dynstrsec->size = 0;
 
       /* Note: one 'spare' (ie DT_NULL) entry is added by
-         bfd_elf_size_dynsym_hash_dynstr.  */
+	 bfd_elf_size_dynsym_hash_dynstr.  */
       dyn.d_tag = DT_IA_64_VMS_STRTAB_OFFSET;
       dyn.d_un.d_val = dynsec->size /* + sizeof (Elf64_External_Dyn) */;
       bed->s->swap_dyn_out (hash_table->dynobj, &dyn,
-                            dynsec->contents + strdyn_off);
+			    dynsec->contents + strdyn_off);
 
       dyn.d_tag = DT_STRSZ;
       dyn.d_un.d_val = dynstrsec->size;
       bed->s->swap_dyn_out (hash_table->dynobj, &dyn,
-                            dynsec->contents + strdyn_off + bed->s->sizeof_dyn);
+			    dynsec->contents + strdyn_off + bed->s->sizeof_dyn);
 
       elf_ia64_vms_tdata (output_bfd)->needed_count = shl_num;
 
       /* Note section.  */
       if (!create_ia64_vms_notes (output_bfd, info, time_hi, time_lo))
-        return FALSE;
+	return false;
     }
 
   /* ??? Perhaps force __gp local.  */
 
-  return TRUE;
+  return true;
 }
 
 static void
 elf64_ia64_install_fixup (bfd *output_bfd,
-                          struct elf64_ia64_link_hash_table *ia64_info,
-                          struct elf_link_hash_entry *h,
-                          unsigned int type, asection *sec, bfd_vma offset,
-                          bfd_vma addend)
+			  struct elf64_ia64_link_hash_table *ia64_info,
+			  struct elf_link_hash_entry *h,
+			  unsigned int type, asection *sec, bfd_vma offset,
+			  bfd_vma addend)
 {
   asection *relsec;
   Elf64_External_VMS_IMAGE_FIXUP *fixup;
@@ -2967,7 +2965,7 @@ set_got_entry (bfd *abfd, struct bfd_link_info *info,
 {
   struct elf64_ia64_link_hash_table *ia64_info;
   asection *got_sec;
-  bfd_boolean done;
+  bool done;
   bfd_vma got_offset;
 
   ia64_info = elf64_ia64_hash_table (info);
@@ -2986,7 +2984,7 @@ set_got_entry (bfd *abfd, struct bfd_link_info *info,
       break;
     default:
       done = dyn_i->got_done;
-      dyn_i->got_done = TRUE;
+      dyn_i->got_done = true;
       got_offset = dyn_i->got_offset;
       break;
     }
@@ -2999,13 +2997,13 @@ set_got_entry (bfd *abfd, struct bfd_link_info *info,
       bfd_put_64 (abfd, value, got_sec->contents + got_offset);
 
       /* Install a dynamic relocation if needed.  */
-      if (((info->shared
+      if (((bfd_link_pic (info)
 	    && (!dyn_i->h
 		|| ELF_ST_VISIBILITY (dyn_i->h->other) == STV_DEFAULT
 		|| dyn_i->h->root.type != bfd_link_hash_undefweak))
-           || elf64_ia64_dynamic_symbol_p (dyn_i->h))
+	   || elf64_ia64_dynamic_symbol_p (dyn_i->h))
 	  && (!dyn_i->want_ltoff_fptr
-	      || !info->pie
+	      || !bfd_link_pie (info)
 	      || !dyn_i->h
 	      || dyn_i->h->root.type != bfd_link_hash_undefweak))
 	{
@@ -3015,25 +3013,25 @@ set_got_entry (bfd *abfd, struct bfd_link_info *info,
 	      addend = value;
 	    }
 
-          /* VMS: install a FIX32 or FIX64.  */
-          switch (dyn_r_type)
-            {
-            case R_IA64_DIR32LSB:
-            case R_IA64_FPTR32LSB:
-              dyn_r_type = R_IA64_VMS_FIX32;
-              break;
-            case R_IA64_DIR64LSB:
-            case R_IA64_FPTR64LSB:
-              dyn_r_type = R_IA64_VMS_FIX64;
-              break;
-            default:
-              BFD_ASSERT (FALSE);
-              break;
-            }
-          elf64_ia64_install_fixup
-            (info->output_bfd, ia64_info, dyn_i->h,
-             dyn_r_type, got_sec, got_offset, addend);
-        }
+	  /* VMS: install a FIX32 or FIX64.  */
+	  switch (dyn_r_type)
+	    {
+	    case R_IA64_DIR32LSB:
+	    case R_IA64_FPTR32LSB:
+	      dyn_r_type = R_IA64_VMS_FIX32;
+	      break;
+	    case R_IA64_DIR64LSB:
+	    case R_IA64_FPTR64LSB:
+	      dyn_r_type = R_IA64_VMS_FIX64;
+	      break;
+	    default:
+	      BFD_ASSERT (false);
+	      break;
+	    }
+	  elf64_ia64_install_fixup
+	    (info->output_bfd, ia64_info, dyn_i->h,
+	     dyn_r_type, got_sec, got_offset, addend);
+	}
     }
 
   /* Return the address of the linkage table entry.  */
@@ -3085,7 +3083,7 @@ set_fptr_entry (bfd *abfd, struct bfd_link_info *info,
 static bfd_vma
 set_pltoff_entry (bfd *abfd, struct bfd_link_info *info,
 		  struct elf64_ia64_dyn_sym_info *dyn_i,
-		  bfd_vma value, bfd_boolean is_plt)
+		  bfd_vma value, bool is_plt)
 {
   struct elf64_ia64_link_hash_table *ia64_info;
   asection *pltoff_sec;
@@ -3109,13 +3107,13 @@ set_pltoff_entry (bfd *abfd, struct bfd_link_info *info,
 
       /* Install dynamic relocations if needed.  */
       if (!is_plt
-	  && info->shared
+	  && bfd_link_pic (info)
 	  && (!dyn_i->h
 	      || ELF_ST_VISIBILITY (dyn_i->h->other) == STV_DEFAULT
 	      || dyn_i->h->root.type != bfd_link_hash_undefweak))
 	{
-          /* VMS:  */
-          abort ();
+	  /* VMS:  */
+	  abort ();
 	}
 
       dyn_i->pltoff_done = 1;
@@ -3147,8 +3145,8 @@ elf64_ia64_unwind_entry_compare (const void * a, const void * b)
 }
 
 /* Make sure we've got ourselves a nice fat __gp value.  */
-static bfd_boolean
-elf64_ia64_choose_gp (bfd *abfd, struct bfd_link_info *info, bfd_boolean final)
+static bool
+elf64_ia64_choose_gp (bfd *abfd, struct bfd_link_info *info, bool final)
 {
   bfd_vma min_vma = (bfd_vma) -1, max_vma = 0;
   bfd_vma min_short_vma = min_vma, max_short_vma = 0;
@@ -3159,7 +3157,7 @@ elf64_ia64_choose_gp (bfd *abfd, struct bfd_link_info *info, bfd_boolean final)
 
   ia64_info = elf64_ia64_hash_table (info);
   if (ia64_info == NULL)
-    return FALSE;
+    return false;
 
   /* Find the min and max vma of all sections marked short.  Also collect
      min and max vma of any type, for use in selecting a nice gp.  */
@@ -3208,8 +3206,8 @@ elf64_ia64_choose_gp (bfd *abfd, struct bfd_link_info *info, bfd_boolean final)
     }
 
   /* See if the user wants to force a value.  */
-  gp = elf_link_hash_lookup (elf_hash_table (info), "__gp", FALSE,
-			     FALSE, FALSE);
+  gp = elf_link_hash_lookup (elf_hash_table (info), "__gp", false,
+			     false, false);
 
   if (gp
       && (gp->root.type == bfd_link_hash_defined
@@ -3274,31 +3272,30 @@ elf64_ia64_choose_gp (bfd *abfd, struct bfd_link_info *info, bfd_boolean final)
     {
       if (max_short_vma - min_short_vma >= 0x400000)
 	{
-overflow:
-	  (*_bfd_error_handler)
-	    (_("%s: short data segment overflowed (0x%lx >= 0x400000)"),
-	     bfd_get_filename (abfd),
-	     (unsigned long) (max_short_vma - min_short_vma));
-	  return FALSE;
+	overflow:
+	  _bfd_error_handler
+	    /* xgettext:c-format */
+	    (_("%pB: short data segment overflowed (%#" PRIx64 " >= 0x400000)"),
+	     abfd, (uint64_t) (max_short_vma - min_short_vma));
+	  return false;
 	}
       else if ((gp_val > min_short_vma
 		&& gp_val - min_short_vma > 0x200000)
 	       || (gp_val < max_short_vma
 		   && max_short_vma - gp_val >= 0x200000))
 	{
-	  (*_bfd_error_handler)
-	    (_("%s: __gp does not cover short data segment"),
-	     bfd_get_filename (abfd));
-	  return FALSE;
+	  _bfd_error_handler
+	    (_("%pB: __gp does not cover short data segment"), abfd);
+	  return false;
 	}
     }
 
   _bfd_set_gp_value (abfd, gp_val);
 
-  return TRUE;
+  return true;
 }
 
-static bfd_boolean
+static bool
 elf64_ia64_final_link (bfd *abfd, struct bfd_link_info *info)
 {
   struct elf64_ia64_link_hash_table *ia64_info;
@@ -3306,10 +3303,10 @@ elf64_ia64_final_link (bfd *abfd, struct bfd_link_info *info)
 
   ia64_info = elf64_ia64_hash_table (info);
   if (ia64_info == NULL)
-    return FALSE;
+    return false;
 
   /* Make sure we've got ourselves a nice fat __gp value.  */
-  if (!info->relocatable)
+  if (!bfd_link_relocatable (info))
     {
       bfd_vma gp_val;
       struct elf_link_hash_entry *gp;
@@ -3317,12 +3314,12 @@ elf64_ia64_final_link (bfd *abfd, struct bfd_link_info *info)
       /* We assume after gp is set, section size will only decrease. We
 	 need to adjust gp for it.  */
       _bfd_set_gp_value (abfd, 0);
-      if (! elf64_ia64_choose_gp (abfd, info, TRUE))
-	return FALSE;
+      if (! elf64_ia64_choose_gp (abfd, info, true))
+	return false;
       gp_val = _bfd_get_gp_value (abfd);
 
-      gp = elf_link_hash_lookup (elf_hash_table (info), "__gp", FALSE,
-			         FALSE, FALSE);
+      gp = elf_link_hash_lookup (elf_hash_table (info), "__gp", false,
+				 false, false);
       if (gp)
 	{
 	  gp->root.type = bfd_link_hash_defined;
@@ -3335,7 +3332,7 @@ elf64_ia64_final_link (bfd *abfd, struct bfd_link_info *info)
      of the .IA_64.unwind section.  Force this section to be relocated
      into memory rather than written immediately to the output file.  */
   unwind_output_sec = NULL;
-  if (!info->relocatable)
+  if (!bfd_link_relocatable (info))
     {
       asection *s = bfd_get_section_by_name (abfd, ELF_STRING_ia64_unwind);
       if (s)
@@ -3344,13 +3341,13 @@ elf64_ia64_final_link (bfd *abfd, struct bfd_link_info *info)
 	  unwind_output_sec->contents
 	    = bfd_malloc (unwind_output_sec->size);
 	  if (unwind_output_sec->contents == NULL)
-	    return FALSE;
+	    return false;
 	}
     }
 
   /* Invoke the regular ELF backend linker to do all the work.  */
   if (!bfd_elf_final_link (abfd, info))
-    return FALSE;
+    return false;
 
   if (unwind_output_sec)
     {
@@ -3363,13 +3360,13 @@ elf64_ia64_final_link (bfd *abfd, struct bfd_link_info *info)
       if (! bfd_set_section_contents (abfd, unwind_output_sec,
 				      unwind_output_sec->contents, (bfd_vma) 0,
 				      unwind_output_sec->size))
-	return FALSE;
+	return false;
     }
 
-  return TRUE;
+  return true;
 }
 
-static bfd_boolean
+static int
 elf64_ia64_relocate_section (bfd *output_bfd,
 			     struct bfd_link_info *info,
 			     bfd *input_bfd,
@@ -3383,16 +3380,16 @@ elf64_ia64_relocate_section (bfd *output_bfd,
   Elf_Internal_Shdr *symtab_hdr;
   Elf_Internal_Rela *rel;
   Elf_Internal_Rela *relend;
-  bfd_boolean ret_val = TRUE;	/* for non-fatal errors */
+  bool ret_val = true;	/* for non-fatal errors */
   bfd_vma gp_val;
 
   symtab_hdr = &elf_tdata (input_bfd)->symtab_hdr;
   ia64_info = elf64_ia64_hash_table (info);
   if (ia64_info == NULL)
-    return FALSE;
+    return false;
 
   /* Infect various flags from the input section to the output section.  */
-  if (info->relocatable)
+  if (bfd_link_relocatable (info))
     {
       bfd_vma flags;
 
@@ -3419,26 +3416,31 @@ elf64_ia64_relocate_section (bfd *output_bfd,
       bfd_vma value;
       asection *sym_sec;
       bfd_byte *hit_addr;
-      bfd_boolean dynamic_symbol_p;
-      bfd_boolean undef_weak_ref;
+      bool dynamic_symbol_p;
+      bool undef_weak_ref;
 
       r_type = ELF64_R_TYPE (rel->r_info);
       if (r_type > R_IA64_MAX_RELOC_CODE)
 	{
-	  (*_bfd_error_handler)
-	    (_("%B: unknown relocation type %d"),
-	     input_bfd, (int) r_type);
+	  /* xgettext:c-format */
+	  _bfd_error_handler (_("%pB: unsupported relocation type %#x"),
+			      input_bfd, (int) r_type);
 	  bfd_set_error (bfd_error_bad_value);
-	  ret_val = FALSE;
+	  ret_val = false;
 	  continue;
 	}
 
       howto = ia64_elf_lookup_howto (r_type);
+      if (howto == NULL)
+	{
+	  ret_val = false;
+	  continue;
+	}
       r_symndx = ELF64_R_SYM (rel->r_info);
       h = NULL;
       sym = NULL;
       sym_sec = NULL;
-      undef_weak_ref = FALSE;
+      undef_weak_ref = false;
 
       if (r_symndx < symtab_hdr->sh_info)
 	{
@@ -3448,14 +3450,14 @@ elf64_ia64_relocate_section (bfd *output_bfd,
 	  sym_sec = local_sections[r_symndx];
 	  msec = sym_sec;
 	  value = _bfd_elf_rela_local_sym (output_bfd, sym, &msec, rel);
-	  if (!info->relocatable
+	  if (!bfd_link_relocatable (info)
 	      && (sym_sec->flags & SEC_MERGE) != 0
 	      && ELF_ST_TYPE (sym->st_info) == STT_SECTION
 	      && sym_sec->sec_info_type == SEC_INFO_TYPE_MERGE)
 	    {
 	      struct elf64_ia64_local_hash_entry *loc_h;
 
-	      loc_h = get_local_sym_hash (ia64_info, input_bfd, rel, FALSE);
+	      loc_h = get_local_sym_hash (ia64_info, input_bfd, rel, false);
 	      if (loc_h && ! loc_h->sec_merge_done)
 		{
 		  struct elf64_ia64_dyn_sym_info *dynent;
@@ -3494,17 +3496,17 @@ elf64_ia64_relocate_section (bfd *output_bfd,
 	}
       else
 	{
-	  bfd_boolean unresolved_reloc;
-	  bfd_boolean warned;
+	  bool unresolved_reloc;
+	  bool warned, ignored;
 	  struct elf_link_hash_entry **sym_hashes = elf_sym_hashes (input_bfd);
 
 	  RELOC_FOR_GLOBAL_SYMBOL (info, input_bfd, input_section, rel,
 				   r_symndx, symtab_hdr, sym_hashes,
 				   h, sym_sec, value,
-				   unresolved_reloc, warned);
+				   unresolved_reloc, warned, ignored);
 
 	  if (h->root.type == bfd_link_hash_undefweak)
-	    undef_weak_ref = TRUE;
+	    undef_weak_ref = true;
 	  else if (warned)
 	    continue;
 	}
@@ -3516,7 +3518,7 @@ elf64_ia64_relocate_section (bfd *output_bfd,
 	RELOC_AGAINST_DISCARDED_SECTION (info, input_bfd, input_section,
 					 rel, 1, relend, howto, 0, contents);
 
-      if (info->relocatable)
+      if (bfd_link_relocatable (info))
 	continue;
 
       hit_addr = contents + rel->r_offset;
@@ -3537,7 +3539,7 @@ elf64_ia64_relocate_section (bfd *output_bfd,
 	case R_IA64_DIR64MSB:
 	case R_IA64_DIR64LSB:
 	  /* Install a dynamic relocation for this reloc.  */
-	  if ((dynamic_symbol_p || info->shared)
+	  if ((dynamic_symbol_p || bfd_link_pic (info))
 	      && r_symndx != 0
 	      && (input_section->flags & SEC_ALLOC) != 0)
 	    {
@@ -3551,13 +3553,15 @@ elf64_ia64_relocate_section (bfd *output_bfd,
 		case R_IA64_IMM64:
 		  /* ??? People shouldn't be doing non-pic code in
 		     shared libraries nor dynamic executables.  */
-		  (*_bfd_error_handler)
-		    (_("%B: non-pic code with imm relocation against dynamic symbol `%s'"),
+		  _bfd_error_handler
+		    /* xgettext:c-format */
+		    (_("%pB: non-pic code with imm relocation against"
+		       " dynamic symbol `%s'"),
 		     input_bfd,
 		     h ? h->root.root.string
 		       : bfd_elf_sym_name (input_bfd, symtab_hdr, sym,
 					   sym_sec));
-		  ret_val = FALSE;
+		  ret_val = false;
 		  continue;
 
 		default:
@@ -3577,24 +3581,24 @@ elf64_ia64_relocate_section (bfd *output_bfd,
 		  addend = value;
 		}
 
-              /* VMS: install a FIX64.  */
-              switch (dyn_r_type)
-                {
-                case R_IA64_DIR32LSB:
-                  dyn_r_type = R_IA64_VMS_FIX32;
-                  break;
-                case R_IA64_DIR64LSB:
-                  dyn_r_type = R_IA64_VMS_FIX64;
-                  break;
-                default:
-                  BFD_ASSERT (FALSE);
-                  break;
-                }
-              elf64_ia64_install_fixup
-                (output_bfd, ia64_info, h,
-                 dyn_r_type, input_section, rel->r_offset, addend);
-              r = bfd_reloc_ok;
-              break;
+	      /* VMS: install a FIX64.  */
+	      switch (dyn_r_type)
+		{
+		case R_IA64_DIR32LSB:
+		  dyn_r_type = R_IA64_VMS_FIX32;
+		  break;
+		case R_IA64_DIR64LSB:
+		  dyn_r_type = R_IA64_VMS_FIX64;
+		  break;
+		default:
+		  BFD_ASSERT (false);
+		  break;
+		}
+	      elf64_ia64_install_fixup
+		(output_bfd, ia64_info, h,
+		 dyn_r_type, input_section, rel->r_offset, addend);
+	      r = bfd_reloc_ok;
+	      break;
 	    }
 	  /* Fall through.  */
 
@@ -3613,13 +3617,14 @@ elf64_ia64_relocate_section (bfd *output_bfd,
 	case R_IA64_GPREL64LSB:
 	  if (dynamic_symbol_p)
 	    {
-	      (*_bfd_error_handler)
-		(_("%B: @gprel relocation against dynamic symbol %s"),
+	      _bfd_error_handler
+		/* xgettext:c-format */
+		(_("%pB: @gprel relocation against dynamic symbol %s"),
 		 input_bfd,
 		 h ? h->root.root.string
 		   : bfd_elf_sym_name (input_bfd, symtab_hdr, sym,
 				       sym_sec));
-	      ret_val = FALSE;
+	      ret_val = false;
 	      continue;
 	    }
 	  value -= gp_val;
@@ -3629,7 +3634,7 @@ elf64_ia64_relocate_section (bfd *output_bfd,
 	case R_IA64_LTOFF22:
 	case R_IA64_LTOFF22X:
 	case R_IA64_LTOFF64I:
-          dyn_i = get_dyn_sym_info (ia64_info, h, input_bfd, rel, FALSE);
+	  dyn_i = get_dyn_sym_info (ia64_info, h, input_bfd, rel, false);
 	  value = set_got_entry (input_bfd, info, dyn_i,
 				 rel->r_addend, value, R_IA64_DIR64LSB);
 	  value -= gp_val;
@@ -3640,8 +3645,8 @@ elf64_ia64_relocate_section (bfd *output_bfd,
 	case R_IA64_PLTOFF64I:
 	case R_IA64_PLTOFF64MSB:
 	case R_IA64_PLTOFF64LSB:
-          dyn_i = get_dyn_sym_info (ia64_info, h, input_bfd, rel, FALSE);
-	  value = set_pltoff_entry (output_bfd, info, dyn_i, value, FALSE);
+	  dyn_i = get_dyn_sym_info (ia64_info, h, input_bfd, rel, false);
+	  value = set_pltoff_entry (output_bfd, info, dyn_i, value, false);
 	  value -= gp_val;
 	  r = ia64_elf_install_value (hit_addr, value, r_type);
 	  break;
@@ -3651,13 +3656,13 @@ elf64_ia64_relocate_section (bfd *output_bfd,
 	case R_IA64_FPTR32LSB:
 	case R_IA64_FPTR64MSB:
 	case R_IA64_FPTR64LSB:
-          dyn_i = get_dyn_sym_info (ia64_info, h, input_bfd, rel, FALSE);
+	  dyn_i = get_dyn_sym_info (ia64_info, h, input_bfd, rel, false);
 	  if (dyn_i->want_fptr)
 	    {
 	      if (!undef_weak_ref)
 		value = set_fptr_entry (output_bfd, info, dyn_i, value);
 	    }
-	  if (!dyn_i->want_fptr || info->pie)
+	  if (!dyn_i->want_fptr || bfd_link_pie (info))
 	    {
 	      /* Otherwise, we expect the dynamic linker to create
 		 the entry.  */
@@ -3672,10 +3677,10 @@ elf64_ia64_relocate_section (bfd *output_bfd,
 			 dynamic symbol table.  */
 		      /* ??? People shouldn't be doing non-pic code in
 			 shared libraries.  Hork.  */
-		      (*_bfd_error_handler)
-			(_("%B: linking non-pic code in a position independent executable"),
+		      _bfd_error_handler
+			(_("%pB: linking non-pic code in a position independent executable"),
 			 input_bfd);
-		      ret_val = FALSE;
+		      ret_val = false;
 		      continue;
 		    }
 		}
@@ -3684,12 +3689,12 @@ elf64_ia64_relocate_section (bfd *output_bfd,
 		  value = 0;
 		}
 
-              /* VMS: FIXFD.  */
-              elf64_ia64_install_fixup
-                (output_bfd, ia64_info, h, R_IA64_VMS_FIXFD,
-                 input_section, rel->r_offset, 0);
-              r = bfd_reloc_ok;
-              break;
+	      /* VMS: FIXFD.  */
+	      elf64_ia64_install_fixup
+		(output_bfd, ia64_info, h, R_IA64_VMS_FIXFD,
+		 input_section, rel->r_offset, 0);
+	      r = bfd_reloc_ok;
+	      break;
 	    }
 
 	  r = ia64_elf_install_value (hit_addr, value, r_type);
@@ -3701,20 +3706,20 @@ elf64_ia64_relocate_section (bfd *output_bfd,
 	case R_IA64_LTOFF_FPTR32LSB:
 	case R_IA64_LTOFF_FPTR64MSB:
 	case R_IA64_LTOFF_FPTR64LSB:
-          dyn_i = get_dyn_sym_info (ia64_info, h, input_bfd, rel, FALSE);
-          if (dyn_i->want_fptr)
-            {
-              BFD_ASSERT (h == NULL || !h->def_dynamic);
-              if (!undef_weak_ref)
-                value = set_fptr_entry (output_bfd, info, dyn_i, value);
-            }
-          else
-            value = 0;
+	  dyn_i = get_dyn_sym_info (ia64_info, h, input_bfd, rel, false);
+	  if (dyn_i->want_fptr)
+	    {
+	      BFD_ASSERT (h == NULL || !h->def_dynamic);
+	      if (!undef_weak_ref)
+		value = set_fptr_entry (output_bfd, info, dyn_i, value);
+	    }
+	  else
+	    value = 0;
 
-          value = set_got_entry (output_bfd, info, dyn_i,
-                                 rel->r_addend, value, R_IA64_FPTR64LSB);
-          value -= gp_val;
-          r = ia64_elf_install_value (hit_addr, value, r_type);
+	  value = set_got_entry (output_bfd, info, dyn_i,
+				 rel->r_addend, value, R_IA64_FPTR64LSB);
+	  value -= gp_val;
+	  r = ia64_elf_install_value (hit_addr, value, r_type);
 	  break;
 
 	case R_IA64_PCREL32MSB:
@@ -3724,8 +3729,8 @@ elf64_ia64_relocate_section (bfd *output_bfd,
 	  /* Install a dynamic relocation for this reloc.  */
 	  if (dynamic_symbol_p && r_symndx != 0)
 	    {
-              /* VMS: doesn't exist ???  */
-              abort ();
+	      /* VMS: doesn't exist ???  */
+	      abort ();
 	    }
 	  goto finish_pcrel;
 
@@ -3734,7 +3739,7 @@ elf64_ia64_relocate_section (bfd *output_bfd,
 	  /* We should have created a PLT entry for any dynamic symbol.  */
 	  dyn_i = NULL;
 	  if (h)
-	    dyn_i = get_dyn_sym_info (ia64_info, h, NULL, NULL, FALSE);
+	    dyn_i = get_dyn_sym_info (ia64_info, h, NULL, NULL, false);
 
 	  if (dyn_i && dyn_i->want_plt2)
 	    {
@@ -3774,18 +3779,21 @@ elf64_ia64_relocate_section (bfd *output_bfd,
 	      const char *msg;
 
 	      if (r_type == R_IA64_PCREL21BI)
-		msg = _("%B: @internal branch to dynamic symbol %s");
+		/* xgettext:c-format */
+		msg = _("%pB: @internal branch to dynamic symbol %s");
 	      else if (r_type == R_IA64_PCREL21F || r_type == R_IA64_PCREL21M)
-		msg = _("%B: speculation fixup to dynamic symbol %s");
+		/* xgettext:c-format */
+		msg = _("%pB: speculation fixup to dynamic symbol %s");
 	      else
-		msg = _("%B: @pcrel relocation against dynamic symbol %s");
-	      (*_bfd_error_handler) (msg, input_bfd,
-				     h ? h->root.root.string
-				       : bfd_elf_sym_name (input_bfd,
-							   symtab_hdr,
-							   sym,
-							   sym_sec));
-	      ret_val = FALSE;
+		/* xgettext:c-format */
+		msg = _("%pB: @pcrel relocation against dynamic symbol %s");
+	      _bfd_error_handler (msg, input_bfd,
+				  h ? h->root.root.string
+				  : bfd_elf_sym_name (input_bfd,
+						      symtab_hdr,
+						      sym,
+						      sym_sec));
+	      ret_val = false;
 	      continue;
 	    }
 	  goto finish_pcrel;
@@ -3838,11 +3846,11 @@ elf64_ia64_relocate_section (bfd *output_bfd,
 	case R_IA64_IPLTMSB:
 	case R_IA64_IPLTLSB:
 	  /* Install a dynamic relocation for this reloc.  */
-	  if ((dynamic_symbol_p || info->shared)
+	  if ((dynamic_symbol_p || bfd_link_pic (info))
 	      && (input_section->flags & SEC_ALLOC) != 0)
 	    {
-              /* VMS: FIXFD ??  */
-              abort ();
+	      /* VMS: FIXFD ??  */
+	      abort ();
 	    }
 
 	  if (r_type == R_IA64_IPLTMSB)
@@ -3891,7 +3899,7 @@ elf64_ia64_relocate_section (bfd *output_bfd,
 	     don't try to continue.  */
 	  (*info->callbacks->undefined_symbol)
 	    (info, "__gp", input_bfd, input_section, rel->r_offset, 1);
-	  return FALSE;
+	  return false;
 
 	case bfd_reloc_notsupported:
 	  {
@@ -3902,11 +3910,10 @@ elf64_ia64_relocate_section (bfd *output_bfd,
 	    else
 	      name = bfd_elf_sym_name (input_bfd, symtab_hdr, sym,
 				       sym_sec);
-	    if (!(*info->callbacks->warning) (info, _("unsupported reloc"),
-					      name, input_bfd,
-					      input_section, rel->r_offset))
-	      return FALSE;
-	    ret_val = FALSE;
+	    (*info->callbacks->warning) (info, _("unsupported reloc"),
+					 name, input_bfd,
+					 input_section, rel->r_offset);
+	    ret_val = false;
 	  }
 	  break;
 
@@ -3938,10 +3945,12 @@ elf64_ia64_relocate_section (bfd *output_bfd,
 	      case R_IA64_LTOFF_TPREL22:
 	      case R_IA64_LTOFF_DTPMOD22:
 	      case R_IA64_LTOFF_DTPREL22:
-		(*_bfd_error_handler)
-		  (_("%B: missing TLS section for relocation %s against `%s' at 0x%lx in section `%A'."),
-		   input_bfd, input_section, howto->name, name,
-		   rel->r_offset);
+		_bfd_error_handler
+		  /* xgettext:c-format */
+		  (_("%pB: missing TLS section for relocation %s against `%s'"
+		     " at %#" PRIx64 " in section `%pA'."),
+		   input_bfd, howto->name, name,
+		   (uint64_t) rel->r_offset, input_section);
 		break;
 
 	      case R_IA64_PCREL21B:
@@ -3953,26 +3962,29 @@ elf64_ia64_relocate_section (bfd *output_bfd,
 		    /* Relaxtion is always performed for ELF output.
 		       Overflow failures for those relocations mean
 		       that the section is too big to relax.  */
-		    (*_bfd_error_handler)
-		      (_("%B: Can't relax br (%s) to `%s' at 0x%lx in section `%A' with size 0x%lx (> 0x1000000)."),
-		       input_bfd, input_section, howto->name, name,
-		       rel->r_offset, input_section->size);
+		    _bfd_error_handler
+		      /* xgettext:c-format */
+		      (_("%pB: Can't relax br (%s) to `%s' "
+			 "at %#" PRIx64 " in section `%pA' "
+			 "with size %#" PRIx64 " (> 0x1000000)."),
+		       input_bfd, howto->name, name, (uint64_t) rel->r_offset,
+		       input_section, (uint64_t) input_section->size);
 		    break;
 		  }
+		/* Fall through.  */
 	      default:
-		if (!(*info->callbacks->reloc_overflow) (info,
-							 &h->root,
-							 name,
-							 howto->name,
-							 (bfd_vma) 0,
-							 input_bfd,
-							 input_section,
-							 rel->r_offset))
-		  return FALSE;
+		(*info->callbacks->reloc_overflow) (info,
+						    &h->root,
+						    name,
+						    howto->name,
+						    (bfd_vma) 0,
+						    input_bfd,
+						    input_section,
+						    rel->r_offset);
 		break;
 	      }
 
-	    ret_val = FALSE;
+	    ret_val = false;
 	  }
 	  break;
 	}
@@ -3981,7 +3993,7 @@ elf64_ia64_relocate_section (bfd *output_bfd,
   return ret_val;
 }
 
-static bfd_boolean
+static bool
 elf64_ia64_finish_dynamic_symbol (bfd *output_bfd,
 				  struct bfd_link_info *info,
 				  struct elf_link_hash_entry *h,
@@ -3992,9 +4004,9 @@ elf64_ia64_finish_dynamic_symbol (bfd *output_bfd,
 
   ia64_info = elf64_ia64_hash_table (info);
   if (ia64_info == NULL)
-    return FALSE;
+    return false;
 
-  dyn_i = get_dyn_sym_info (ia64_info, h, NULL, NULL, FALSE);
+  dyn_i = get_dyn_sym_info (ia64_info, h, NULL, NULL, false);
 
   /* Fill in the PLT data, if required.  */
   if (dyn_i && dyn_i->want_plt)
@@ -4007,7 +4019,7 @@ elf64_ia64_finish_dynamic_symbol (bfd *output_bfd,
 
       plt_sec = ia64_info->root.splt;
       plt_addr = 0;  /* Not used as overriden by FIXUPs.  */
-      pltoff_addr = set_pltoff_entry (output_bfd, info, dyn_i, plt_addr, TRUE);
+      pltoff_addr = set_pltoff_entry (output_bfd, info, dyn_i, plt_addr, true);
 
       /* Initialize the FULL PLT entry, if needed.  */
       if (dyn_i->want_plt2)
@@ -4027,9 +4039,9 @@ elf64_ia64_finish_dynamic_symbol (bfd *output_bfd,
 
       /* VMS: FIXFD.  */
       elf64_ia64_install_fixup
-        (output_bfd, ia64_info, h, R_IA64_VMS_FIXFD, ia64_info->pltoff_sec,
-         pltoff_addr - (ia64_info->pltoff_sec->output_section->vma
-                        + ia64_info->pltoff_sec->output_offset), 0);
+	(output_bfd, ia64_info, h, R_IA64_VMS_FIXFD, ia64_info->pltoff_sec,
+	 pltoff_addr - (ia64_info->pltoff_sec->output_section->vma
+			+ ia64_info->pltoff_sec->output_offset), 0);
     }
 
   /* Mark some specially defined symbols as absolute.  */
@@ -4038,10 +4050,10 @@ elf64_ia64_finish_dynamic_symbol (bfd *output_bfd,
       || h == ia64_info->root.hplt)
     sym->st_shndx = SHN_ABS;
 
-  return TRUE;
+  return true;
 }
 
-static bfd_boolean
+static bool
 elf64_ia64_finish_dynamic_sections (bfd *abfd,
 				    struct bfd_link_info *info)
 {
@@ -4050,7 +4062,7 @@ elf64_ia64_finish_dynamic_sections (bfd *abfd,
 
   ia64_info = elf64_ia64_hash_table (info);
   if (ia64_info == NULL)
-    return FALSE;
+    return false;
 
   dynobj = ia64_info->root.dynobj;
 
@@ -4074,7 +4086,7 @@ elf64_ia64_finish_dynamic_sections (bfd *abfd,
 
       gp_val = _bfd_get_gp_value (abfd);
       phdr = _bfd_elf_find_segment_containing_section
-        (info->output_bfd, ia64_info->pltoff_sec->output_section);
+	(info->output_bfd, ia64_info->pltoff_sec->output_section);
       BFD_ASSERT (phdr != NULL);
       base_phdr = elf_tdata (info->output_bfd)->phdr;
       gp_seg = phdr - base_phdr;
@@ -4082,18 +4094,18 @@ elf64_ia64_finish_dynamic_sections (bfd *abfd,
 
       unwind_sec = bfd_get_section_by_name (abfd, ELF_STRING_ia64_unwind);
       if (unwind_sec != NULL)
-        {
-          asection *code_sec;
+	{
+	  asection *code_sec;
 
-          phdr = _bfd_elf_find_segment_containing_section (abfd, unwind_sec);
-          BFD_ASSERT (phdr != NULL);
-          unwind_seg = phdr - base_phdr;
+	  phdr = _bfd_elf_find_segment_containing_section (abfd, unwind_sec);
+	  BFD_ASSERT (phdr != NULL);
+	  unwind_seg = phdr - base_phdr;
 
-          code_sec = bfd_get_section_by_name (abfd, "$CODE$");
-          phdr = _bfd_elf_find_segment_containing_section (abfd, code_sec);
-          BFD_ASSERT (phdr != NULL);
-          code_seg = phdr - base_phdr;
-        }
+	  code_sec = bfd_get_section_by_name (abfd, "$CODE$");
+	  phdr = _bfd_elf_find_segment_containing_section (abfd, code_sec);
+	  BFD_ASSERT (phdr != NULL);
+	  code_seg = phdr - base_phdr;
+	}
 
       for (; dyncon < dynconend; dyncon++)
 	{
@@ -4103,46 +4115,46 @@ elf64_ia64_finish_dynamic_sections (bfd *abfd,
 
 	  switch (dyn.d_tag)
 	    {
-            case DT_IA_64_VMS_FIXUP_RELA_OFF:
-              dyn.d_un.d_val +=
-                (ia64_info->fixups_sec->output_section->vma
-                 + ia64_info->fixups_sec->output_offset)
-                - (sdyn->output_section->vma + sdyn->output_offset);
-              break;
+	    case DT_IA_64_VMS_FIXUP_RELA_OFF:
+	      dyn.d_un.d_val +=
+		(ia64_info->fixups_sec->output_section->vma
+		 + ia64_info->fixups_sec->output_offset)
+		- (sdyn->output_section->vma + sdyn->output_offset);
+	      break;
 
-            case DT_IA_64_VMS_PLTGOT_OFFSET:
-              dyn.d_un.d_val = gp_off;
-              break;
+	    case DT_IA_64_VMS_PLTGOT_OFFSET:
+	      dyn.d_un.d_val = gp_off;
+	      break;
 
-            case DT_IA_64_VMS_PLTGOT_SEG:
-              dyn.d_un.d_val = gp_seg;
-              break;
+	    case DT_IA_64_VMS_PLTGOT_SEG:
+	      dyn.d_un.d_val = gp_seg;
+	      break;
 
-            case DT_IA_64_VMS_UNWINDSZ:
-              if (unwind_sec == NULL)
-                {
-                  dyn.d_tag = DT_NULL;
-                  dyn.d_un.d_val = 0xdead;
-                }
-              else
-                dyn.d_un.d_val = unwind_sec->size;
-              break;
+	    case DT_IA_64_VMS_UNWINDSZ:
+	      if (unwind_sec == NULL)
+		{
+		  dyn.d_tag = DT_NULL;
+		  dyn.d_un.d_val = 0xdead;
+		}
+	      else
+		dyn.d_un.d_val = unwind_sec->size;
+	      break;
 
-            case DT_IA_64_VMS_UNWIND_CODSEG:
-              dyn.d_un.d_val = code_seg;
-              break;
+	    case DT_IA_64_VMS_UNWIND_CODSEG:
+	      dyn.d_un.d_val = code_seg;
+	      break;
 
-            case DT_IA_64_VMS_UNWIND_INFOSEG:
-            case DT_IA_64_VMS_UNWIND_SEG:
-              dyn.d_un.d_val = unwind_seg;
-              break;
+	    case DT_IA_64_VMS_UNWIND_INFOSEG:
+	    case DT_IA_64_VMS_UNWIND_SEG:
+	      dyn.d_un.d_val = unwind_seg;
+	      break;
 
-            case DT_IA_64_VMS_UNWIND_OFFSET:
-              break;
+	    case DT_IA_64_VMS_UNWIND_OFFSET:
+	      break;
 
-            default:
-              /* No need to rewrite the entry.  */
-              continue;
+	    default:
+	      /* No need to rewrite the entry.  */
+	      continue;
 	    }
 
 	  bfd_elf64_swap_dyn_out (abfd, &dyn, dyncon);
@@ -4158,68 +4170,73 @@ elf64_ia64_finish_dynamic_sections (bfd *abfd,
     tfr = (struct elf64_vms_transfer *)tfr_sec->contents;
     bfd_putl32 (6 * 8, tfr->size);
     bfd_putl64 (tfr_sec->output_section->vma
-                + tfr_sec->output_offset
-                + 6 * 8, tfr->tfradr3);
+		+ tfr_sec->output_offset
+		+ 6 * 8, tfr->tfradr3);
 
-    tfr3 = elf_link_hash_lookup (elf_hash_table (info), "ELF$TFRADR", FALSE,
-                                 FALSE, FALSE);
+    tfr3 = elf_link_hash_lookup (elf_hash_table (info), "ELF$TFRADR", false,
+				 false, false);
 
     if (tfr3
-        && (tfr3->root.type == bfd_link_hash_defined
-            || tfr3->root.type == bfd_link_hash_defweak))
+	&& (tfr3->root.type == bfd_link_hash_defined
+	    || tfr3->root.type == bfd_link_hash_defweak))
       {
-        asection *tfr3_sec = tfr3->root.u.def.section;
-        bfd_vma tfr3_val;
+	asection *tfr3_sec = tfr3->root.u.def.section;
+	bfd_vma tfr3_val;
 
-        tfr3_val = (tfr3->root.u.def.value
-                    + tfr3_sec->output_section->vma
-                    + tfr3_sec->output_offset);
+	tfr3_val = (tfr3->root.u.def.value
+		    + tfr3_sec->output_section->vma
+		    + tfr3_sec->output_offset);
 
-        bfd_putl64 (tfr3_val, tfr->tfr3_func);
-        bfd_putl64 (_bfd_get_gp_value (info->output_bfd), tfr->tfr3_gp);
+	bfd_putl64 (tfr3_val, tfr->tfr3_func);
+	bfd_putl64 (_bfd_get_gp_value (info->output_bfd), tfr->tfr3_gp);
       }
 
     /* FIXME: set linker flags,
        handle lib$initialize.  */
   }
 
-  return TRUE;
+  return true;
 }
 
 /* ELF file flag handling:  */
 
 /* Function to keep IA-64 specific file flags.  */
-static bfd_boolean
+static bool
 elf64_ia64_set_private_flags (bfd *abfd, flagword flags)
 {
   BFD_ASSERT (!elf_flags_init (abfd)
 	      || elf_elfheader (abfd)->e_flags == flags);
 
   elf_elfheader (abfd)->e_flags = flags;
-  elf_flags_init (abfd) = TRUE;
-  return TRUE;
+  elf_flags_init (abfd) = true;
+  return true;
 }
 
 /* Merge backend specific data from an object file to the output
    object file when linking.  */
-static bfd_boolean
-elf64_ia64_merge_private_bfd_data (bfd *ibfd, bfd *obfd)
+static bool
+elf64_ia64_merge_private_bfd_data (bfd *ibfd, struct bfd_link_info *info)
 {
+  bfd *obfd = info->output_bfd;
   flagword out_flags;
   flagword in_flags;
-  bfd_boolean ok = TRUE;
+  bool ok = true;
+
+  /* FIXME: What should be checked when linking shared libraries?  */
+  if ((ibfd->flags & DYNAMIC) != 0)
+    return true;
 
   /* Don't even pretend to support mixed-format linking.  */
   if (bfd_get_flavour (ibfd) != bfd_target_elf_flavour
       || bfd_get_flavour (obfd) != bfd_target_elf_flavour)
-    return FALSE;
+    return false;
 
   in_flags  = elf_elfheader (ibfd)->e_flags;
   out_flags = elf_elfheader (obfd)->e_flags;
 
   if (! elf_flags_init (obfd))
     {
-      elf_flags_init (obfd) = TRUE;
+      elf_flags_init (obfd) = true;
       elf_elfheader (obfd)->e_flags = in_flags;
 
       if (bfd_get_arch (obfd) == bfd_get_arch (ibfd)
@@ -4229,12 +4246,12 @@ elf64_ia64_merge_private_bfd_data (bfd *ibfd, bfd *obfd)
 				    bfd_get_mach (ibfd));
 	}
 
-      return TRUE;
+      return true;
     }
 
   /* Check flag compatibility.  */
   if (in_flags == out_flags)
-    return TRUE;
+    return true;
 
   /* Output has EF_IA_64_REDUCEDFP set only if all inputs have it set.  */
   if (!(in_flags & EF_IA_64_REDUCEDFP) && (out_flags & EF_IA_64_REDUCEDFP))
@@ -4242,55 +4259,55 @@ elf64_ia64_merge_private_bfd_data (bfd *ibfd, bfd *obfd)
 
   if ((in_flags & EF_IA_64_TRAPNIL) != (out_flags & EF_IA_64_TRAPNIL))
     {
-      (*_bfd_error_handler)
-	(_("%B: linking trap-on-NULL-dereference with non-trapping files"),
+      _bfd_error_handler
+	(_("%pB: linking trap-on-NULL-dereference with non-trapping files"),
 	 ibfd);
 
       bfd_set_error (bfd_error_bad_value);
-      ok = FALSE;
+      ok = false;
     }
   if ((in_flags & EF_IA_64_BE) != (out_flags & EF_IA_64_BE))
     {
-      (*_bfd_error_handler)
-	(_("%B: linking big-endian files with little-endian files"),
+      _bfd_error_handler
+	(_("%pB: linking big-endian files with little-endian files"),
 	 ibfd);
 
       bfd_set_error (bfd_error_bad_value);
-      ok = FALSE;
+      ok = false;
     }
   if ((in_flags & EF_IA_64_ABI64) != (out_flags & EF_IA_64_ABI64))
     {
-      (*_bfd_error_handler)
-	(_("%B: linking 64-bit files with 32-bit files"),
+      _bfd_error_handler
+	(_("%pB: linking 64-bit files with 32-bit files"),
 	 ibfd);
 
       bfd_set_error (bfd_error_bad_value);
-      ok = FALSE;
+      ok = false;
     }
   if ((in_flags & EF_IA_64_CONS_GP) != (out_flags & EF_IA_64_CONS_GP))
     {
-      (*_bfd_error_handler)
-	(_("%B: linking constant-gp files with non-constant-gp files"),
+      _bfd_error_handler
+	(_("%pB: linking constant-gp files with non-constant-gp files"),
 	 ibfd);
 
       bfd_set_error (bfd_error_bad_value);
-      ok = FALSE;
+      ok = false;
     }
   if ((in_flags & EF_IA_64_NOFUNCDESC_CONS_GP)
       != (out_flags & EF_IA_64_NOFUNCDESC_CONS_GP))
     {
-      (*_bfd_error_handler)
-	(_("%B: linking auto-pic files with non-auto-pic files"),
+      _bfd_error_handler
+	(_("%pB: linking auto-pic files with non-auto-pic files"),
 	 ibfd);
 
       bfd_set_error (bfd_error_bad_value);
-      ok = FALSE;
+      ok = false;
     }
 
   return ok;
 }
 
-static bfd_boolean
+static bool
 elf64_ia64_print_private_bfd_data (bfd *abfd, void * ptr)
 {
   FILE *file = (FILE *) ptr;
@@ -4309,7 +4326,7 @@ elf64_ia64_print_private_bfd_data (bfd *abfd, void * ptr)
 	   (flags & EF_IA_64_ABI64) ? "ABI64" : "ABI32");
 
   _bfd_elf_print_private_bfd_data (abfd, ptr);
-  return TRUE;
+  return true;
 }
 
 static enum elf_reloc_type_class
@@ -4336,12 +4353,12 @@ elf64_ia64_reloc_type_class (const struct bfd_link_info *info ATTRIBUTE_UNUSED,
 
 static const struct bfd_elf_special_section elf64_ia64_special_sections[] =
 {
-  { STRING_COMMA_LEN (".sbss"),  -1, SHT_NOBITS,   SHF_ALLOC + SHF_WRITE + SHF_IA_64_SHORT },
+  { STRING_COMMA_LEN (".sbss"),	 -1, SHT_NOBITS,   SHF_ALLOC + SHF_WRITE + SHF_IA_64_SHORT },
   { STRING_COMMA_LEN (".sdata"), -1, SHT_PROGBITS, SHF_ALLOC + SHF_WRITE + SHF_IA_64_SHORT },
-  { NULL,                    0,   0, 0,            0 }
+  { NULL,		     0,	  0, 0,		   0 }
 };
 
-static bfd_boolean
+static bool
 elf64_ia64_object_p (bfd *abfd)
 {
   asection *sec;
@@ -4349,10 +4366,10 @@ elf64_ia64_object_p (bfd *abfd)
   flagword flags;
   const char *name;
   char *unwi_name, *unw_name;
-  bfd_size_type amt;
+  size_t amt;
 
   if (abfd->flags & DYNAMIC)
-    return TRUE;
+    return true;
 
   /* Flags for fake group section.  */
   flags = (SEC_LINKER_CREATED | SEC_GROUP | SEC_LINK_ONCE
@@ -4365,14 +4382,14 @@ elf64_ia64_object_p (bfd *abfd)
       if (elf_sec_group (sec) == NULL
 	  && ((sec->flags & (SEC_LINK_ONCE | SEC_CODE | SEC_GROUP))
 	      == (SEC_LINK_ONCE | SEC_CODE))
-	  && CONST_STRNEQ (sec->name, ".gnu.linkonce.t."))
+	  && startswith (sec->name, ".gnu.linkonce.t."))
 	{
 	  name = sec->name + 16;
 
 	  amt = strlen (name) + sizeof (".gnu.linkonce.ia64unwi.");
 	  unwi_name = bfd_alloc (abfd, amt);
 	  if (!unwi_name)
-	    return FALSE;
+	    return false;
 
 	  strcpy (stpcpy (unwi_name, ".gnu.linkonce.ia64unwi."), name);
 	  unwi = bfd_get_section_by_name (abfd, unwi_name);
@@ -4380,7 +4397,7 @@ elf64_ia64_object_p (bfd *abfd)
 	  amt = strlen (name) + sizeof (".gnu.linkonce.ia64unw.");
 	  unw_name = bfd_alloc (abfd, amt);
 	  if (!unw_name)
-	    return FALSE;
+	    return false;
 
 	  strcpy (stpcpy (unw_name, ".gnu.linkonce.ia64unw."), name);
 	  unw = bfd_get_section_by_name (abfd, unw_name);
@@ -4390,7 +4407,7 @@ elf64_ia64_object_p (bfd *abfd)
 	  group = bfd_make_section_anyway_with_flags (abfd, name,
 						      flags);
 	  if (group == NULL)
-	    return FALSE;
+	    return false;
 
 	  /* Move the fake group section to the beginning.  */
 	  bfd_section_list_remove (abfd, group);
@@ -4431,14 +4448,14 @@ elf64_ia64_object_p (bfd *abfd)
 	  elf_section_data (group)->this_hdr.sh_type = SHT_GROUP;
 	}
     }
-  return TRUE;
+  return true;
 }
 
 /* Handle an IA-64 specific section when reading an object file.  This
    is called when bfd_section_from_shdr finds a section with an unknown
    type.  */
 
-static bfd_boolean
+static bool
 elf64_vms_section_from_shdr (bfd *abfd,
 			     Elf_Internal_Shdr *hdr,
 			     const char *name,
@@ -4460,29 +4477,29 @@ elf64_vms_section_from_shdr (bfd *abfd,
 
     case SHT_IA_64_EXT:
       if (strcmp (name, ELF_STRING_ia64_archext) != 0)
-	return FALSE;
+	return false;
       break;
 
     default:
-      return FALSE;
+      return false;
     }
 
   if (! _bfd_elf_make_section_from_shdr (abfd, hdr, name, shindex))
-    return FALSE;
+    return false;
 
   if (secflags != 0)
     {
       asection *newsect = hdr->bfd_section;
 
-      if (! bfd_set_section_flags
-          (abfd, newsect, bfd_get_section_flags (abfd, newsect) | secflags))
-	return FALSE;
+      if (!bfd_set_section_flags (newsect,
+				  bfd_section_flags (newsect) | secflags))
+	return false;
     }
 
-  return TRUE;
+  return true;
 }
 
-static bfd_boolean
+static bool
 elf64_vms_object_p (bfd *abfd)
 {
   Elf_Internal_Ehdr *i_ehdrp = elf_elfheader (abfd);
@@ -4494,7 +4511,7 @@ elf64_vms_object_p (bfd *abfd)
   char name[16];
 
   if (!elf64_ia64_object_p (abfd))
-    return FALSE;
+    return false;
 
   /* Many VMS compilers do not generate sections for the corresponding
      segment.  This is boring as binutils tools won't be able to disassemble
@@ -4568,14 +4585,14 @@ elf64_vms_object_p (bfd *abfd)
 	      size_t name_len = strlen (name) + 1;
 	      nname = bfd_alloc (abfd, name_len);
 	      if (nname == NULL)
-		return FALSE;
+		return false;
 	      memcpy (nname, name, name_len);
 	    }
 
 	  /* Create and fill new section.  */
 	  nsec = bfd_make_section_anyway_with_flags (abfd, nname, flags);
 	  if (nsec == NULL)
-	    return FALSE;
+	    return false;
 	  nsec->vma = base_vma;
 	  nsec->size = next_vma - base_vma;
 	  nsec->filepos = i_phdr->p_offset + (base_vma - i_phdr->p_vaddr);
@@ -4583,26 +4600,30 @@ elf64_vms_object_p (bfd *abfd)
 	  base_vma = next_vma;
 	}
     }
-  return TRUE;
+  return true;
 }
 
-static void
-elf64_vms_post_process_headers (bfd *abfd,
-				struct bfd_link_info *info ATTRIBUTE_UNUSED)
+static bool
+elf64_vms_init_file_header (bfd *abfd, struct bfd_link_info *info)
 {
-  Elf_Internal_Ehdr *i_ehdrp = elf_elfheader (abfd);
+  Elf_Internal_Ehdr *i_ehdrp;
 
+  if (!_bfd_elf_init_file_header (abfd, info))
+    return false;
+
+  i_ehdrp = elf_elfheader (abfd);
   i_ehdrp->e_ident[EI_OSABI] = ELFOSABI_OPENVMS;
   i_ehdrp->e_ident[EI_ABIVERSION] = 2;
+  return true;
 }
 
-static bfd_boolean
+static bool
 elf64_vms_section_processing (bfd *abfd ATTRIBUTE_UNUSED,
 			      Elf_Internal_Shdr *hdr)
 {
   if (hdr->bfd_section != NULL)
     {
-      const char *name = bfd_get_section_name (abfd, hdr->bfd_section);
+      const char *name = bfd_section_name (hdr->bfd_section);
 
       if (strcmp (name, ".text") == 0)
 	hdr->sh_flags |= SHF_IA_64_VMS_SHARED;
@@ -4626,15 +4647,14 @@ elf64_vms_section_processing (bfd *abfd ATTRIBUTE_UNUSED,
 	hdr->sh_type = SHT_IA_64_VMS_DEBUG_STR;
     }
 
-  return TRUE;
+  return true;
 }
 
 /* The final processing done just before writing out a VMS IA-64 ELF
    object file.  */
 
-static void
-elf64_vms_final_write_processing (bfd *abfd,
-				  bfd_boolean linker ATTRIBUTE_UNUSED)
+static bool
+elf64_vms_final_write_processing (bfd *abfd)
 {
   Elf_Internal_Shdr *hdr;
   asection *s;
@@ -4644,7 +4664,7 @@ elf64_vms_final_write_processing (bfd *abfd,
     {
       hdr = &elf_section_data (s)->this_hdr;
 
-      if (strcmp (bfd_get_section_name (abfd, hdr->bfd_section),
+      if (strcmp (bfd_section_name (hdr->bfd_section),
 		  ".IA_64.unwind_info") == 0)
 	unwind_info_sect_idx = elf_section_data (s)->this_idx;
 
@@ -4652,7 +4672,7 @@ elf64_vms_final_write_processing (bfd *abfd,
 	{
 	case SHT_IA_64_UNWIND:
 	  /* VMS requires sh_info to point to the unwind info section.  */
-          hdr->sh_info = unwind_info_sect_idx;
+	  hdr->sh_info = unwind_info_sect_idx;
 	  break;
 	}
     }
@@ -4667,28 +4687,29 @@ elf64_vms_final_write_processing (bfd *abfd,
 	flags |= EF_IA_64_ABI64;
 
       elf_elfheader (abfd)->e_flags = flags;
-      elf_flags_init (abfd) = TRUE;
+      elf_flags_init (abfd) = true;
     }
+  return _bfd_elf_final_write_processing (abfd);
 }
 
-static bfd_boolean
+static bool
 elf64_vms_write_shdrs_and_ehdr (bfd *abfd)
 {
   unsigned char needed_count[8];
 
   if (!bfd_elf64_write_shdrs_and_ehdr (abfd))
-    return FALSE;
+    return false;
 
   bfd_putl64 (elf_ia64_vms_tdata (abfd)->needed_count, needed_count);
 
   if (bfd_seek (abfd, sizeof (Elf64_External_Ehdr), SEEK_SET) != 0
       || bfd_bwrite (needed_count, 8, abfd) != 8)
-    return FALSE;
+    return false;
 
-  return TRUE;
+  return true;
 }
 
-static bfd_boolean
+static bool
 elf64_vms_close_and_cleanup (bfd *abfd)
 {
   if (bfd_get_format (abfd) == bfd_object)
@@ -4700,7 +4721,7 @@ elf64_vms_close_and_cleanup (bfd *abfd)
       if ((isize & 7) != 0)
 	{
 	  int ishort = 8 - (isize & 7);
-          bfd_uint64_t pad = 0;
+	  uint64_t pad = 0;
 
 	  bfd_seek (abfd, isize, SEEK_SET);
 	  bfd_bwrite (&pad, ishort, abfd);
@@ -4712,7 +4733,7 @@ elf64_vms_close_and_cleanup (bfd *abfd)
 
 /* Add symbols from an ELF object file to the linker hash table.  */
 
-static bfd_boolean
+static bool
 elf64_vms_link_add_object_symbols (bfd *abfd, struct bfd_link_info *info)
 {
   Elf_Internal_Shdr *hdr;
@@ -4720,7 +4741,7 @@ elf64_vms_link_add_object_symbols (bfd *abfd, struct bfd_link_info *info)
   bfd_size_type extsymcount;
   bfd_size_type extsymoff;
   struct elf_link_hash_entry **sym_hash;
-  bfd_boolean dynamic;
+  bool dynamic;
   Elf_Internal_Sym *isymbuf = NULL;
   Elf_Internal_Sym *isym;
   Elf_Internal_Sym *isymend;
@@ -4732,19 +4753,19 @@ elf64_vms_link_add_object_symbols (bfd *abfd, struct bfd_link_info *info)
   bed = get_elf_backend_data (abfd);
 
   if ((abfd->flags & DYNAMIC) == 0)
-    dynamic = FALSE;
+    dynamic = false;
   else
     {
-      dynamic = TRUE;
+      dynamic = true;
 
       /* You can't use -r against a dynamic object.  Also, there's no
 	 hope of using a dynamic object which does not exactly match
 	 the format of the output file.  */
-      if (info->relocatable
-	  || !is_elf_hash_table (htab)
+      if (bfd_link_relocatable (info)
+	  || !is_elf_hash_table (&htab->root)
 	  || info->output_bfd->xvec != abfd->xvec)
 	{
-	  if (info->relocatable)
+	  if (bfd_link_relocatable (info))
 	    bfd_set_error (bfd_error_invalid_operation);
 	  else
 	    bfd_set_error (bfd_error_wrong_format);
@@ -4759,8 +4780,8 @@ elf64_vms_link_add_object_symbols (bfd *abfd, struct bfd_link_info *info)
 	 so we attach them to this BFD, provided it is the right
 	 format.  FIXME: If there are no input BFD's of the same
 	 format as the output, we can't make a shared library.  */
-      if (info->shared
-	  && is_elf_hash_table (htab)
+      if (bfd_link_pic (info)
+	  && is_elf_hash_table (&htab->root)
 	  && info->output_bfd->xvec == abfd->xvec
 	  && !htab->dynamic_sections_created)
 	{
@@ -4768,7 +4789,7 @@ elf64_vms_link_add_object_symbols (bfd *abfd, struct bfd_link_info *info)
 	    goto error_return;
 	}
     }
-  else if (!is_elf_hash_table (htab))
+  else if (!is_elf_hash_table (&htab->root))
     goto error_return;
   else
     {
@@ -4784,65 +4805,65 @@ elf64_vms_link_add_object_symbols (bfd *abfd, struct bfd_link_info *info)
 
       /* Be sure there are dynamic sections.  */
       if (! elf64_ia64_create_dynamic_sections (htab->dynobj, info))
-        goto error_return;
+	goto error_return;
 
       s = bfd_get_section_by_name (abfd, ".dynamic");
       if (s == NULL)
-        {
-          /* VMS libraries do not have dynamic sections.  Create one from
-             the segment.  */
-          Elf_Internal_Phdr *phdr;
-          unsigned int i, phnum;
+	{
+	  /* VMS libraries do not have dynamic sections.  Create one from
+	     the segment.  */
+	  Elf_Internal_Phdr *phdr;
+	  unsigned int i, phnum;
 
-          phdr = elf_tdata (abfd)->phdr;
-          if (phdr == NULL)
-            goto error_return;
-          phnum = elf_elfheader (abfd)->e_phnum;
-          for (i = 0; i < phnum; phdr++)
-            if (phdr->p_type == PT_DYNAMIC)
-              {
-                s = bfd_make_section (abfd, ".dynamic");
-                if (s == NULL)
-                  goto error_return;
-                s->vma = phdr->p_vaddr;
-                s->lma = phdr->p_paddr;
-                s->size = phdr->p_filesz;
-                s->filepos = phdr->p_offset;
-                s->flags |= SEC_HAS_CONTENTS;
-                s->alignment_power = bfd_log2 (phdr->p_align);
-                break;
-              }
-          if (s == NULL)
-            goto error_return;
-        }
+	  phdr = elf_tdata (abfd)->phdr;
+	  if (phdr == NULL)
+	    goto error_return;
+	  phnum = elf_elfheader (abfd)->e_phnum;
+	  for (i = 0; i < phnum; phdr++)
+	    if (phdr->p_type == PT_DYNAMIC)
+	      {
+		s = bfd_make_section (abfd, ".dynamic");
+		if (s == NULL)
+		  goto error_return;
+		s->vma = phdr->p_vaddr;
+		s->lma = phdr->p_paddr;
+		s->size = phdr->p_filesz;
+		s->filepos = phdr->p_offset;
+		s->flags |= SEC_HAS_CONTENTS;
+		s->alignment_power = bfd_log2 (phdr->p_align);
+		break;
+	      }
+	  if (s == NULL)
+	    goto error_return;
+	}
 
       /* Extract IDENT.  */
       if (!bfd_malloc_and_get_section (abfd, s, &dynbuf))
-        {
-error_free_dyn:
-          free (dynbuf);
-          goto error_return;
-        }
+	{
+	error_free_dyn:
+	  free (dynbuf);
+	  goto error_return;
+	}
 
       for (extdyn = dynbuf;
-           extdyn < dynbuf + s->size;
-           extdyn += bed->s->sizeof_dyn)
-        {
-          Elf_Internal_Dyn dyn;
+	   (size_t) (dynbuf + s->size - extdyn) >= bed->s->sizeof_dyn;
+	   extdyn += bed->s->sizeof_dyn)
+	{
+	  Elf_Internal_Dyn dyn;
 
-          bed->s->swap_dyn_in (abfd, extdyn, &dyn);
-          if (dyn.d_tag == DT_IA_64_VMS_IDENT)
-            {
-              bfd_uint64_t tagv = dyn.d_un.d_val;
-              elf_ia64_vms_ident (abfd) = tagv;
-              break;
-            }
-        }
+	  bed->s->swap_dyn_in (abfd, extdyn, &dyn);
+	  if (dyn.d_tag == DT_IA_64_VMS_IDENT)
+	    {
+	      uint64_t tagv = dyn.d_un.d_val;
+	      elf_ia64_vms_ident (abfd) = tagv;
+	      break;
+	    }
+	}
       if (extdyn >= dynbuf + s->size)
-        {
-          /* Ident not found.  */
-          goto error_free_dyn;
-        }
+	{
+	  /* Ident not found.  */
+	  goto error_free_dyn;
+	}
       free (dynbuf);
 
       /* We do not want to include any of the sections in a dynamic
@@ -4855,7 +4876,7 @@ error_free_dyn:
       bfd_section_list_clear (abfd);
 
       /* FIXME: should we detect if this library is already included ?
-         This should be harmless and shouldn't happen in practice.  */
+	 This should be harmless and shouldn't happen in practice.  */
     }
 
   hdr = &elf_tdata (abfd)->symtab_hdr;
@@ -4894,10 +4915,10 @@ error_free_dyn:
       flagword flags;
       const char *name;
       struct elf_link_hash_entry *h;
-      bfd_boolean definition;
-      bfd_boolean size_change_ok;
-      bfd_boolean type_change_ok;
-      bfd_boolean common;
+      bool definition;
+      bool size_change_ok;
+      bool type_change_ok;
+      bool common;
       unsigned int old_alignment;
       bfd *old_bfd;
 
@@ -4988,27 +5009,27 @@ error_free_dyn:
 
       if (bfd_is_und_section (sec)
 	  || bfd_is_com_section (sec))
-	definition = FALSE;
+	definition = false;
       else
-	definition = TRUE;
+	definition = true;
 
-      size_change_ok = FALSE;
+      size_change_ok = false;
       type_change_ok = bed->type_change_ok;
       old_alignment = 0;
       old_bfd = NULL;
       new_sec = sec;
 
       if (! bfd_is_und_section (sec))
-        h = elf_link_hash_lookup (htab, name, TRUE, FALSE, FALSE);
+	h = elf_link_hash_lookup (htab, name, true, false, false);
       else
-        h = ((struct elf_link_hash_entry *) bfd_wrapped_link_hash_lookup
-             (abfd, info, name, TRUE, FALSE, FALSE));
+	h = ((struct elf_link_hash_entry *) bfd_wrapped_link_hash_lookup
+	     (abfd, info, name, true, false, false));
       if (h == NULL)
-        goto error_free_sym;
+	goto error_free_sym;
 
       *sym_hash = h;
 
-      if (is_elf_hash_table (htab))
+      if (is_elf_hash_table (&htab->root))
 	{
 	  while (h->root.type == bfd_link_hash_indirect
 		 || h->root.type == bfd_link_hash_warning)
@@ -5026,9 +5047,9 @@ error_free_dyn:
 	      break;
 
 	    case bfd_link_hash_defined:
-              if (abfd->selective_search)
-                continue;
-              /* Fall-through.  */
+	      if (abfd->selective_search)
+		continue;
+	      /* Fall-through.  */
 	    case bfd_link_hash_defweak:
 	      old_bfd = h->root.u.def.section->owner;
 	      break;
@@ -5041,7 +5062,7 @@ error_free_dyn:
 	}
 
       if (! (_bfd_generic_link_add_one_symbol
-	     (info, abfd, name, flags, sec, value, NULL, FALSE, bed->collect,
+	     (info, abfd, name, flags, sec, value, NULL, false, bed->collect,
 	      (struct bfd_link_hash_entry **) sym_hash)))
 	goto error_free_vers;
 
@@ -5077,7 +5098,7 @@ error_free_dyn:
 	    h->root.u.c.p->alignment_power = old_alignment;
 	}
 
-      if (is_elf_hash_table (htab))
+      if (is_elf_hash_table (&htab->root))
 	{
 	  /* Check the alignment when a common symbol is involved. This
 	     can change when a common symbol is overridden by a normal
@@ -5121,17 +5142,19 @@ error_free_dyn:
 		{
 		  /* PR binutils/2735 */
 		  if (normal_bfd == NULL)
-		    (*_bfd_error_handler)
-		      (_("Warning: alignment %u of common symbol `%s' in %B"
-			 " is greater than the alignment (%u) of its section %A"),
-		       common_bfd, h->root.u.def.section,
-		       1 << common_align, name, 1 << normal_align);
+		    _bfd_error_handler
+		      /* xgettext:c-format */
+		      (_("warning: alignment %u of common symbol `%s' in %pB"
+			 " is greater than the alignment (%u) of its section %pA"),
+		       1 << common_align, name, common_bfd,
+		       1 << normal_align, h->root.u.def.section);
 		  else
-		    (*_bfd_error_handler)
-		      (_("Warning: alignment %u of symbol `%s' in %B"
-			 " is smaller than %u in %B"),
-		       normal_bfd, common_bfd,
-		       1 << normal_align, name, 1 << common_align);
+		    _bfd_error_handler
+		      /* xgettext:c-format */
+		      (_("warning: alignment %u of symbol `%s' in %pB"
+			 " is smaller than %u in %pB"),
+		       1 << normal_align, name, normal_bfd,
+		       1 << common_align, common_bfd);
 		}
 	    }
 
@@ -5142,12 +5165,12 @@ error_free_dyn:
 	      if (h->size != 0
 		  && h->size != isym->st_size
 		  && ! size_change_ok)
-		(*_bfd_error_handler)
-		  (_("Warning: size of symbol `%s' changed"
-		     " from %lu in %B to %lu in %B"),
-		   old_bfd, abfd,
-		   name, (unsigned long) h->size,
-		   (unsigned long) isym->st_size);
+		_bfd_error_handler
+		  /* xgettext:c-format */
+		  (_("warning: size of symbol `%s' changed"
+		     " from %" PRIu64 " in %pB to %" PRIu64 " in %pB"),
+		   name, (uint64_t) h->size, old_bfd,
+		   (uint64_t) isym->st_size, abfd);
 
 	      h->size = isym->st_size;
 	    }
@@ -5169,10 +5192,11 @@ error_free_dyn:
 	      if (h->type != type)
 		{
 		  if (h->type != STT_NOTYPE && ! type_change_ok)
-		    (*_bfd_error_handler)
-		      (_("Warning: type of symbol `%s' changed"
-			 " from %d to %d in %B"),
-		       abfd, name, h->type, type);
+		    _bfd_error_handler
+		      /* xgettext:c-format */
+		      (_("warning: type of symbol `%s' changed"
+			 " from %d to %d in %pB"),
+		       name, h->type, type, abfd);
 
 		  h->type = type;
 		}
@@ -5193,25 +5217,22 @@ error_free_dyn:
 		}
 	      else
 		{
-                  BFD_ASSERT (!h->def_dynamic);
+		  BFD_ASSERT (!h->def_dynamic);
 		  h->def_regular = 1;
 		}
 	    }
 	  else
 	    {
 	      BFD_ASSERT (definition);
-              h->def_dynamic = 1;
-              h->dynindx = -2;
-              ((struct elf64_ia64_link_hash_entry *)h)->shl = abfd;
+	      h->def_dynamic = 1;
+	      h->dynindx = -2;
+	      ((struct elf64_ia64_link_hash_entry *)h)->shl = abfd;
 	    }
 	}
     }
 
-  if (isymbuf != NULL)
-    {
-      free (isymbuf);
-      isymbuf = NULL;
-    }
+  free (isymbuf);
+  isymbuf = NULL;
 
   /* If this object is the same format as the output object, and it is
      not a shared library, then let the backend look through the
@@ -5231,7 +5252,7 @@ error_free_dyn:
      I have no idea how to handle linking PIC code into a file of a
      different format.  It probably can't be done.  */
   if (! dynamic
-      && is_elf_hash_table (htab)
+      && is_elf_hash_table (&htab->root)
       && bed->check_relocs != NULL
       && (*bed->relocs_compatible) (abfd->xvec, info->output_bfd->xvec))
     {
@@ -5240,7 +5261,7 @@ error_free_dyn:
       for (o = abfd->sections; o != NULL; o = o->next)
 	{
 	  Elf_Internal_Rela *internal_relocs;
-	  bfd_boolean ok;
+	  bool ok;
 
 	  if ((o->flags & SEC_RELOC) == 0
 	      || o->reloc_count == 0
@@ -5264,17 +5285,16 @@ error_free_dyn:
 	}
     }
 
-  return TRUE;
+  return true;
 
  error_free_vers:
  error_free_sym:
-  if (isymbuf != NULL)
-    free (isymbuf);
+  free (isymbuf);
  error_return:
-  return FALSE;
+  return false;
 }
 
-static bfd_boolean
+static bool
 elf64_vms_link_add_archive_symbols (bfd *abfd, struct bfd_link_info *info)
 {
   int pass;
@@ -5285,7 +5305,7 @@ elf64_vms_link_add_archive_symbols (bfd *abfd, struct bfd_link_info *info)
   if (info->output_bfd->xvec != abfd->xvec)
     {
       bfd_set_error (bfd_error_wrong_format);
-      return FALSE;
+      return false;
     }
 
   /* The archive_pass field in the archive itself is used to
@@ -5315,10 +5335,10 @@ elf64_vms_link_add_archive_symbols (bfd *abfd, struct bfd_link_info *info)
 	     entry if it is the tail, because that would lose any
 	     entries we add to the list later on.  */
 	  if (*pundef != info->hash->undefs_tail)
-            {
-              *pundef = *next_pundef;
-              next_pundef = pundef;
-            }
+	    {
+	      *pundef = *next_pundef;
+	      next_pundef = pundef;
+	    }
 	  continue;
 	}
 
@@ -5332,46 +5352,46 @@ elf64_vms_link_add_archive_symbols (bfd *abfd, struct bfd_link_info *info)
 
       element = bfd_get_elt_at_index (abfd, symidx);
       if (element == NULL)
-	return FALSE;
+	return false;
 
       if (element->archive_pass == -1 || element->archive_pass == pass)
-        {
-          /* Next symbol if this archive is wrong or already handled.  */
-          continue;
-        }
+	{
+	  /* Next symbol if this archive is wrong or already handled.  */
+	  continue;
+	}
 
       orig_element = element;
       if (bfd_is_thin_archive (abfd))
-        {
-          element = _bfd_vms_lib_get_imagelib_file (element);
-          if (element == NULL || !bfd_check_format (element, bfd_object))
-            {
-              orig_element->archive_pass = -1;
-              return FALSE;
-            }
-        }
+	{
+	  element = _bfd_vms_lib_get_imagelib_file (element);
+	  if (element == NULL || !bfd_check_format (element, bfd_object))
+	    {
+	      orig_element->archive_pass = -1;
+	      return false;
+	    }
+	}
       else if (! bfd_check_format (element, bfd_object))
-        {
-          element->archive_pass = -1;
-          return FALSE;
-        }
+	{
+	  element->archive_pass = -1;
+	  return false;
+	}
 
       /* Unlike the generic linker, we know that this element provides
 	 a definition for an undefined symbol and we know that we want
 	 to include it.  We don't need to check anything.  */
       if (! (*info->callbacks->add_archive_element) (info, element,
-                                                     h->root.string, &element))
-	return FALSE;
+						     h->root.string, &element))
+	continue;
       if (! elf64_vms_link_add_object_symbols (element, info))
-	return FALSE;
+	return false;
 
       orig_element->archive_pass = pass;
     }
 
-  return TRUE;
+  return true;
 }
 
-static bfd_boolean
+static bool
 elf64_vms_bfd_link_add_symbols (bfd *abfd, struct bfd_link_info *info)
 {
   switch (bfd_get_format (abfd))
@@ -5384,11 +5404,11 @@ elf64_vms_bfd_link_add_symbols (bfd *abfd, struct bfd_link_info *info)
       break;
     default:
       bfd_set_error (bfd_error_wrong_format);
-      return FALSE;
+      return false;
     }
 }
 
-static bfd_boolean
+static bool
 elf64_ia64_vms_mkobject (bfd *abfd)
 {
   return bfd_elf_allocate_object
@@ -5459,8 +5479,6 @@ static const struct elf_size_info elf64_ia64_vms_size_info = {
 /* Stuff for the BFD linker: */
 #define bfd_elf64_bfd_link_hash_table_create \
 	elf64_ia64_hash_table_create
-#define bfd_elf64_bfd_link_hash_table_free \
-	elf64_ia64_hash_table_free
 #define elf_backend_create_dynamic_sections \
 	elf64_ia64_create_dynamic_sections
 #define elf_backend_check_relocs \
@@ -5470,7 +5488,7 @@ static const struct elf_size_info elf64_ia64_vms_size_info = {
 #define elf_backend_size_dynamic_sections \
 	elf64_ia64_size_dynamic_sections
 #define elf_backend_omit_section_dynsym \
-  ((bfd_boolean (*) (bfd *, struct bfd_link_info *, asection *)) bfd_true)
+	_bfd_elf_omit_section_dynsym_all
 #define elf_backend_relocate_section \
 	elf64_ia64_relocate_section
 #define elf_backend_finish_dynamic_symbol \
@@ -5513,7 +5531,7 @@ static const struct elf_size_info elf64_ia64_vms_size_info = {
 /* VMS-specific vectors.  */
 
 #undef  TARGET_LITTLE_SYM
-#define TARGET_LITTLE_SYM		bfd_elf64_ia64_vms_vec
+#define TARGET_LITTLE_SYM		ia64_elf64_vms_vec
 #undef  TARGET_LITTLE_NAME
 #define TARGET_LITTLE_NAME		"elf64-ia64-vms"
 #undef  TARGET_BIG_SYM
@@ -5527,8 +5545,8 @@ static const struct elf_size_info elf64_ia64_vms_size_info = {
 #undef  elf_backend_section_from_shdr
 #define elf_backend_section_from_shdr elf64_vms_section_from_shdr
 
-#undef  elf_backend_post_process_headers
-#define elf_backend_post_process_headers elf64_vms_post_process_headers
+#undef  elf_backend_init_file_header
+#define elf_backend_init_file_header elf64_vms_init_file_header
 
 #undef  elf_backend_section_processing
 #define elf_backend_section_processing elf64_vms_section_processing
@@ -5592,10 +5610,10 @@ static const struct elf_size_info elf64_ia64_vms_size_info = {
 
 /* VMS link methods.  */
 #undef  bfd_elf64_bfd_link_add_symbols
-#define bfd_elf64_bfd_link_add_symbols 	elf64_vms_bfd_link_add_symbols
+#define bfd_elf64_bfd_link_add_symbols	elf64_vms_bfd_link_add_symbols
 
 #undef  elf_backend_want_got_sym
-#define elf_backend_want_got_sym 	0
+#define elf_backend_want_got_sym	0
 
 #undef  bfd_elf64_mkobject
 #define bfd_elf64_mkobject		elf64_ia64_vms_mkobject

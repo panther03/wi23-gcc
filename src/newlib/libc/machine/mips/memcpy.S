@@ -34,12 +34,6 @@
 # define PREFETCH_LOAD_HINT PREFETCH_HINT_LOAD_STREAMED
 # define PREFETCH_STORE_HINT PREFETCH_HINT_PREPAREFORSTORE
 #elif _LIBC
-# include <sysdep.h>
-# include <regdef.h>
-# include <sys/asm.h>
-# define PREFETCH_LOAD_HINT PREFETCH_HINT_LOAD_STREAMED
-# define PREFETCH_STORE_HINT PREFETCH_HINT_PREPAREFORSTORE
-#elif _COMPILING_NEWLIB
 # include "machine/asm.h"
 # include "machine/regdef.h"
 # define PREFETCH_LOAD_HINT PREFETCH_HINT_LOAD_STREAMED
@@ -311,7 +305,7 @@ L(memcpy):
  * size, copy dst pointer to v0 for the return value.
  */
 	slti	t2,a2,(2 * NSIZE)
-	bne	t2,zero,L(lastb)
+	bne	t2,zero,L(lasts)
 #if defined(RETURN_FIRST_PREFETCH) || defined(RETURN_LAST_PREFETCH)
 	move	v0,zero
 #else
@@ -562,7 +556,7 @@ L(chkw):
  */
 L(chk1w):
 	andi	a2,t8,(NSIZE-1)	/* a2 is the reminder past one (d)word chunks */
-	beq	a2,t8,L(lastb)
+	beq	a2,t8,L(lastw)
 	PTR_SUBU a3,t8,a2	/* a3 is count of bytes in one (d)word chunks */
 	PTR_ADDU a3,a0,a3	/* a3 is the dst address after loop */
 
@@ -573,6 +567,20 @@ L(wordCopy_loop):
 	PTR_ADDIU a1,a1,UNIT(1)
 	bne	a0,a3,L(wordCopy_loop)
 	C_ST	REG3,UNIT(-1)(a0)
+
+/* If we have been copying double words, see if we can copy a single word
+   before doing byte copies.  We can have, at most, one word to copy.  */
+
+L(lastw):
+#ifdef USE_DOUBLE
+	andi    t8,a2,3		/* a2 is the remainder past 4 byte chunks.  */
+	beq	t8,a2,L(lastb)
+	move	a2,t8
+	lw	REG3,0(a1)
+	sw	REG3,0(a0)
+	PTR_ADDIU a0,a0,4
+	PTR_ADDIU a1,a1,4
+#endif
 
 /* Copy the last 8 (or 16) bytes */
 L(lastb):
@@ -587,6 +595,33 @@ L(lastbloop):
 L(leave):
 	j	ra
 	nop
+
+/* We jump here with a memcpy of less than 8 or 16 bytes, depending on
+   whether or not USE_DOUBLE is defined.  Instead of just doing byte
+   copies, check the alignment and size and use lw/sw if possible.
+   Otherwise, do byte copies.  */
+
+L(lasts):
+	andi	t8,a2,3
+	beq	t8,a2,L(lastb)
+
+	andi	t9,a0,3
+	bne	t9,zero,L(lastb)
+	andi	t9,a1,3
+	bne	t9,zero,L(lastb)
+
+	PTR_SUBU a3,a2,t8
+	PTR_ADDU a3,a0,a3
+
+L(wcopy_loop):
+	lw	REG3,0(a1)
+	PTR_ADDIU a0,a0,4
+	PTR_ADDIU a1,a1,4
+	bne	a0,a3,L(wcopy_loop)
+	sw	REG3,-4(a0)
+
+	b	L(lastb)
+	move	a2,t8
 
 #ifndef R6_CODE
 /*
@@ -836,8 +871,3 @@ L(r6_unaligned7):
 	.set	at
 	.set	reorder
 END(MEMCPY_NAME)
-#ifndef ANDROID_CHANGES
-# ifdef _LIBC
-libc_hidden_builtin_def (MEMCPY_NAME)
-# endif
-#endif

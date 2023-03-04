@@ -1,4 +1,4 @@
-#   Copyright 1998-2013 Free Software Foundation, Inc.
+#   Copyright 1998-2023 Free Software Foundation, Inc.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -17,29 +17,23 @@
 
 load_lib "trace-support.exp"
 
-
-gdb_exit
-gdb_start
-
 standard_testfile
+require gdb_trace_common_supports_arch
 if { [gdb_compile "$srcdir/$subdir/$srcfile" $binfile \
 	  executable {debug nowarnings}] != "" } {
-    untested actions.exp
+    untested "failed to compile"
     return -1
 }
-gdb_reinitialize_dir $srcdir/$subdir
 
-# If testing on a remote host, download the source file.
-# remote_download host $srcdir/$subdir/$srcfile
-
+clean_restart
 gdb_file_cmd $binfile
 
 # define relative source line numbers:
 # all subsequent line numbers are relative to this first one (baseline)
 
 set baseline  [gdb_find_recursion_test_baseline $srcfile]
-if { $baseline == -1 } then {
-    fail "Could not find gdb_recursion_test function"
+if {$baseline == -1} {
+    fail "could not find gdb_recursion_test function"
     return
 }
 
@@ -53,7 +47,7 @@ gdb_delete_tracepoints
 set trcpt1 [gdb_gettpnum gdb_c_test]
 set trcpt2 [gdb_gettpnum gdb_asm_test]
 set trcpt3 [gdb_gettpnum $testline1]
-if { $trcpt1 <= 0 || $trcpt2 <= 0 || $trcpt3 <= 0 } then {
+if {$trcpt1 <= 0 || $trcpt2 <= 0 || $trcpt3 <= 0} {
     fail "setting tracepoints"
     return
 }
@@ -212,7 +206,7 @@ gdb_test_no_output "set default-collect" \
 
 gdb_test "tvariable \$tsv" \
   "Trace state variable \\\$tsv created, with initial value 0." \
-  "Create a trace state variable"
+  "create a trace state variable"
 
 gdb_trace_setactions "5.10a: set teval action for first tracepoint" \
 	"$trcpt1" \
@@ -235,9 +229,17 @@ gdb_test "info tracepoints" \
 \[\t \]+not installed on target." \
 		"5.10a: verify teval actions set for two tracepoints"
 
-gdb_test "break main"
+# Load the binary to the target too.
+gdb_load $binfile
+
+# Can't use runto_main here, because that would delete the tracepoints
+# created above.
+gdb_breakpoint "main"
 gdb_run_cmd
-gdb_test "" "Breakpoint .*"
+if {[gdb_test "" "Breakpoint .*" "run to main"] != 0} {
+    return -1
+}
+
 if ![gdb_target_supports_trace] {
     unsupported "target does not support trace"
     return -1
@@ -316,9 +318,7 @@ gdb_test "tsave -ctf ${tracefile}.ctf" \
     "save ctf trace file"
 
 # Restart GDB and read the trace data in tfile target.
-gdb_exit
-gdb_start
-gdb_reinitialize_dir $srcdir/$subdir
+clean_restart
 gdb_file_cmd $binfile
 gdb_test "target tfile ${tracefile}.tf" ".*" \
     "change to tfile target"
@@ -336,9 +336,7 @@ gdb_test_multiple "target ctf" "" {
 }
 
 if { $gdb_can_read_ctf_data } {
-    gdb_exit
-    gdb_start
-    gdb_reinitialize_dir $srcdir/$subdir
+    clean_restart
     gdb_file_cmd $binfile
     gdb_test "target ctf ${tracefile}.ctf" ".*" \
 	"change to ctf target"

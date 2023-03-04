@@ -1,6 +1,6 @@
 /* <proc_service.h> implementation.
 
-   Copyright (C) 1999-2013 Free Software Foundation, Inc.
+   Copyright (C) 1999-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -21,9 +21,11 @@
 
 #include "gdbcore.h"
 #include "inferior.h"
+#include "gdbthread.h"
 #include "symtab.h"
 #include "target.h"
 #include "regcache.h"
+#include "objfiles.h"
 
 #include "gdb_proc_service.h"
 
@@ -33,24 +35,6 @@
 #include "gregset.h"
 
 
-/* Fix-up some broken systems.  */
-
-/* The prototypes in <proc_service.h> are slightly different on older
-   systems.  Compensate for the discrepancies.  */
-
-#ifdef PROC_SERVICE_IS_OLD
-typedef const struct ps_prochandle *gdb_ps_prochandle_t;
-typedef char *gdb_ps_read_buf_t;
-typedef char *gdb_ps_write_buf_t;
-typedef int gdb_ps_size_t;
-#else
-typedef struct ps_prochandle *gdb_ps_prochandle_t;
-typedef void *gdb_ps_read_buf_t;
-typedef const void *gdb_ps_write_buf_t;
-typedef size_t gdb_ps_size_t;
-#endif
-
-
 /* Helper functions.  */
 
 /* Convert a psaddr_t to a CORE_ADDR.  */
@@ -58,7 +42,8 @@ typedef size_t gdb_ps_size_t;
 static CORE_ADDR
 ps_addr_to_core_addr (psaddr_t addr)
 {
-  if (exec_bfd && bfd_get_sign_extend_vma (exec_bfd))
+  if (current_program_space->exec_bfd ()
+      && bfd_get_sign_extend_vma (current_program_space->exec_bfd ()))
     return (intptr_t) addr;
   else
     return (uintptr_t) addr;
@@ -69,7 +54,8 @@ ps_addr_to_core_addr (psaddr_t addr)
 static psaddr_t
 core_addr_to_ps_addr (CORE_ADDR addr)
 {
-  if (exec_bfd && bfd_get_sign_extend_vma (exec_bfd))
+  if (current_program_space->exec_bfd ()
+      && bfd_get_sign_extend_vma (current_program_space->exec_bfd ()))
     return (psaddr_t) (intptr_t) addr;
   else
     return (psaddr_t) (uintptr_t) addr;
@@ -80,166 +66,60 @@ core_addr_to_ps_addr (CORE_ADDR addr)
    else transfer them from the process.  Returns PS_OK for success,
    PS_ERR on failure.
 
-   This is a helper function for ps_pdread, ps_pdwrite, ps_ptread and
-   ps_ptwrite.  */
+   This is a helper function for ps_pdread and ps_pdwrite.  */
 
 static ps_err_e
 ps_xfer_memory (const struct ps_prochandle *ph, psaddr_t addr,
 		gdb_byte *buf, size_t len, int write)
 {
-  struct cleanup *old_chain = save_inferior_ptid ();
-  int ret;
+  scoped_restore_current_inferior restore_inferior;
+  set_current_inferior (ph->thread->inf);
+
+  scoped_restore_current_program_space restore_current_progspace;
+  set_current_program_space (ph->thread->inf->pspace);
+
+  scoped_restore save_inferior_ptid = make_scoped_restore (&inferior_ptid);
+  inferior_ptid = ph->thread->ptid;
+
   CORE_ADDR core_addr = ps_addr_to_core_addr (addr);
 
-  inferior_ptid = ph->ptid;
-
+  int ret;
   if (write)
     ret = target_write_memory (core_addr, buf, len);
   else
     ret = target_read_memory (core_addr, buf, len);
-
-  do_cleanups (old_chain);
-
   return (ret == 0 ? PS_OK : PS_ERR);
 }
 
-
-/* Stop the target process PH.  */
-
-ps_err_e
-ps_pstop (gdb_ps_prochandle_t ph)
-{
-  /* The process is always stopped when under control of GDB.  */
-  return PS_OK;
-}
-
-/* Resume the target process PH.  */
-
-ps_err_e
-ps_pcontinue (gdb_ps_prochandle_t ph)
-{
-  /* Pretend we did successfully continue the process.  GDB will take
-     care of it later on.  */
-  return PS_OK;
-}
-
-/* Stop the lightweight process LWPID within the target process PH.  */
-
-ps_err_e
-ps_lstop (gdb_ps_prochandle_t ph, lwpid_t lwpid)
-{
-  /* All lightweight processes are stopped when under control of GDB.  */
-  return PS_OK;
-}
-
-/* Resume the lightweight process (LWP) LWPID within the target
-   process PH.  */
-
-ps_err_e
-ps_lcontinue (gdb_ps_prochandle_t ph, lwpid_t lwpid)
-{
-  /* Pretend we did successfully continue LWPID.  GDB will take care
-     of it later on.  */
-  return PS_OK;
-}
-
-/* Get the size of the architecture-dependent extra state registers
-   for LWP LWPID within the target process PH and return it in
-   *XREGSIZE.  */
-
-ps_err_e
-ps_lgetxregsize (gdb_ps_prochandle_t ph, lwpid_t lwpid, int *xregsize)
-{
-  /* FIXME: Not supported yet.  */
-  return PS_OK;
-}
-
-/* Get the extra state registers of LWP LWPID within the target
-   process PH and store them in XREGSET.  */
-
-ps_err_e
-ps_lgetxregs (gdb_ps_prochandle_t ph, lwpid_t lwpid, caddr_t xregset)
-{
-  /* FIXME: Not supported yet.  */
-  return PS_OK;
-}
-
-/* Set the extra state registers of LWP LWPID within the target
-   process PH from XREGSET.  */
-
-ps_err_e
-ps_lsetxregs (gdb_ps_prochandle_t ph, lwpid_t lwpid, caddr_t xregset)
-{
-  /* FIXME: Not supported yet.  */
-  return PS_OK;
-}
-
-/* Log (additional) diognostic information.  */
-
-void
-ps_plog (const char *fmt, ...)
-{
-  va_list args;
-
-  va_start (args, fmt);
-  vfprintf_filtered (gdb_stderr, fmt, args);
-  va_end (args);
-}
 
 /* Search for the symbol named NAME within the object named OBJ within
    the target process PH.  If the symbol is found the address of the
    symbol is stored in SYM_ADDR.  */
 
 ps_err_e
-ps_pglobal_lookup (gdb_ps_prochandle_t ph, const char *obj,
+ps_pglobal_lookup (struct ps_prochandle *ph, const char *obj,
 		   const char *name, psaddr_t *sym_addr)
 {
-  struct minimal_symbol *ms;
-  struct cleanup *old_chain = save_current_program_space ();
-  struct inferior *inf = find_inferior_pid (ptid_get_pid (ph->ptid));
-  ps_err_e result;
+  inferior *inf = ph->thread->inf;
+
+  scoped_restore_current_program_space restore_pspace;
 
   set_current_program_space (inf->pspace);
 
   /* FIXME: kettenis/2000-09-03: What should we do with OBJ?  */
-  ms = lookup_minimal_symbol (name, NULL, NULL);
-  if (ms == NULL)
-    result = PS_NOSYM;
-  else
-    {
-      *sym_addr = core_addr_to_ps_addr (SYMBOL_VALUE_ADDRESS (ms));
-      result = PS_OK;
-    }
+  bound_minimal_symbol ms = lookup_minimal_symbol (name, NULL, NULL);
+  if (ms.minsym == NULL)
+    return PS_NOSYM;
 
-  do_cleanups (old_chain);
-  return result;
+  *sym_addr = core_addr_to_ps_addr (ms.value_address ());
+  return PS_OK;
 }
 
 /* Read SIZE bytes from the target process PH at address ADDR and copy
    them into BUF.  */
 
 ps_err_e
-ps_pdread (gdb_ps_prochandle_t ph, psaddr_t addr,
-	   gdb_ps_read_buf_t buf, gdb_ps_size_t size)
-{
-  return ps_xfer_memory (ph, addr, buf, size, 0);
-}
-
-/* Write SIZE bytes from BUF into the target process PH at address ADDR.  */
-
-ps_err_e
-ps_pdwrite (gdb_ps_prochandle_t ph, psaddr_t addr,
-	    gdb_ps_write_buf_t buf, gdb_ps_size_t size)
-{
-  return ps_xfer_memory (ph, addr, (gdb_byte *) buf, size, 1);
-}
-
-/* Read SIZE bytes from the target process PH at address ADDR and copy
-   them into BUF.  */
-
-ps_err_e
-ps_ptread (gdb_ps_prochandle_t ph, psaddr_t addr,
-	   gdb_ps_read_buf_t buf, gdb_ps_size_t size)
+ps_pdread (struct ps_prochandle *ph, psaddr_t addr, void *buf, size_t size)
 {
   return ps_xfer_memory (ph, addr, (gdb_byte *) buf, size, 0);
 }
@@ -247,28 +127,37 @@ ps_ptread (gdb_ps_prochandle_t ph, psaddr_t addr,
 /* Write SIZE bytes from BUF into the target process PH at address ADDR.  */
 
 ps_err_e
-ps_ptwrite (gdb_ps_prochandle_t ph, psaddr_t addr,
-	    gdb_ps_write_buf_t buf, gdb_ps_size_t size)
+ps_pdwrite (struct ps_prochandle *ph, psaddr_t addr,
+	    const void *buf, size_t size)
 {
   return ps_xfer_memory (ph, addr, (gdb_byte *) buf, size, 1);
+}
+
+/* Get a regcache for LWPID using its inferior's "main" architecture,
+   which is the register set libthread_db expects to be using.  In
+   multi-arch debugging scenarios, the thread's architecture may
+   differ from the inferior's "main" architecture.  */
+
+static struct regcache *
+get_ps_regcache (struct ps_prochandle *ph, lwpid_t lwpid)
+{
+  inferior *inf = ph->thread->inf;
+  return get_thread_arch_regcache (inf->process_target (),
+				   ptid_t (inf->pid, lwpid),
+				   inf->gdbarch);
 }
 
 /* Get the general registers of LWP LWPID within the target process PH
    and store them in GREGSET.  */
 
 ps_err_e
-ps_lgetregs (gdb_ps_prochandle_t ph, lwpid_t lwpid, prgregset_t gregset)
+ps_lgetregs (struct ps_prochandle *ph, lwpid_t lwpid, prgregset_t gregset)
 {
-  struct cleanup *old_chain = save_inferior_ptid ();
-  struct regcache *regcache;
-
-  inferior_ptid = ptid_build (ptid_get_pid (ph->ptid), lwpid, 0);
-  regcache = get_thread_arch_regcache (inferior_ptid, target_gdbarch ());
+  struct regcache *regcache = get_ps_regcache (ph, lwpid);
 
   target_fetch_registers (regcache, -1);
   fill_gregset (regcache, (gdb_gregset_t *) gregset, -1);
 
-  do_cleanups (old_chain);
   return PS_OK;
 }
 
@@ -276,18 +165,13 @@ ps_lgetregs (gdb_ps_prochandle_t ph, lwpid_t lwpid, prgregset_t gregset)
    from GREGSET.  */
 
 ps_err_e
-ps_lsetregs (gdb_ps_prochandle_t ph, lwpid_t lwpid, const prgregset_t gregset)
+ps_lsetregs (struct ps_prochandle *ph, lwpid_t lwpid, const prgregset_t gregset)
 {
-  struct cleanup *old_chain = save_inferior_ptid ();
-  struct regcache *regcache;
-
-  inferior_ptid = ptid_build (ptid_get_pid (ph->ptid), lwpid, 0);
-  regcache = get_thread_arch_regcache (inferior_ptid, target_gdbarch ());
+  struct regcache *regcache = get_ps_regcache (ph, lwpid);
 
   supply_gregset (regcache, (const gdb_gregset_t *) gregset);
   target_store_registers (regcache, -1);
 
-  do_cleanups (old_chain);
   return PS_OK;
 }
 
@@ -295,19 +179,14 @@ ps_lsetregs (gdb_ps_prochandle_t ph, lwpid_t lwpid, const prgregset_t gregset)
    process PH and store them in FPREGSET.  */
 
 ps_err_e
-ps_lgetfpregs (gdb_ps_prochandle_t ph, lwpid_t lwpid,
-	       gdb_prfpregset_t *fpregset)
+ps_lgetfpregs (struct ps_prochandle *ph, lwpid_t lwpid,
+	       prfpregset_t *fpregset)
 {
-  struct cleanup *old_chain = save_inferior_ptid ();
-  struct regcache *regcache;
-
-  inferior_ptid = ptid_build (ptid_get_pid (ph->ptid), lwpid, 0);
-  regcache = get_thread_arch_regcache (inferior_ptid, target_gdbarch ());
+  struct regcache *regcache = get_ps_regcache (ph, lwpid);
 
   target_fetch_registers (regcache, -1);
   fill_fpregset (regcache, (gdb_fpregset_t *) fpregset, -1);
 
-  do_cleanups (old_chain);
   return PS_OK;
 }
 
@@ -315,19 +194,14 @@ ps_lgetfpregs (gdb_ps_prochandle_t ph, lwpid_t lwpid,
    process PH from FPREGSET.  */
 
 ps_err_e
-ps_lsetfpregs (gdb_ps_prochandle_t ph, lwpid_t lwpid,
-	       const gdb_prfpregset_t *fpregset)
+ps_lsetfpregs (struct ps_prochandle *ph, lwpid_t lwpid,
+	       const prfpregset_t *fpregset)
 {
-  struct cleanup *old_chain = save_inferior_ptid ();
-  struct regcache *regcache;
-
-  inferior_ptid = ptid_build (ptid_get_pid (ph->ptid), lwpid, 0);
-  regcache = get_thread_arch_regcache (inferior_ptid, target_gdbarch ());
+  struct regcache *regcache = get_ps_regcache (ph, lwpid);
 
   supply_fpregset (regcache, (const gdb_fpregset_t *) fpregset);
   target_store_registers (regcache, -1);
 
-  do_cleanups (old_chain);
   return PS_OK;
 }
 
@@ -335,16 +209,14 @@ ps_lsetfpregs (gdb_ps_prochandle_t ph, lwpid_t lwpid,
    -- not used on Solaris.  */
 
 pid_t
-ps_getpid (gdb_ps_prochandle_t ph)
+ps_getpid (struct ps_prochandle *ph)
 {
-  return ptid_get_pid (ph->ptid);
+  return ph->thread->ptid.pid ();
 }
 
-/* Provide a prototype to silence -Wmissing-prototypes.  */
-extern initialize_file_ftype _initialize_proc_service;
-
+void _initialize_proc_service ();
 void
-_initialize_proc_service (void)
+_initialize_proc_service ()
 {
   /* This function solely exists to make sure this module is linked
      into the final binary.  */

@@ -1,7 +1,7 @@
 /* Get info from stack frames; convert between frames, blocks,
    functions and pc values.
 
-   Copyright (C) 1986-2013 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -29,7 +29,6 @@
 #include "inferior.h"
 #include "annotate.h"
 #include "regcache.h"
-#include "gdb_assert.h"
 #include "dummy-frame.h"
 #include "command.h"
 #include "gdbcmd.h"
@@ -52,11 +51,11 @@
    --- hopefully pointing us at the call instruction, or its delay
    slot instruction.  */
 
-struct block *
-get_frame_block (struct frame_info *frame, CORE_ADDR *addr_in_block)
+const struct block *
+get_frame_block (frame_info_ptr frame, CORE_ADDR *addr_in_block)
 {
   CORE_ADDR pc;
-  struct block *bl;
+  const struct block *bl;
   int inline_count;
 
   if (!get_frame_address_in_block_if_available (frame, &pc))
@@ -73,10 +72,10 @@ get_frame_block (struct frame_info *frame, CORE_ADDR *addr_in_block)
 
   while (inline_count > 0)
     {
-      if (block_inlined_p (bl))
+      if (bl->inlined_p ())
 	inline_count--;
 
-      bl = BLOCK_SUPERBLOCK (bl);
+      bl = bl->superblock ();
       gdb_assert (bl != NULL);
     }
 
@@ -86,25 +85,25 @@ get_frame_block (struct frame_info *frame, CORE_ADDR *addr_in_block)
 CORE_ADDR
 get_pc_function_start (CORE_ADDR pc)
 {
-  struct block *bl;
+  const struct block *bl;
   struct bound_minimal_symbol msymbol;
 
   bl = block_for_pc (pc);
   if (bl)
     {
-      struct symbol *symbol = block_linkage_function (bl);
+      struct symbol *symbol = bl->linkage_function ();
 
       if (symbol)
 	{
-	  bl = SYMBOL_BLOCK_VALUE (symbol);
-	  return BLOCK_START (bl);
+	  bl = symbol->value_block ();
+	  return bl->entry_pc ();
 	}
     }
 
   msymbol = lookup_minimal_symbol_by_pc (pc);
   if (msymbol.minsym)
     {
-      CORE_ADDR fstart = SYMBOL_VALUE_ADDRESS (msymbol.minsym);
+      CORE_ADDR fstart = msymbol.value_address ();
 
       if (find_pc_section (fstart))
 	return fstart;
@@ -116,17 +115,17 @@ get_pc_function_start (CORE_ADDR pc)
 /* Return the symbol for the function executing in frame FRAME.  */
 
 struct symbol *
-get_frame_function (struct frame_info *frame)
+get_frame_function (frame_info_ptr frame)
 {
-  struct block *bl = get_frame_block (frame, 0);
+  const struct block *bl = get_frame_block (frame, 0);
 
   if (bl == NULL)
     return NULL;
 
-  while (BLOCK_FUNCTION (bl) == NULL && BLOCK_SUPERBLOCK (bl) != NULL)
-    bl = BLOCK_SUPERBLOCK (bl);
+  while (bl->function () == NULL && bl->superblock () != NULL)
+    bl = bl->superblock ();
 
-  return BLOCK_FUNCTION (bl);
+  return bl->function ();
 }
 
 
@@ -136,11 +135,11 @@ get_frame_function (struct frame_info *frame)
 struct symbol *
 find_pc_sect_function (CORE_ADDR pc, struct obj_section *section)
 {
-  struct block *b = block_for_pc_sect (pc, section);
+  const struct block *b = block_for_pc_sect (pc, section);
 
   if (b == 0)
     return 0;
-  return block_linkage_function (b);
+  return b->linkage_function ();
 }
 
 /* Return the function containing pc value PC.
@@ -153,14 +152,48 @@ find_pc_function (CORE_ADDR pc)
   return find_pc_sect_function (pc, find_pc_mapped_section (pc));
 }
 
-/* These variables are used to cache the most recent result
-   of find_pc_partial_function.  */
+/* See symtab.h.  */
+
+struct symbol *
+find_pc_sect_containing_function (CORE_ADDR pc, struct obj_section *section)
+{
+  const block *bl = block_for_pc_sect (pc, section);
+
+  if (bl == nullptr)
+    return nullptr;
+
+  return bl->containing_function ();
+}
+
+/* These variables are used to cache the most recent result of
+   find_pc_partial_function.
+
+   The addresses cache_pc_function_low and cache_pc_function_high
+   record the range in which PC was found during the most recent
+   successful lookup.  When the function occupies a single contiguous
+   address range, these values correspond to the low and high
+   addresses of the function.  (The high address is actually one byte
+   beyond the last byte of the function.)  For a function with more
+   than one (non-contiguous) range, the range in which PC was found is
+   used to set the cache bounds.
+
+   When determining whether or not these cached values apply to a
+   particular PC value, PC must be within the range specified by
+   cache_pc_function_low and cache_pc_function_high.  In addition to
+   PC being in that range, cache_pc_section must also match PC's
+   section.  See find_pc_partial_function() for details on both the
+   comparison as well as how PC's section is determined.
+
+   The other values aren't used for determining whether the cache
+   applies, but are used for setting the outputs from
+   find_pc_partial_function.  cache_pc_function_low and
+   cache_pc_function_high are used to set outputs as well.  */
 
 static CORE_ADDR cache_pc_function_low = 0;
 static CORE_ADDR cache_pc_function_high = 0;
-static const char *cache_pc_function_name = 0;
+static const general_symbol_info *cache_pc_function_sym = nullptr;
 static struct obj_section *cache_pc_function_section = NULL;
-static int cache_pc_function_is_gnu_ifunc = 0;
+static const struct block *cache_pc_function_block = nullptr;
 
 /* Clear cache, e.g. when symbol table is discarded.  */
 
@@ -169,39 +202,26 @@ clear_pc_function_cache (void)
 {
   cache_pc_function_low = 0;
   cache_pc_function_high = 0;
-  cache_pc_function_name = (char *) 0;
+  cache_pc_function_sym = nullptr;
   cache_pc_function_section = NULL;
-  cache_pc_function_is_gnu_ifunc = 0;
+  cache_pc_function_block = nullptr;
 }
 
-/* Finds the "function" (text symbol) that is smaller than PC but
-   greatest of all of the potential text symbols in SECTION.  Sets
-   *NAME and/or *ADDRESS conditionally if that pointer is non-null.
-   If ENDADDR is non-null, then set *ENDADDR to be the end of the
-   function (exclusive), but passing ENDADDR as non-null means that
-   the function might cause symbols to be read.  If IS_GNU_IFUNC_P is provided
-   *IS_GNU_IFUNC_P is set to 1 on return if the function is STT_GNU_IFUNC.
-   This function either succeeds or fails (not halfway succeeds).  If it
-   succeeds, it sets *NAME, *ADDRESS, and *ENDADDR to real information and
-   returns 1.  If it fails, it sets *NAME, *ADDRESS, *ENDADDR and
-   *IS_GNU_IFUNC_P to zero and returns 0.  */
+/* See symtab.h.  */
 
-/* Backward compatibility, no section argument.  */
-
-int
-find_pc_partial_function_gnu_ifunc (CORE_ADDR pc, const char **name,
-				    CORE_ADDR *address, CORE_ADDR *endaddr,
-				    int *is_gnu_ifunc_p)
+bool
+find_pc_partial_function_sym (CORE_ADDR pc,
+			      const struct general_symbol_info **sym,
+			      CORE_ADDR *address, CORE_ADDR *endaddr,
+			      const struct block **block)
 {
   struct obj_section *section;
   struct symbol *f;
-  struct minimal_symbol *msymbol;
-  struct symtab *symtab = NULL;
-  struct objfile *objfile;
-  int i;
+  struct bound_minimal_symbol msymbol;
+  struct compunit_symtab *compunit_symtab = NULL;
   CORE_ADDR mapped_pc;
 
-  /* To ensure that the symbol returned belongs to the correct setion
+  /* To ensure that the symbol returned belongs to the correct section
      (and that the last [random] symbol from the previous section
      isn't returned) try to find the section containing PC.  First try
      the overlay code (which by default returns NULL); and second try
@@ -217,31 +237,68 @@ find_pc_partial_function_gnu_ifunc (CORE_ADDR pc, const char **name,
       && section == cache_pc_function_section)
     goto return_cached_value;
 
-  msymbol = lookup_minimal_symbol_by_pc_section (mapped_pc, section).minsym;
-  ALL_OBJFILES (objfile)
-  {
-    if (objfile->sf)
-      symtab = objfile->sf->qf->find_pc_sect_symtab (objfile, msymbol,
-						     mapped_pc, section, 0);
-    if (symtab)
-      break;
-  }
+  msymbol = lookup_minimal_symbol_by_pc_section (mapped_pc, section);
+  compunit_symtab = find_pc_sect_compunit_symtab (mapped_pc, section);
 
-  if (symtab)
+  if (compunit_symtab != NULL)
     {
       /* Checking whether the msymbol has a larger value is for the
-	 "pathological" case mentioned in print_frame_info.  */
+	 "pathological" case mentioned in stack.c:find_frame_funname.
+
+	 We use BLOCK_ENTRY_PC instead of BLOCK_START_PC for this
+	 comparison because the minimal symbol should refer to the
+	 function's entry pc which is not necessarily the lowest
+	 address of the function.  This will happen when the function
+	 has more than one range and the entry pc is not within the
+	 lowest range of addresses.  */
       f = find_pc_sect_function (mapped_pc, section);
       if (f != NULL
-	  && (msymbol == NULL
-	      || (BLOCK_START (SYMBOL_BLOCK_VALUE (f))
-		  >= SYMBOL_VALUE_ADDRESS (msymbol))))
+	  && (msymbol.minsym == NULL
+	      || (f->value_block ()->entry_pc ()
+		  >= msymbol.value_address ())))
 	{
-	  cache_pc_function_low = BLOCK_START (SYMBOL_BLOCK_VALUE (f));
-	  cache_pc_function_high = BLOCK_END (SYMBOL_BLOCK_VALUE (f));
-	  cache_pc_function_name = SYMBOL_LINKAGE_NAME (f);
+	  const struct block *b = f->value_block ();
+
+	  cache_pc_function_sym = f;
 	  cache_pc_function_section = section;
-	  cache_pc_function_is_gnu_ifunc = TYPE_GNU_IFUNC (SYMBOL_TYPE (f));
+	  cache_pc_function_block = b;
+
+	  /* For blocks occupying contiguous addresses (i.e. no gaps),
+	     the low and high cache addresses are simply the start
+	     and end of the block.
+
+	     For blocks with non-contiguous ranges, we have to search
+	     for the range containing mapped_pc and then use the start
+	     and end of that range.
+
+	     This causes the returned *ADDRESS and *ENDADDR values to
+	     be limited to the range in which mapped_pc is found.  See
+	     comment preceding declaration of find_pc_partial_function
+	     in symtab.h for more information.  */
+
+	  if (b->is_contiguous ())
+	    {
+	      cache_pc_function_low = b->start ();
+	      cache_pc_function_high = b->end ();
+	    }
+	  else
+	    {
+	      bool found = false;
+	      for (const blockrange &range : b->ranges ())
+		{
+		  if (range.start () <= mapped_pc && mapped_pc < range.end ())
+		    {
+		      cache_pc_function_low = range.start ();
+		      cache_pc_function_high = range.end ();
+		      found = true;
+		      break;
+		    }
+		}
+	      /* Above loop should exit via the break.  */
+	      gdb_assert (found);
+	    }
+
+
 	  goto return_cached_value;
 	}
     }
@@ -252,59 +309,28 @@ find_pc_partial_function_gnu_ifunc (CORE_ADDR pc, const char **name,
      last function in the text segment.  */
 
   if (!section)
-    msymbol = NULL;
+    msymbol.minsym = NULL;
 
   /* Must be in the minimal symbol table.  */
-  if (msymbol == NULL)
+  if (msymbol.minsym == NULL)
     {
       /* No available symbol.  */
-      if (name != NULL)
-	*name = 0;
+      if (sym != nullptr)
+	*sym = 0;
       if (address != NULL)
 	*address = 0;
       if (endaddr != NULL)
 	*endaddr = 0;
-      if (is_gnu_ifunc_p != NULL)
-	*is_gnu_ifunc_p = 0;
-      return 0;
+      if (block != nullptr)
+	*block = nullptr;
+      return false;
     }
 
-  cache_pc_function_low = SYMBOL_VALUE_ADDRESS (msymbol);
-  cache_pc_function_name = SYMBOL_LINKAGE_NAME (msymbol);
+  cache_pc_function_low = msymbol.value_address ();
+  cache_pc_function_sym = msymbol.minsym;
   cache_pc_function_section = section;
-  cache_pc_function_is_gnu_ifunc = MSYMBOL_TYPE (msymbol) == mst_text_gnu_ifunc;
-
-  /* If the minimal symbol has a size, use it for the cache.
-     Otherwise use the lesser of the next minimal symbol in the same
-     section, or the end of the section, as the end of the
-     function.  */
-
-  if (MSYMBOL_SIZE (msymbol) != 0)
-    cache_pc_function_high = cache_pc_function_low + MSYMBOL_SIZE (msymbol);
-  else
-    {
-      /* Step over other symbols at this same address, and symbols in
-	 other sections, to find the next symbol in this section with
-	 a different address.  */
-
-      for (i = 1; SYMBOL_LINKAGE_NAME (msymbol + i) != NULL; i++)
-	{
-	  if (SYMBOL_VALUE_ADDRESS (msymbol + i)
-	      != SYMBOL_VALUE_ADDRESS (msymbol)
-	      && SYMBOL_SECTION (msymbol + i)
-	      == SYMBOL_SECTION (msymbol))
-	    break;
-	}
-
-      if (SYMBOL_LINKAGE_NAME (msymbol + i) != NULL
-	  && SYMBOL_VALUE_ADDRESS (msymbol + i)
-	  < obj_section_endaddr (section))
-	cache_pc_function_high = SYMBOL_VALUE_ADDRESS (msymbol + i);
-      else
-	/* We got the start address from the last msymbol in the objfile.
-	   So the end address is the end of the section.  */
-	cache_pc_function_high = obj_section_endaddr (section);
-    }
+  cache_pc_function_high = minimal_symbol_upper_bound (msymbol);
+  cache_pc_function_block = nullptr;
 
  return_cached_value:
 
@@ -316,8 +342,8 @@ find_pc_partial_function_gnu_ifunc (CORE_ADDR pc, const char **name,
 	*address = cache_pc_function_low;
     }
 
-  if (name)
-    *name = cache_pc_function_name;
+  if (sym != nullptr)
+    *sym = cache_pc_function_sym;
 
   if (endaddr)
     {
@@ -335,41 +361,115 @@ find_pc_partial_function_gnu_ifunc (CORE_ADDR pc, const char **name,
 	*endaddr = cache_pc_function_high;
     }
 
-  if (is_gnu_ifunc_p)
-    *is_gnu_ifunc_p = cache_pc_function_is_gnu_ifunc;
+  if (block != nullptr)
+    *block = cache_pc_function_block;
 
-  return 1;
+  return true;
 }
 
-/* See find_pc_partial_function_gnu_ifunc, only the IS_GNU_IFUNC_P parameter
-   is omitted here for backward API compatibility.  */
+/* See symtab.h.  */
 
-int
+bool
 find_pc_partial_function (CORE_ADDR pc, const char **name, CORE_ADDR *address,
-			  CORE_ADDR *endaddr)
+			  CORE_ADDR *endaddr, const struct block **block)
 {
-  return find_pc_partial_function_gnu_ifunc (pc, name, address, endaddr, NULL);
+  const general_symbol_info *gsi;
+  bool r = find_pc_partial_function_sym (pc, &gsi, address, endaddr, block);
+  if (name != nullptr)
+    *name = r ? gsi->linkage_name () : nullptr;
+  return r;
+}
+
+
+/* See symtab.h.  */
+
+bool
+find_function_entry_range_from_pc (CORE_ADDR pc, const char **name,
+				   CORE_ADDR *address, CORE_ADDR *endaddr)
+{
+  const struct block *block;
+  bool status = find_pc_partial_function (pc, name, address, endaddr, &block);
+
+  if (status && block != nullptr && !block->is_contiguous ())
+    {
+      CORE_ADDR entry_pc = block->entry_pc ();
+
+      for (const blockrange &range : block->ranges ())
+	{
+	  if (range.start () <= entry_pc && entry_pc < range.end ())
+	    {
+	      if (address != nullptr)
+		*address = range.start ();
+
+	      if (endaddr != nullptr)
+		*endaddr = range.end ();
+
+	      return status;
+	    }
+	}
+
+      /* It's an internal error if we exit the above loop without finding
+	 the range.  */
+      internal_error (_("Entry block not found in find_function_entry_range_from_pc"));
+    }
+
+  return status;
+}
+
+/* See symtab.h.  */
+
+struct type *
+find_function_type (CORE_ADDR pc)
+{
+  struct symbol *sym = find_pc_function (pc);
+
+  if (sym != NULL && sym->value_block ()->entry_pc () == pc)
+    return sym->type ();
+
+  return NULL;
+}
+
+/* See symtab.h.  */
+
+struct type *
+find_gnu_ifunc_target_type (CORE_ADDR resolver_funaddr)
+{
+  struct type *resolver_type = find_function_type (resolver_funaddr);
+  if (resolver_type != NULL)
+    {
+      /* Get the return type of the resolver.  */
+      struct type *resolver_ret_type
+	= check_typedef (resolver_type->target_type ());
+
+      /* If we found a pointer to function, then the resolved type
+	 is the type of the pointed-to function.  */
+      if (resolver_ret_type->code () == TYPE_CODE_PTR)
+	{
+	  struct type *resolved_type
+	    = resolver_ret_type->target_type ();
+	  if (check_typedef (resolved_type)->code () == TYPE_CODE_FUNC)
+	    return resolved_type;
+	}
+    }
+
+  return NULL;
 }
 
 /* Return the innermost stack frame that is executing inside of BLOCK and is
    at least as old as the selected frame. Return NULL if there is no
    such frame.  If BLOCK is NULL, just return NULL.  */
 
-struct frame_info *
+frame_info_ptr
 block_innermost_frame (const struct block *block)
 {
-  struct frame_info *frame;
-
   if (block == NULL)
     return NULL;
 
-  frame = get_selected_frame_if_set ();
-  if (frame == NULL)
-    frame = get_current_frame ();
+  frame_info_ptr frame = get_selected_frame ();
   while (frame != NULL)
     {
-      struct block *frame_block = get_frame_block (frame, NULL);
-      if (frame_block != NULL && contained_in (frame_block, block))
+      const struct block *frame_block = get_frame_block (frame, NULL);
+      if (frame_block != NULL && block->contains (frame_block))
 	return frame;
 
       frame = get_prev_frame (frame);

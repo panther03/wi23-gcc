@@ -1,6 +1,5 @@
 /* BFD back-end for OSF/1 core files.
-   Copyright 1993, 1994, 1995, 1998, 1999, 2001, 2002, 2003, 2004, 2005, 2006,
-   2007, 2010, 2011, 2012 Free Software Foundation, Inc.
+   Copyright (C) 1993-2023 Free Software Foundation, Inc.
 
    This file is part of BFD, the Binary File Descriptor library.
 
@@ -71,21 +70,21 @@ make_bfd_asection (bfd *abfd,
   return asect;
 }
 
-static const bfd_target *
+static bfd_cleanup
 osf_core_core_file_p (bfd *abfd)
 {
   int val;
   int i;
   char *secname;
   struct core_filehdr core_header;
-  bfd_size_type amt;
+  size_t amt;
 
   amt = sizeof core_header;
   val = bfd_bread (& core_header, amt, abfd);
   if (val != sizeof core_header)
     return NULL;
 
-  if (! CONST_STRNEQ (core_header.magic, "Core"))
+  if (! startswith (core_header.magic, "Core"))
     return NULL;
 
   core_hdr (abfd) = (struct osf_core_struct *)
@@ -125,8 +124,8 @@ osf_core_core_file_p (bfd *abfd)
 	  flags = SEC_HAS_CONTENTS;
 	  break;
 	default:
-	  (*_bfd_error_handler) (_("Unhandled OSF/1 core file section type %d\n"),
-				 core_scnhdr.scntype);
+	  _bfd_error_handler (_("unhandled OSF/1 core file section type %d"),
+			      core_scnhdr.scntype);
 	  continue;
 	}
 
@@ -139,7 +138,7 @@ osf_core_core_file_p (bfd *abfd)
 
   /* OK, we believe you.  You're a core file (sure, sure).  */
 
-  return abfd->xvec;
+  return _bfd_no_cleanup;
 
  fail:
   bfd_release (abfd, core_hdr (abfd));
@@ -170,11 +169,11 @@ swap_abort (void)
 #define	NO_GET ((bfd_vma (*) (const void *)) swap_abort)
 #define	NO_PUT ((void (*) (bfd_vma, void *)) swap_abort)
 #define	NO_GETS ((bfd_signed_vma (*) (const void *)) swap_abort)
-#define	NO_GET64 ((bfd_uint64_t (*) (const void *)) swap_abort)
-#define	NO_PUT64 ((void (*) (bfd_uint64_t, void *)) swap_abort)
-#define	NO_GETS64 ((bfd_int64_t (*) (const void *)) swap_abort)
+#define	NO_GET64 ((uint64_t (*) (const void *)) swap_abort)
+#define	NO_PUT64 ((void (*) (uint64_t, void *)) swap_abort)
+#define	NO_GETS64 ((int64_t (*) (const void *)) swap_abort)
 
-const bfd_target osf_core_vec =
+const bfd_target core_osf_vec =
   {
     "osf-core",
     bfd_target_unknown_flavour,
@@ -188,6 +187,7 @@ const bfd_target osf_core_vec =
     ' ',			/* ar_pad_char */
     16,				/* ar_max_namelen */
     0,				/* match priority.  */
+    TARGET_KEEP_UNUSED_SECTION_SYMBOLS, /* keep unused section symbols.  */
     NO_GET64, NO_GETS64, NO_PUT64,	/* 64 bit data */
     NO_GET, NO_GETS, NO_PUT,		/* 32 bit data */
     NO_GET, NO_GETS, NO_PUT,		/* 16 bit data */
@@ -202,12 +202,16 @@ const bfd_target osf_core_vec =
       osf_core_core_file_p		/* a core file */
     },
     {				/* bfd_set_format */
-      bfd_false, bfd_false,
-      bfd_false, bfd_false
+      _bfd_bool_bfd_false_error,
+      _bfd_bool_bfd_false_error,
+      _bfd_bool_bfd_false_error,
+      _bfd_bool_bfd_false_error
     },
     {				/* bfd_write_contents */
-      bfd_false, bfd_false,
-      bfd_false, bfd_false
+      _bfd_bool_bfd_false_error,
+      _bfd_bool_bfd_false_error,
+      _bfd_bool_bfd_false_error,
+      _bfd_bool_bfd_false_error
     },
 
     BFD_JUMP_TABLE_GENERIC (_bfd_generic),

@@ -1,6 +1,6 @@
 /* Blackfin Watchpoint (WP) model.
 
-   Copyright (C) 2010-2013 Free Software Foundation, Inc.
+   Copyright (C) 2010-2023 Free Software Foundation, Inc.
    Contributed by Analog Devices, Inc.
 
    This file is part of simulators.
@@ -18,7 +18,8 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "config.h"
+/* This must come before any other includes.  */
+#include "defs.h"
 
 #include "sim-main.h"
 #include "devices.h"
@@ -77,9 +78,13 @@ bfin_wp_io_write_buffer (struct hw *me, const void *source, int space,
   bu32 value;
   bu32 *valuep;
 
+  /* Invalid access mode is higher priority than missing register.  */
+  if (!dv_bfin_mmr_require_32 (me, addr, nr_bytes, true))
+    return 0;
+
   value = dv_load_4 (source);
   mmr_off = addr - wp->base;
-  valuep = (void *)((unsigned long)wp + mmr_base() + mmr_off);
+  valuep = (void *)((uintptr_t)wp + mmr_base() + mmr_off);
 
   HW_TRACE_WRITE ();
 
@@ -99,7 +104,7 @@ bfin_wp_io_write_buffer (struct hw *me, const void *source, int space,
       break;
     default:
       dv_bfin_mmr_invalid (me, addr, nr_bytes, true);
-      break;
+      return 0;
     }
 
   return nr_bytes;
@@ -114,8 +119,12 @@ bfin_wp_io_read_buffer (struct hw *me, void *dest, int space,
   bu32 value;
   bu32 *valuep;
 
+  /* Invalid access mode is higher priority than missing register.  */
+  if (!dv_bfin_mmr_require_32 (me, addr, nr_bytes, false))
+    return 0;
+
   mmr_off = addr - wp->base;
-  valuep = (void *)((unsigned long)wp + mmr_base() + mmr_off);
+  valuep = (void *)((uintptr_t)wp + mmr_base() + mmr_off);
 
   HW_TRACE_READ ();
 
@@ -131,9 +140,8 @@ bfin_wp_io_read_buffer (struct hw *me, void *dest, int space,
       value = *valuep;
       break;
     default:
-      while (1) /* Core MMRs -> exception -> doesn't return.  */
-	dv_bfin_mmr_invalid (me, addr, nr_bytes, false);
-      break;
+      dv_bfin_mmr_invalid (me, addr, nr_bytes, false);
+      return 0;
     }
 
   dv_store_4 (dest, value);

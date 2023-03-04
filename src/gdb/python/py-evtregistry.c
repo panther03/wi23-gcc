@@ -1,6 +1,6 @@
 /* Python interface to inferior thread event registries.
 
-   Copyright (C) 2009-2013 Free Software Foundation, Inc.
+   Copyright (C) 2009-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -23,7 +23,7 @@
 
 events_object gdb_py_events;
 
-static PyTypeObject eventregistry_object_type
+extern PyTypeObject eventregistry_object_type
     CPYCHECKER_TYPE_OBJECT_FOR_TYPEDEF ("eventregistry_object");
 
 /* Implementation of EventRegistry.connect () -> NULL.
@@ -79,22 +79,18 @@ evregpy_disconnect (PyObject *self, PyObject *function)
 eventregistry_object *
 create_eventregistry_object (void)
 {
-  eventregistry_object *eventregistry_obj;
+  gdbpy_ref<eventregistry_object>
+    eventregistry_obj (PyObject_New (eventregistry_object,
+				     &eventregistry_object_type));
 
-  eventregistry_obj = PyObject_New (eventregistry_object,
-                                    &eventregistry_object_type);
-
-  if (!eventregistry_obj)
+  if (eventregistry_obj == NULL)
     return NULL;
 
   eventregistry_obj->callbacks = PyList_New (0);
   if (!eventregistry_obj->callbacks)
-    {
-      Py_DECREF (eventregistry_obj);
-      return NULL;
-    }
+    return NULL;
 
-  return eventregistry_obj;
+  return eventregistry_obj.release ();
 }
 
 static void
@@ -116,13 +112,15 @@ gdbpy_initialize_eventregistry (void)
 				 (PyObject *) &eventregistry_object_type);
 }
 
-/* Retern the number of listeners currently connected to this
+/* Return the number of listeners currently connected to this
    registry.  */
 
-int
+bool
 evregpy_no_listeners_p (eventregistry_object *registry)
 {
-  return PyList_Size (registry->callbacks) == 0;
+  /* REGISTRY can be nullptr if gdb failed to find the data directory
+     at startup.  */
+  return registry == nullptr || PyList_Size (registry->callbacks) == 0;
 }
 
 static PyMethodDef eventregistry_object_methods[] =
@@ -132,7 +130,7 @@ static PyMethodDef eventregistry_object_methods[] =
   { NULL } /* Sentinel.  */
 };
 
-static PyTypeObject eventregistry_object_type =
+PyTypeObject eventregistry_object_type =
 {
   PyVarObject_HEAD_INIT (NULL, 0)
   "gdb.EventRegistry",                        /* tp_name */

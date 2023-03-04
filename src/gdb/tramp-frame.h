@@ -1,6 +1,6 @@
 /* Signal trampoline unwinder.
 
-   Copyright (C) 2004-2013 Free Software Foundation, Inc.
+   Copyright (C) 2004-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -22,8 +22,7 @@
 
 #include "frame.h"		/* For "enum frame_type".  */
 
-struct trad_frame;
-struct frame_info;
+class frame_info_ptr;
 struct trad_frame_cache;
 
 /* A trampoline consists of a small sequence of instructions placed at
@@ -41,7 +40,7 @@ struct trad_frame_cache;
 
 /* Magic instruction that to mark the end of the signal trampoline
    instruction sequence.  */
-#define TRAMP_SENTINEL_INSN ((LONGEST) -1)
+#define TRAMP_SENTINEL_INSN ULONGEST_MAX
 
 struct tramp_frame
 {
@@ -66,9 +65,16 @@ struct tramp_frame
   /* Initialize a trad-frame cache corresponding to the tramp-frame.
      FUNC is the address of the instruction TRAMP[0] in memory.  */
   void (*init) (const struct tramp_frame *self,
-		struct frame_info *this_frame,
+		frame_info_ptr this_frame,
 		struct trad_frame_cache *this_cache,
 		CORE_ADDR func);
+  /* Return non-zero if the tramp-frame is valid for the PC requested.
+     Adjust the PC to point to the address to check the instruction
+     sequence against if required.  If this is NULL, then the tramp-frame
+     is valid for any PC.  */
+  int (*validate) (const struct tramp_frame *self,
+		   frame_info_ptr this_frame,
+		   CORE_ADDR *pc);
 };
 
 void tramp_frame_prepend_unwinder (struct gdbarch *gdbarch,

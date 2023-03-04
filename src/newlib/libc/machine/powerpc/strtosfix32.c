@@ -13,9 +13,8 @@
  * Ignores `locale' stuff.
  */
 __int32_t
-_DEFUN (_strtosfix32_r, (rptr, nptr, endptr),
-	struct _reent *rptr _AND
-	_CONST char *nptr _AND
+_strtosfix32_r (struct _reent *rptr,
+	const char *nptr,
 	char **endptr)
 {
   union double_union dbl;
@@ -30,10 +29,10 @@ _DEFUN (_strtosfix32_r, (rptr, nptr, endptr),
     {
       if (isnan (dbl.d))
 	{
-	  rptr->_errno = EDOM;
+	  _REENT_ERRNO(rptr) = EDOM;
 	  return 0;
 	}
-      rptr->_errno = ERANGE;
+      _REENT_ERRNO(rptr) = ERANGE;
       if (word0(dbl) & Sign_bit)
 	return LONG_MIN;
       return LONG_MAX;
@@ -42,12 +41,12 @@ _DEFUN (_strtosfix32_r, (rptr, nptr, endptr),
   /* check for normal saturation */
   if (dbl.d >= 1.0)
     {
-      rptr->_errno = ERANGE;
+      _REENT_ERRNO(rptr) = ERANGE;
       return LONG_MAX;
     }
   else if (dbl.d < -1.0)
     {
-      rptr->_errno = ERANGE;
+      _REENT_ERRNO(rptr) = ERANGE;
       return LONG_MIN;
     }
 
@@ -76,7 +75,7 @@ _DEFUN (_strtosfix32_r, (rptr, nptr, endptr),
       /* check if positive saturation has occurred because of rounding */
       if (!sign && result < 0)
 	{
-	  rptr->_errno = ERANGE;
+	  _REENT_ERRNO(rptr) = ERANGE;
 	  return LONG_MAX;
 	}
     }
@@ -92,8 +91,7 @@ _DEFUN (_strtosfix32_r, (rptr, nptr, endptr),
 #ifndef _REENT_ONLY
 
 __int32_t
-_DEFUN (strtosfix32, (s, ptr, base),
-	_CONST char *s _AND
+strtosfix32 (const char *s,
 	char **ptr)
 {
   return _strtosfix32_r (_REENT, s, ptr);

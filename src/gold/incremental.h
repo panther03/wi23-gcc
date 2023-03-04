@@ -1,6 +1,6 @@
 // inremental.h -- incremental linking support for gold   -*- C++ -*-
 
-// Copyright 2009, 2010, 2011, 2012, 2013 Free Software Foundation, Inc.
+// Copyright (C) 2009-2023 Free Software Foundation, Inc.
 // Written by Mikolaj Zalewski <mikolajz@google.com>.
 
 // This file is part of gold.
@@ -1368,6 +1368,9 @@ class Incremental_binary
     Input_reader()
     { }
 
+    Input_reader(const Input_reader&)
+    { }
+
     virtual
     ~Input_reader()
     { }
@@ -1708,6 +1711,10 @@ class Sized_incremental_binary : public Incremental_binary
       : Input_reader(), reader_(r)
     { }
 
+    Sized_input_reader(const Sized_input_reader& r)
+      : Input_reader(), reader_(r.reader_)
+    { }
+
     virtual
     ~Sized_input_reader()
     { }
@@ -1901,7 +1908,7 @@ class Sized_relobj_incr : public Sized_relobj<size, big_endian>
 
   // Get the name of a section.
   std::string
-  do_section_name(unsigned int shndx);
+  do_section_name(unsigned int shndx) const;
 
   // Return a view of the contents of a section.
   const unsigned char*
@@ -2112,7 +2119,7 @@ class Sized_incr_dynobj : public Dynobj
 
   // Get the name of a section.
   std::string
-  do_section_name(unsigned int shndx);
+  do_section_name(unsigned int shndx) const;
 
   // Return a view of the contents of a section.
   const unsigned char*

@@ -1,6 +1,5 @@
 /* tc-c30.c -- Assembly code for the Texas Instruments TMS320C30
-   Copyright 1998, 1999, 2000, 2001, 2002, 2003, 2005, 2006, 2007, 2009
-   Free Software Foundation, Inc.
+   Copyright (C) 1998-2023 Free Software Foundation, Inc.
    Contributed by Steven Haworth (steve@pm.cse.rmit.edu.au)
 
    This file is part of GAS, the GNU Assembler.
@@ -32,7 +31,7 @@
 /* Put here all non-digit non-letter characters that may occur in an
    operand.  */
 static char operand_special_chars[] = "%$-+(,)*._~/<>&^!:[@]";
-static char *ordinal_names[] =
+static const char *ordinal_names[] =
 {
   N_("first"), N_("second"), N_("third"), N_("fourth"), N_("fifth")
 };
@@ -85,11 +84,11 @@ debug (const char *string, ...)
   if (flag_debug)
     {
       char str[100];
+      va_list argptr;
 
-      VA_OPEN (argptr, string);
-      VA_FIXEDARG (argptr, const char *, string);
+      va_start (argptr, string);
       vsprintf (str, string, argptr);
-      VA_CLOSE (argptr);
+      va_end (argptr);
       if (str[0] == '\0')
 	return (0);
       fputs (str, USE_STDOUT ? stdout : stderr);
@@ -100,78 +99,56 @@ debug (const char *string, ...)
 }
 
 /* Hash table for opcode lookup.  */
-static struct hash_control *op_hash;
+static htab_t op_hash;
 /* Hash table for parallel opcode lookup.  */
-static struct hash_control *parop_hash;
+static htab_t parop_hash;
 /* Hash table for register lookup.  */
-static struct hash_control *reg_hash;
+static htab_t reg_hash;
 /* Hash table for indirect addressing lookup.  */
-static struct hash_control *ind_hash;
+static htab_t ind_hash;
 
 void
 md_begin (void)
 {
-  const char *hash_err;
-
   debug ("In md_begin()\n");
-  op_hash = hash_new ();
+  op_hash = str_htab_create ();
 
   {
     const insn_template *current_optab = tic30_optab;
 
     for (; current_optab < tic30_optab_end; current_optab++)
-      {
-	hash_err = hash_insert (op_hash, current_optab->name,
-				(char *) current_optab);
-	if (hash_err)
-	  as_fatal ("Internal Error: Can't Hash %s: %s",
-		    current_optab->name, hash_err);
-      }
+      if (str_hash_insert (op_hash, current_optab->name, current_optab, 0))
+	as_fatal (_("duplicate %s"), current_optab->name);
   }
 
-  parop_hash = hash_new ();
+  parop_hash = str_htab_create ();
 
   {
     const partemplate *current_parop = tic30_paroptab;
 
     for (; current_parop < tic30_paroptab_end; current_parop++)
-      {
-	hash_err = hash_insert (parop_hash, current_parop->name,
-				(char *) current_parop);
-	if (hash_err)
-	  as_fatal ("Internal Error: Can't Hash %s: %s",
-		    current_parop->name, hash_err);
-      }
+      if (str_hash_insert (parop_hash, current_parop->name, current_parop, 0))
+	as_fatal (_("duplicate %s"), current_parop->name);
   }
 
-  reg_hash = hash_new ();
+  reg_hash = str_htab_create ();
 
   {
     const reg *current_reg = tic30_regtab;
 
     for (; current_reg < tic30_regtab_end; current_reg++)
-      {
-	hash_err = hash_insert (reg_hash, current_reg->name,
-				(char *) current_reg);
-	if (hash_err)
-	  as_fatal ("Internal Error: Can't Hash %s: %s",
-		    current_reg->name, hash_err);
-      }
+      if (str_hash_insert (reg_hash, current_reg->name, current_reg, 0))
+	as_fatal (_("duplicate %s"), current_reg->name);
   }
 
-  ind_hash = hash_new ();
+  ind_hash = str_htab_create ();
 
   {
     const ind_addr_type *current_ind = tic30_indaddr_tab;
 
     for (; current_ind < tic30_indaddrtab_end; current_ind++)
-      {
-	hash_err = hash_insert (ind_hash, current_ind->syntax,
-				(char *) current_ind);
-	if (hash_err)
-	  as_fatal ("Internal Error: Can't Hash %s: %s",
-		    current_ind->syntax, hash_err);
-      }
+      if (str_hash_insert (ind_hash, current_ind->syntax, current_ind, 0))
+	as_fatal (_("duplicate %s"), current_ind->syntax);
   }
 
   /* Fill in lexical tables:  opcode_chars, operand_chars, space_chars.  */
@@ -281,7 +258,7 @@ output_invalid (char c)
     snprintf (output_invalid_buf, sizeof (output_invalid_buf),
 	      "'%c'", c);
   else
-    snprintf (output_invalid_buf, sizeof (output_invalid_buf), 
+    snprintf (output_invalid_buf, sizeof (output_invalid_buf),
 	      "(0x%x)", (unsigned char) c);
   return output_invalid_buf;
 }
@@ -381,11 +358,10 @@ tic30_find_parallel_insn (char *current_line, char *next_line)
 	}
       }
   }
-  parallel_insn = malloc (strlen (first_opcode) + strlen (first_operands)
-			  + strlen (second_opcode) + strlen (second_operands) + 8);
-  sprintf (parallel_insn, "q_%s_%s %s | %s",
-	   first_opcode, second_opcode,
-	   first_operands, second_operands);
+
+  parallel_insn = concat ("q_", first_opcode, "_", second_opcode, " ",
+			  first_operands, " | ", second_operands,
+			  (char *) NULL);
   debug ("parallel insn = %s\n", parallel_insn);
   return parallel_insn;
 }
@@ -400,12 +376,10 @@ static operand *
 tic30_operand (char *token)
 {
   unsigned int count;
-  char ind_buffer[strlen (token)];
   operand *current_op;
 
   debug ("In tic30_operand with %s\n", token);
-  current_op = malloc (sizeof (* current_op));
-  memset (current_op, '\0', sizeof (operand));
+  current_op = XCNEW (operand);
 
   if (*token == DIRECT_REFERENCE)
     {
@@ -464,6 +438,9 @@ tic30_operand (char *token)
       int disp_number = 0;
       int buffer_posn = 1;
       ind_addr_type *ind_addr_op;
+      char * ind_buffer;
+
+      ind_buffer = XNEWVEC (char, strlen (token));
 
       debug ("Found indirect reference\n");
       ind_buffer[0] = *token;
@@ -477,15 +454,17 @@ tic30_operand (char *token)
 	      && (*(token + count) == 'r' || *(token + count) == 'R'))
 	    {
 	      /* AR reference is found, so get its number and remove
-		 it from the buffer so it can pass through hash_find().  */
+		 it from the buffer so it can pass through str_hash_find().  */
 	      if (found_ar)
 		{
 		  as_bad (_("More than one AR register found in indirect reference"));
+		  free (ind_buffer);
 		  return NULL;
 		}
 	      if (*(token + count + 1) < '0' || *(token + count + 1) > '7')
 		{
 		  as_bad (_("Illegal AR register in indirect reference"));
+		  free (ind_buffer);
 		  return NULL;
 		}
 	      ar_number = *(token + count + 1) - '0';
@@ -506,6 +485,7 @@ tic30_operand (char *token)
 		  if (found_disp)
 		    {
 		      as_bad (_("More than one displacement found in indirect reference"));
+		      free (ind_buffer);
 		      return NULL;
 		    }
 		  count++;
@@ -514,6 +494,7 @@ tic30_operand (char *token)
 		      if (!is_digit_char (*(token + count)))
 			{
 			  as_bad (_("Invalid displacement in indirect reference"));
+			  free (ind_buffer);
 			  return NULL;
 			}
 		      disp[disp_posn++] = *(token + (count++));
@@ -531,10 +512,11 @@ tic30_operand (char *token)
       if (!found_ar)
 	{
 	  as_bad (_("AR register not found in indirect reference"));
+	  free (ind_buffer);
 	  return NULL;
 	}
 
-      ind_addr_op = (ind_addr_type *) hash_find (ind_hash, ind_buffer);
+      ind_addr_op = (ind_addr_type *) str_hash_find (ind_hash, ind_buffer);
       if (ind_addr_op)
 	{
 	  debug ("Found indirect reference: %s\n", ind_addr_op->syntax);
@@ -547,18 +529,21 @@ tic30_operand (char *token)
 	    {
 	      /* Maybe an implied displacement of 1 again.  */
 	      as_bad (_("required displacement wasn't given in indirect reference"));
-	      return 0;
+	      free (ind_buffer);
+	      return NULL;
 	    }
 	}
       else
 	{
 	  as_bad (_("illegal indirect reference"));
+	  free (ind_buffer);
 	  return NULL;
 	}
 
       if (found_disp && (disp_number < 0 || disp_number > 255))
 	{
 	  as_bad (_("displacement must be an unsigned 8-bit number"));
+	  free (ind_buffer);
 	  return NULL;
 	}
 
@@ -566,10 +551,11 @@ tic30_operand (char *token)
       current_op->indirect.disp = disp_number;
       current_op->indirect.ARnum = ar_number;
       current_op->op_type = Indirect;
+      free (ind_buffer);
     }
   else
     {
-      reg *regop = (reg *) hash_find (reg_hash, token);
+      reg *regop = (reg *) str_hash_find (reg_hash, token);
 
       if (regop)
 	{
@@ -594,9 +580,7 @@ tic30_operand (char *token)
 	      segT retval;
 
 	      debug ("Probably a label: %s\n", token);
-	      current_op->immediate.label = malloc (strlen (token) + 1);
-	      strcpy (current_op->immediate.label, token);
-	      current_op->immediate.label[strlen (token)] = '\0';
+	      current_op->immediate.label = xstrdup (token);
 	      save_input_line_pointer = input_line_pointer;
 	      input_line_pointer = token;
 
@@ -624,9 +608,7 @@ tic30_operand (char *token)
 	      for (count = 0; count < strlen (token); count++)
 		if (*(token + count) == '.')
 		  current_op->immediate.decimal_found = 1;
-	      current_op->immediate.label = malloc (strlen (token) + 1);
-	      strcpy (current_op->immediate.label, token);
-	      current_op->immediate.label[strlen (token)] = '\0';
+	      current_op->immediate.label = xstrdup (token);
 	      current_op->immediate.f_number = (float) atof (token);
 	      current_op->immediate.s_number = (int) atoi (token);
 	      current_op->immediate.u_number = (unsigned int) atoi (token);
@@ -670,7 +652,7 @@ tic30_parallel_insn (char *token)
     /* Find instruction.  */
     save_char = *current_posn;
     *current_posn = '\0';
-    p_opcode = (partemplate *) hash_find (parop_hash, token);
+    p_opcode = (partemplate *) str_hash_find (parop_hash, token);
     if (p_opcode)
       {
 	debug ("Found instruction %s\n", p_opcode->name);
@@ -715,7 +697,7 @@ tic30_parallel_insn (char *token)
 	debug ("first_opcode = %s\n", first_opcode);
 	debug ("second_opcode = %s\n", second_opcode);
 	sprintf (token, "q_%s_%s", second_opcode, first_opcode);
-	p_opcode = (partemplate *) hash_find (parop_hash, token);
+	p_opcode = (partemplate *) str_hash_find (parop_hash, token);
 
 	if (p_opcode)
 	  {
@@ -1117,7 +1099,7 @@ md_estimate_size_before_relax (fragS *fragP ATTRIBUTE_UNUSED,
 void
 md_convert_frag (bfd *abfd ATTRIBUTE_UNUSED,
 		 segT sec ATTRIBUTE_UNUSED,
-		 register fragS *fragP ATTRIBUTE_UNUSED)
+		 fragS *fragP ATTRIBUTE_UNUSED)
 {
   debug ("In md_convert_frag()\n");
 }
@@ -1153,7 +1135,7 @@ md_apply_fix (fixS *fixP,
 
 int
 md_parse_option (int c ATTRIBUTE_UNUSED,
-		 char *arg ATTRIBUTE_UNUSED)
+		 const char *arg ATTRIBUTE_UNUSED)
 {
   debug ("In md_parse_option()\n");
   return 0;
@@ -1208,7 +1190,7 @@ md_pcrel_from (fixS *fixP)
   return fixP->fx_where - fixP->fx_size + (INSN_SIZE * offset);
 }
 
-char *
+const char *
 md_atof (int what_statement_type,
 	 char *literalP,
 	 int *sizeP)
@@ -1385,9 +1367,9 @@ tc_gen_reloc (asection *section ATTRIBUTE_UNUSED, fixS *fixP)
 #undef MAP
 #undef F
 
-  rel = xmalloc (sizeof (* rel));
+  rel = XNEW (arelent);
   gas_assert (rel != 0);
-  rel->sym_ptr_ptr = xmalloc (sizeof (asymbol *));
+  rel->sym_ptr_ptr = XNEW (asymbol *);
   *rel->sym_ptr_ptr = symbol_get_bfdsym (fixP->fx_addsy);
   rel->address = fixP->fx_frag->fr_address + fixP->fx_where;
   rel->addend = 0;
@@ -1462,7 +1444,7 @@ md_assemble (char *line)
     /* Find instruction.  */
     save_char = *current_posn;
     *current_posn = '\0';
-    op = (insn_template *) hash_find (op_hash, token_start);
+    op = (insn_template *) str_hash_find (op_hash, token_start);
     if (op)
       {
 	debug ("Found instruction %s\n", op->name);
@@ -1993,8 +1975,7 @@ md_assemble (char *line)
 
     for (i = 0; i < insn.operands; i++)
       {
-	if (insn.operand_type[i]->immediate.label)
-	  free (insn.operand_type[i]->immediate.label);
+	free (insn.operand_type[i]->immediate.label);
 	free (insn.operand_type[i]);
       }
   }

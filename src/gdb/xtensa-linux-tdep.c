@@ -1,6 +1,6 @@
 /* Target-dependent code for GNU/Linux on Xtensa processors.
 
-   Copyright (C) 2007-2013 Free Software Foundation, Inc.
+   Copyright (C) 2007-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -18,10 +18,12 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 #include "defs.h"
+#include "xtensa-tdep.h"
 #include "osabi.h"
 #include "linux-tdep.h"
 #include "solib-svr4.h"
 #include "symtab.h"
+#include "gdbarch.h"
 
 /* This enum represents the signals' numbers on the Xtensa
    architecture.  It just contains the signal definitions which are
@@ -97,22 +99,35 @@ xtensa_linux_gdb_signal_to_target (struct gdbarch *gdbarch,
 static void
 xtensa_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
 {
-  linux_init_abi (info, gdbarch);
+  xtensa_gdbarch_tdep *tdep = gdbarch_tdep<xtensa_gdbarch_tdep> (gdbarch);
+
+  if (tdep->num_nopriv_regs < tdep->num_regs)
+    {
+      tdep->num_pseudo_regs += tdep->num_regs - tdep->num_nopriv_regs;
+      tdep->num_regs = tdep->num_nopriv_regs;
+
+      set_gdbarch_num_regs (gdbarch, tdep->num_regs);
+      set_gdbarch_num_pseudo_regs (gdbarch, tdep->num_pseudo_regs);
+    }
+
+  linux_init_abi (info, gdbarch, 0);
 
   set_solib_svr4_fetch_link_map_offsets
-    (gdbarch, svr4_ilp32_fetch_link_map_offsets);
+    (gdbarch, linux_ilp32_fetch_link_map_offsets);
 
   set_gdbarch_gdb_signal_from_target (gdbarch,
 				      xtensa_linux_gdb_signal_from_target);
   set_gdbarch_gdb_signal_to_target (gdbarch,
 				    xtensa_linux_gdb_signal_to_target);
+
+  /* Enable TLS support.  */
+  set_gdbarch_fetch_tls_load_module_address (gdbarch,
+					     svr4_fetch_objfile_link_map);
 }
 
-/* Provide a prototype to silence -Wmissing-prototypes.  */
-extern initialize_file_ftype _initialize_xtensa_linux_tdep;
-
+void _initialize_xtensa_linux_tdep ();
 void
-_initialize_xtensa_linux_tdep (void)
+_initialize_xtensa_linux_tdep ()
 {
   gdbarch_register_osabi (bfd_arch_xtensa, bfd_mach_xtensa, GDB_OSABI_LINUX,
 			  xtensa_linux_init_abi);

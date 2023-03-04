@@ -1,6 +1,6 @@
 /* The common simulator framework for GDB, the GNU Debugger.
 
-   Copyright 2002-2013 Free Software Foundation, Inc.
+   Copyright 2002-2023 Free Software Foundation, Inc.
 
    Contributed by Andrew Cagney and Red Hat.
 
@@ -19,19 +19,16 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
+/* This must come before any other includes.  */
+#include "defs.h"
+
+#include <string.h>
+
 #include "hw-main.h"
 #include "hw-base.h"
 
 #include "sim-io.h"
 #include "sim-assert.h"
-
-#ifdef HAVE_STRING_H
-#include <string.h>
-#else
-#ifdef HAVE_STRINGS_H
-#include <strings.h>
-#endif
-#endif
 
 /* property entries */
 
@@ -371,7 +368,7 @@ hw_add_boolean_property (struct hw *me,
 			 const char *property,
 			 int boolean)
 {
-  signed32 new_boolean = (boolean ? -1 : 0);
+  int32_t new_boolean = (boolean ? -1 : 0);
   hw_add_property (me, property, boolean_property,
 		   &new_boolean, sizeof (new_boolean),
 		   &new_boolean, sizeof (new_boolean),
@@ -417,7 +414,6 @@ hw_find_ihandle_runtime_property (struct hw *me,
 				  ihandle_runtime_property_spec *ihandle)
 {
   struct hw_property_data *entry = find_property_data (me, property);
-  HW_TRACE ((me, "hw_find_ihandle_runtime_property(property=%s)\n", property));
   if (entry == NULL)
     hw_abort (me, "property \"%s\" not found", property);
   if (entry->property->type != ihandle_property
@@ -489,7 +485,6 @@ hw_find_integer_property (struct hw *me,
 {
   const struct hw_property *node;
   signed_cell integer;
-  HW_TRACE ((me, "hw_find_integer(property=%s)\n", property));
   node = hw_find_property (me, property);
   if (node == NULL)
     hw_abort (me, "property \"%s\" not found", property);
@@ -509,7 +504,6 @@ hw_find_integer_array_property (struct hw *me,
   const struct hw_property *node;
   int sizeof_integer = sizeof (*integer);
   signed_cell *cell;
-  HW_TRACE ((me, "hw_find_integer(property=%s)\n", property));
 
   /* check things sane */
   node = hw_find_property (me, property);
@@ -879,7 +873,6 @@ hw_add_duplicate_property (struct hw *me,
 			   const struct hw_property *original)
 {
   struct hw_property_data *master;
-  HW_TRACE ((me, "hw_add_duplicate_property(property=%s, ...)\n", property));
   if (original->disposition != permenant_object)
     hw_abort (me, "Can only duplicate permenant objects");
   /* find the original's master */

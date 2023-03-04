@@ -13,7 +13,7 @@
 
 /*
 FUNCTION
-<<scalbn>>, <<scalbnf>>, <<scalbln>>, <<scalblnf>>--scale by power of FLT_RADIX (=2)
+<<scalbn>>, <<scalbnf>>, <<scalbln>>, <<scalblnf>>---scale by power of FLT_RADIX (=2)
 INDEX
 	scalbn
 INDEX
@@ -23,7 +23,7 @@ INDEX
 INDEX
 	scalblnf
 
-ANSI_SYNOPSIS
+SYNOPSIS
 	#include <math.h>
 	double scalbn(double <[x]>, int <[n]>);
 	float scalbnf(float <[x]>, int <[n]>);
@@ -93,15 +93,14 @@ tiny   = 1.0e-300;
             if (n< -50000) return tiny*x; 	/*underflow*/
 	    }
         if (k==0x7ff) return x+x;		/* NaN or Inf */
+        if (n > 50000) 	/* in case integer overflow in n+k */
+	    return huge*copysign(huge,x);	/*overflow*/
         k = k+n; 
         if (k >  0x7fe) return huge*copysign(huge,x); /* overflow  */
         if (k > 0) 				/* normal result */
 	    {SET_HIGH_WORD(x,(hx&0x800fffff)|(k<<20)); return x;}
-        if (k <= -54) {
-            if (n > 50000) 	/* in case integer overflow in n+k */
-		return huge*copysign(huge,x);	/*overflow*/
-	    else return tiny*copysign(tiny,x); 	/*underflow*/
-      }
+        if (k <= -54)
+	    return tiny*copysign(tiny,x); 	/*underflow*/
         k += 54;				/* subnormal result */
 	SET_HIGH_WORD(x,(hx&0x800fffff)|(k<<20));
         return x*twom54;

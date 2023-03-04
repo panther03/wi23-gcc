@@ -1,6 +1,6 @@
 /* Module support.
 
-   Copyright 1996-2013 Free Software Foundation, Inc.
+   Copyright 1996-2023 Free Software Foundation, Inc.
 
    Contributed by Cygnus Support.
 
@@ -19,53 +19,33 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
+/* This must come before any other includes.  */
+#include "defs.h"
+
+#include <stdlib.h>
+
+#include "libiberty.h"
+
 #include "sim-main.h"
 #include "sim-io.h"
 #include "sim-options.h"
 #include "sim-assert.h"
 
-#if WITH_HW
-#include "sim-hw.h"
-#endif
-
-#include "libiberty.h"
-
-/* List of all modules.  */
-static MODULE_INSTALL_FN * const modules[] = {
+/* List of all early/core modules.
+   TODO: Should trim this list by converting to sim_install_* framework.  */
+static MODULE_INSTALL_FN * const early_modules[] = {
   standard_install,
   sim_events_install,
-#ifdef SIM_HAVE_MODEL
   sim_model_install,
-#endif
-#if WITH_ENGINE
-  sim_engine_install,
-#endif
-#if WITH_TRACE
-  trace_install,
-#endif
-#if WITH_PROFILE
-  profile_install,
-#endif
   sim_core_install,
-#ifndef SIM_HAVE_FLATMEM
-  /* FIXME: should handle flatmem as well FLATMEM */
   sim_memopt_install,
-#endif
-#if WITH_WATCHPOINTS
   sim_watchpoint_install,
-#endif
-#if WITH_SCACHE
-  scache_install,
-#endif
-#if WITH_HW
-  sim_hw_install,
-#endif
-  /* Configured in [simulator specific] additional modules.  */
-#ifdef MODULE_LIST
-  MODULE_LIST
-#endif
-  0
 };
+static int early_modules_len = ARRAY_SIZE (early_modules);
+
+/* List of dynamically detected modules.  Declared in generated modules.c.  */
+extern MODULE_INSTALL_FN * const sim_modules_detected[];
+extern const int sim_modules_detected_len;
 
 /* Functions called from sim_open.  */
 
@@ -77,9 +57,7 @@ sim_pre_argv_init (SIM_DESC sd, const char *myname)
   SIM_ASSERT (STATE_MAGIC (sd) == SIM_MAGIC_NUMBER);
   SIM_ASSERT (STATE_MODULES (sd) == NULL);
 
-  STATE_MY_NAME (sd) = myname + strlen (myname);
-  while (STATE_MY_NAME (sd) > myname && STATE_MY_NAME (sd)[-1] != '/')
-    --STATE_MY_NAME (sd);
+  STATE_MY_NAME (sd) = lbasename (myname);
 
   /* Set the cpu names to default values.  */
   {
@@ -95,11 +73,13 @@ sim_pre_argv_init (SIM_DESC sd, const char *myname)
 
   sim_config_default (sd);
 
-  /* Install all configured in modules.  */
+  /* Install all early configured-in modules.  */
   if (sim_module_install (sd) != SIM_RC_OK)
     return SIM_RC_FAIL;
 
-  return SIM_RC_OK;
+  /* Install all remaining dynamically detected modules.  */
+  return sim_module_install_list (sd, sim_modules_detected,
+				  sim_modules_detected_len);
 }
 
 /* Initialize common parts after argument processing.  */
@@ -124,6 +104,29 @@ sim_post_argv_init (SIM_DESC sd)
   return SIM_RC_OK;
 }
 
+/* Install a list of modules.
+   If this fails, no modules are left installed.  */
+SIM_RC
+sim_module_install_list (SIM_DESC sd, MODULE_INSTALL_FN * const *modules,
+			 size_t modules_len)
+{
+  size_t i;
+
+  for (i = 0; i < modules_len; ++i)
+    {
+      MODULE_INSTALL_FN *modp = modules[i];
+
+      if (modp != NULL && modp (sd) != SIM_RC_OK)
+	{
+	  sim_module_uninstall (sd);
+	  SIM_ASSERT (STATE_MODULES (sd) == NULL);
+	  return SIM_RC_FAIL;
+	}
+    }
+
+  return SIM_RC_OK;
+}
+
 /* Install all modules.
    If this fails, no modules are left installed.  */
 
@@ -136,16 +139,7 @@ sim_module_install (SIM_DESC sd)
   SIM_ASSERT (STATE_MODULES (sd) == NULL);
 
   STATE_MODULES (sd) = ZALLOC (struct module_list);
-  for (modp = modules; *modp != NULL; ++modp)
-    {
-      if ((*modp) (sd) != SIM_RC_OK)
-	{
-	  sim_module_uninstall (sd);
-	  SIM_ASSERT (STATE_MODULES (sd) == NULL);
-	  return SIM_RC_FAIL;
-	}
-    }
-  return SIM_RC_OK;
+  return sim_module_install_list (sd, early_modules, early_modules_len);
 }
 
 /* Called after all modules have been installed and after argv
@@ -278,7 +272,7 @@ sim_module_uninstall (SIM_DESC sd)
 /* Called when ever simulator info is needed */
 
 void
-sim_module_info (SIM_DESC sd, int verbose)
+sim_module_info (SIM_DESC sd, bool verbose)
 {
   struct module_list *modules = STATE_MODULES (sd);
   MODULE_INFO_LIST *modp;

@@ -230,6 +230,7 @@ test_eva:
 	lwe	$29,2147483647
 	lwe	$30,($31)
 	lwe	$0,MYDATA
+	.ifndef r6
 	lwle	$2,-256($3)
 	lwle	$4,-256
 	lwle	$5,255($6)
@@ -306,6 +307,7 @@ test_eva:
 	lwre	$19,2147483647
 	lwre	$20,($21)
 	lwre	$22,MYDATA
+	.endif
 	sbe	$23,-256($24)
 	sbe	$25,-256
 	sbe	$26,255($27)
@@ -458,6 +460,7 @@ test_eva:
 	swe	$30,2147483647
 	swe	$31,($0)
 	swe	$2,MYDATA
+	.ifndef r6
 	swle	$3,-256($4)
 	swle	$5,-256
 	swle	$6,255($7)
@@ -534,6 +537,7 @@ test_eva:
 	swre	$20,2147483647
 	swre	$21,($22)
 	swre	$23,MYDATA
+	.endif
 	cachee	24,-256($25)
 	cachee	26,-256
 	cachee	27,255($28)
@@ -611,3 +615,16 @@ test_eva:
 	prefe	11,($12)
 	prefe	13,MYDATA
 	prefe	5,%lo(foo)($6)
+
+	.ifdef r6
+	llwpe $2, $3, 0x1234
+	llwpe $2, $0, 0xabcd($0)
+	llwpe $0, $3, %lo(sync_mem)
+	llwpe $2, $2, 0xffffffff01234567($0)
+	llwpe $0, $0, sync_mem
+	scwpe $2, $3, 0x1234
+	scwpe $2, $0, 0xabcd($0)
+	scwpe $0, $3, %lo(sync_mem)
+	scwpe $2, $2, 0xffffffff01234567($0)
+	scwpe $0, $0, sync_mem
+	.endif

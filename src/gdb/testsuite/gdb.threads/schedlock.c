@@ -1,6 +1,6 @@
 /* This testcase is part of GDB, the GNU debugger.
 
-   Copyright 2002-2013 Free Software Foundation, Inc.
+   Copyright 2002-2023 Free Software Foundation, Inc.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -24,13 +24,15 @@ void *thread_function(void *arg); /* Pointer to function executed by each thread
 
 #define NUM 1
 
-unsigned int args[NUM+1];
+unsigned long long int args[NUM+1];
 
 int main() {
     int res;
     pthread_t threads[NUM];
     void *thread_result;
     long i;
+
+    alarm (30);
 
     for (i = 1; i <= NUM; i++)
       {
@@ -48,15 +50,37 @@ int main() {
     exit(EXIT_SUCCESS);
 }
 
+void some_function (void) {
+  /* Sleep a bit to give the other threads a chance to run, if not
+     locked.  This also ensure that even if the compiler optimizes out
+     or inlines some_function, there's still be some function that
+     needs to be stepped over.  */
+  usleep (1);
+}
+
+/* When testing "next", this is set to have the loop call
+   some_function, which GDB should step over.  When testing "step",
+   that would step into the function, which is not what we want.  */
+volatile int call_function = 0;
+
+/* Call some_function if CALL_FUNCTION is set.  This is wrapped in a
+   macro so that it's a single source line in the main loop.  */
+#define MAYBE_CALL_SOME_FUNCTION()		\
+  do						\
+    {						\
+      if (call_function)			\
+	some_function ();			\
+    } while (0)
+
 void *thread_function(void *arg) {
     int my_number =  (long) arg;
-    int *myp = (int *) &args[my_number];
+    unsigned long long int *myp = (unsigned long long int *) &args[my_number];
+    volatile unsigned int one = 1;
 
-    /* Don't run forever.  Run just short of it :)  */
-    while (*myp > 0)
+    while (one)
       {
 	/* schedlock.exp: main loop.  */
-	(*myp) ++;
+	MAYBE_CALL_SOME_FUNCTION(); (*myp) ++;
       }
 
     pthread_exit(NULL);

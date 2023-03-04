@@ -1,6 +1,5 @@
 /* BFD backend for CRIS a.out binaries.
-   Copyright 2000, 2001, 2002, 2003, 2004, 2005, 2007, 2009, 2012
-   Free Software Foundation, Inc.
+   Copyright (C) 2000-2023 Free Software Foundation, Inc.
    Contributed by Axis Communications AB.
    Written by Hans-Peter Nilsson.
 
@@ -25,7 +24,7 @@
    functions.  Beware; some of the information there is outdated.  */
 
 #define N_HEADER_IN_TEXT(x) 0
-#define N_TXTOFF(x)         32
+#define N_TXTOFF(x)	    32
 #define ENTRY_CAN_BE_ZERO
 #define TEXT_START_ADDR     0
 
@@ -38,7 +37,7 @@
    after text, but with those, we don't have any choice besides reading
    symbol info, and luckily there's no pressing need for correctness for
    those vma:s at this time.  */
-#define N_TXTADDR(x) ((x).a_entry & ~(bfd_vma) 0xffff)
+#define N_TXTADDR(x) ((x)->a_entry & ~(bfd_vma) 0xffff)
 
 /* If you change this to 4, you can not link to an address N*4+2.  */
 #define SEGMENT_SIZE 2
@@ -57,9 +56,6 @@
 #define TARGET_PAGE_SIZE SEGMENT_SIZE
 #define TARGETNAME "a.out-cris"
 
-/* The definition here seems not used; just provided as a convention.  */
-#define DEFAULT_ARCH bfd_arch_cris
-
 /* Do not "beautify" the CONCAT* macro args.  Traditional C will not
    remove whitespace added here, and thus will fail to concatenate
    the tokens.  */
@@ -73,7 +69,7 @@
 #define MY_exec_hdr_flags 1
 
 #define MY_write_object_contents MY (write_object_contents)
-static bfd_boolean MY (write_object_contents) (bfd *);
+static bool MY (write_object_contents) (bfd *);
 
 /* Forward this, so we can use a pointer to it in PARAMS.  */
 struct reloc_ext_external;
@@ -86,16 +82,15 @@ static void MY (swap_ext_reloc_in) (bfd *, struct reloc_ext_external *,
 				    arelent *, asymbol **, bfd_size_type);
 
 #define MY_set_sizes MY (set_sizes)
-static bfd_boolean MY (set_sizes) (bfd *);
+static bool MY (set_sizes) (bfd *);
 
 /* To set back reloc_size to ext, we make MY (set_sizes) be called
    through this construct.  Note that MY_set_arch_mach is only called
    through SET_ARCH_MACH.  The default bfd_default_set_arch_mach will
    not call set_sizes.  */
 
-#define MY_set_arch_mach NAME (aout, set_arch_mach)
-#define SET_ARCH_MACH(BFD, EXEC) \
- MY_set_arch_mach (BFD, DEFAULT_ARCH, N_MACHTYPE (EXEC))
+#define SET_ARCH_MACH(BFD, EXECP) \
+  bfd_set_arch_mach (BFD, bfd_arch_cris, N_MACHTYPE (EXECP))
 
 /* These macros describe the binary layout of the reloc information we
    use in a file.  */
@@ -115,7 +110,7 @@ static bfd_boolean MY (set_sizes) (bfd *);
 
 /* We need our own version to set header flags.  */
 
-static bfd_boolean
+static bool
 MY (write_object_contents) (bfd *abfd)
 {
   struct external_exec exec_bytes;
@@ -130,13 +125,13 @@ MY (write_object_contents) (bfd *abfd)
   /* Setting N_SET_MACHTYPE and using N_SET_FLAGS is not performed by
      the default definition.  */
   if (bfd_get_arch (abfd) == bfd_arch_cris)
-    N_SET_MACHTYPE (*execp, M_CRIS);
+    N_SET_MACHTYPE (execp, M_CRIS);
 
-  N_SET_FLAGS (*execp, aout_backend_info (abfd)->exec_hdr_flags);
+  N_SET_FLAGS (execp, aout_backend_info (abfd)->exec_hdr_flags);
 
   WRITE_HEADERS (abfd, execp);
 
-  return TRUE;
+  return true;
 }
 
 /* We need our own for these reasons:
@@ -170,14 +165,14 @@ MY (swap_ext_reloc_out) (bfd *abfd,
      from the abs section, or as a symbol which has an abs value.
      check for that here.  */
 
-  if (bfd_is_abs_section (bfd_get_section (sym)))
+  if (bfd_is_abs_section (bfd_asymbol_section (sym)))
     {
       r_extern = 0;
       r_index = N_ABS;
     }
   else if ((sym->flags & BSF_SECTION_SYM) == 0)
     {
-      if (bfd_is_und_section (bfd_get_section (sym))
+      if (bfd_is_und_section (bfd_asymbol_section (sym))
 	  /* Remember to check for weak symbols; they count as global.  */
 	  || (sym->flags & (BSF_GLOBAL | BSF_WEAK)) != 0)
 	r_extern = 1;
@@ -197,8 +192,9 @@ MY (swap_ext_reloc_out) (bfd *abfd,
      We may change this later, but assert this for the moment.  */
   if (r_type > 2)
     {
-      (*_bfd_error_handler) (_("%s: Invalid relocation type exported: %d"),
-			     bfd_get_filename (abfd), r_type);
+      /* xgettext:c-format */
+      _bfd_error_handler (_("%pB: unsupported relocation type exported: %#x"),
+			  abfd, r_type);
 
       bfd_set_error (bfd_error_wrong_format);
     }
@@ -231,17 +227,20 @@ MY (swap_ext_reloc_in) (bfd *abfd,
   cache_ptr->address = (GET_SWORD (abfd, bytes->r_address));
 
   /* Now the fun stuff.  */
-  r_index =  (bytes->r_index[2] << 16)
-    | (bytes->r_index[1] << 8)
-    |  bytes->r_index[0];
+  r_index =  (((unsigned int) bytes->r_index[2] << 16)
+    | ((unsigned int) bytes->r_index[1] << 8)
+    |  bytes->r_index[0]);
+  
   r_extern = (0 != (bytes->r_type[0] & RELOC_EXT_BITS_EXTERN_LITTLE));
-  r_type = ((bytes->r_type[0]) >> RELOC_EXT_BITS_TYPE_SH_LITTLE)
-    & RELOC_EXT_BITS_TYPE_LITTLE;
+
+  r_type = ((bytes->r_type[0] & RELOC_EXT_BITS_TYPE_LITTLE)
+    >> RELOC_EXT_BITS_TYPE_SH_LITTLE);
 
   if (r_type > 2)
     {
-      (*_bfd_error_handler) (_("%B: Invalid relocation type imported: %d"),
-			     abfd, r_type);
+      /* xgettext:c-format */
+      _bfd_error_handler (_("%pB: unsupported relocation type imported: %#x"),
+			  abfd, r_type);
 
       bfd_set_error (bfd_error_wrong_format);
     }
@@ -250,8 +249,9 @@ MY (swap_ext_reloc_in) (bfd *abfd,
 
   if (r_extern && r_index > symcount)
     {
-      (*_bfd_error_handler)
-        (_("%B: Bad relocation record imported: %d"), abfd, r_index);
+      _bfd_error_handler
+	/* xgettext:c-format */
+	(_("%pB: bad relocation record imported: %d"), abfd, r_index);
 
       bfd_set_error (bfd_error_wrong_format);
 
@@ -269,7 +269,7 @@ MY (swap_ext_reloc_in) (bfd *abfd,
    "obj_reloc_entry_size (abfd) = RELOC_EXT_SIZE;", to avoid changing
    NAME (aout, set_arch_mach) in aoutx.  */
 
-static bfd_boolean
+static bool
 MY (set_sizes) (bfd *abfd)
 {
   /* Just as the default in aout-target.h (with some #ifdefs folded)...  */
@@ -286,5 +286,5 @@ MY (set_sizes) (bfd *abfd)
 
   obj_reloc_entry_size (abfd) = RELOC_EXT_SIZE;
 
-  return TRUE;
+  return true;
 }

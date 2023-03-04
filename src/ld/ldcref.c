@@ -1,5 +1,5 @@
 /* ldcref.c -- output a cross reference table
-   Copyright 1996-2013 Free Software Foundation, Inc.
+   Copyright (C) 1996-2023 Free Software Foundation, Inc.
    Written by Ian Lance Taylor <ian@cygnus.com>
 
    This file is part of the GNU Binutils.
@@ -27,6 +27,7 @@
 #include "sysdep.h"
 #include "bfd.h"
 #include "bfdlink.h"
+#include "ctf-api.h"
 #include "libiberty.h"
 #include "demangle.h"
 #include "objalloc.h"
@@ -40,7 +41,8 @@
 /* We keep an instance of this structure for each reference to a
    symbol from a given object.  */
 
-struct cref_ref {
+struct cref_ref
+{
   /* The next reference.  */
   struct cref_ref *next;
   /* The object.  */
@@ -55,7 +57,8 @@ struct cref_ref {
 
 /* We keep a hash table of symbols.  Each entry looks like this.  */
 
-struct cref_hash_entry {
+struct cref_hash_entry
+{
   struct bfd_hash_entry root;
   /* The demangled name.  */
   const char *demangled;
@@ -65,7 +68,8 @@ struct cref_hash_entry {
 
 /* This is what the hash table looks like.  */
 
-struct cref_hash_table {
+struct cref_hash_table
+{
   struct bfd_hash_table root;
 };
 
@@ -73,8 +77,8 @@ struct cref_hash_table {
 
 static void output_one_cref (FILE *, struct cref_hash_entry *);
 static void check_local_sym_xref (lang_input_statement_type *);
-static bfd_boolean check_nocrossref (struct cref_hash_entry *, void *);
-static void check_refs (const char *, bfd_boolean, asection *, bfd *,
+static bool check_nocrossref (struct cref_hash_entry *, void *);
+static void check_refs (const char *, bool, asection *, bfd *,
 			struct lang_nocrossrefs *);
 static void check_reloc_refs (bfd *, asection *, void *);
 
@@ -89,8 +93,7 @@ static void check_reloc_refs (bfd *, asection *, void *);
 #define cref_hash_traverse(table, func, info)				\
   (bfd_hash_traverse							\
    (&(table)->root,							\
-    (bfd_boolean (*) (struct bfd_hash_entry *, void *)) (func),		\
-    (info)))
+    (bool (*) (struct bfd_hash_entry *, void *)) (func), (info)))
 
 /* The cref hash table.  */
 
@@ -98,7 +101,7 @@ static struct cref_hash_table cref_table;
 
 /* Whether the cref hash table has been initialized.  */
 
-static bfd_boolean cref_initialized;
+static bool cref_initialized;
 
 /* The number of symbols seen so far.  */
 
@@ -160,15 +163,15 @@ add_cref (const char *name,
   struct cref_hash_entry *h;
   struct cref_ref *r;
 
-  if (! cref_initialized)
+  if (!cref_initialized)
     {
       if (!bfd_hash_table_init (&cref_table.root, cref_hash_newfunc,
 				sizeof (struct cref_hash_entry)))
 	einfo (_("%X%P: bfd_hash_table_init of cref table failed: %E\n"));
-      cref_initialized = TRUE;
+      cref_initialized = true;
     }
 
-  h = cref_hash_lookup (&cref_table, name, TRUE, FALSE);
+  h = cref_hash_lookup (&cref_table, name, true, false);
   if (h == NULL)
     einfo (_("%X%P: cref_hash_lookup failed: %E\n"));
 
@@ -184,31 +187,31 @@ add_cref (const char *name,
       r->next = h->refs;
       h->refs = r;
       r->abfd = abfd;
-      r->def = FALSE;
-      r->common = FALSE;
-      r->undef = FALSE;
+      r->def = false;
+      r->common = false;
+      r->undef = false;
     }
 
   if (bfd_is_und_section (section))
-    r->undef = TRUE;
+    r->undef = true;
   else if (bfd_is_com_section (section))
-    r->common = TRUE;
+    r->common = true;
   else
-    r->def = TRUE;
+    r->def = true;
 }
 
 /* Called before loading an as-needed library to take a snapshot of
    the cref hash table, and after we have loaded or found that the
    library was not needed.  */
 
-bfd_boolean
+bool
 handle_asneeded_cref (bfd *abfd ATTRIBUTE_UNUSED,
 		      enum notice_asneeded_action act)
 {
   unsigned int i;
 
   if (!cref_initialized)
-    return TRUE;
+    return true;
 
   if (act == notice_as_needed)
     {
@@ -234,7 +237,7 @@ handle_asneeded_cref (bfd *abfd ATTRIBUTE_UNUSED,
 
       alloc_mark = bfd_hash_allocate (&cref_table.root, 1);
       if (alloc_mark == NULL)
-	return FALSE;
+	return false;
 
       memcpy (old_tab, cref_table.root.table, tabsize);
       old_ent = (char *) old_tab + tabsize;
@@ -262,7 +265,7 @@ handle_asneeded_cref (bfd *abfd ATTRIBUTE_UNUSED,
 		}
 	    }
 	}
-      return TRUE;
+      return true;
     }
 
   if (act == notice_not_needed)
@@ -274,8 +277,8 @@ handle_asneeded_cref (bfd *abfd ATTRIBUTE_UNUSED,
 	  /* The only way old_tab can be NULL is if the cref hash table
 	     had not been initialised when notice_as_needed.  */
 	  bfd_hash_table_free (&cref_table.root);
-	  cref_initialized = FALSE;
-	  return TRUE;
+	  cref_initialized = false;
+	  return true;
 	}
 
       old_ent = (char *) old_tab + tabsize;
@@ -309,18 +312,18 @@ handle_asneeded_cref (bfd *abfd ATTRIBUTE_UNUSED,
 			   alloc_mark);
     }
   else if (act != notice_needed)
-    return FALSE;
+    return false;
 
   free (old_tab);
   old_tab = NULL;
-  return TRUE;
+  return true;
 }
 
 /* Copy the addresses of the hash table entries into an array.  This
    is called via cref_hash_traverse.  We also fill in the demangled
    name.  */
 
-static bfd_boolean
+static bool
 cref_fill_array (struct cref_hash_entry *h, void *data)
 {
   struct cref_hash_entry ***pph = (struct cref_hash_entry ***) data;
@@ -335,7 +338,7 @@ cref_fill_array (struct cref_hash_entry *h, void *data)
 
   ++*pph;
 
-  return TRUE;
+  return true;
 }
 
 /* Sort an array of cref hash table entries by name.  */
@@ -343,12 +346,15 @@ cref_fill_array (struct cref_hash_entry *h, void *data)
 static int
 cref_sort_array (const void *a1, const void *a2)
 {
-  const struct cref_hash_entry * const *p1 =
-      (const struct cref_hash_entry * const *) a1;
-  const struct cref_hash_entry * const *p2 =
-      (const struct cref_hash_entry * const *) a2;
+  const struct cref_hash_entry *const *p1
+    = (const struct cref_hash_entry *const *) a1;
+  const struct cref_hash_entry *const *p2
+    = (const struct cref_hash_entry *const *) a2;
 
-  return strcmp ((*p1)->demangled, (*p2)->demangled);
+  if (demangling)
+    return strcmp ((*p1)->demangled, (*p2)->demangled);
+  else
+    return strcmp ((*p1)->root.string, (*p2)->root.string);
 }
 
 /* Write out the cref table.  */
@@ -373,7 +379,7 @@ output_cref (FILE *fp)
     }
   fprintf (fp, _("File\n"));
 
-  if (! cref_initialized)
+  if (!cref_initialized)
     {
       fprintf (fp, _("No symbols\n"));
       return;
@@ -401,10 +407,10 @@ output_one_cref (FILE *fp, struct cref_hash_entry *h)
   struct bfd_link_hash_entry *hl;
   struct cref_ref *r;
 
-  hl = bfd_link_hash_lookup (link_info.hash, h->root.string, FALSE,
-			     FALSE, TRUE);
+  hl = bfd_link_hash_lookup (link_info.hash, h->root.string, false,
+			     false, true);
   if (hl == NULL)
-    einfo ("%P: symbol `%T' missing from main hash table\n",
+    einfo (_("%P: symbol `%pT' missing from main hash table\n"),
 	   h->root.string);
   else
     {
@@ -426,8 +432,16 @@ output_one_cref (FILE *fp, struct cref_hash_entry *h)
 	}
     }
 
-  fprintf (fp, "%s ", h->demangled);
-  len = strlen (h->demangled) + 1;
+  if (demangling)
+    {
+      fprintf (fp, "%s ", h->demangled);
+      len = strlen (h->demangled) + 1;
+    }
+  else
+    {
+      fprintf (fp, "%s ", h->root.string);
+      len = strlen (h->root.string) + 1;
+    }
 
   for (r = h->refs; r != NULL; r = r->next)
     {
@@ -438,7 +452,7 @@ output_one_cref (FILE *fp, struct cref_hash_entry *h)
 	      putc (' ', fp);
 	      ++len;
 	    }
-	  lfinfo (fp, "%B\n", r->abfd);
+	  lfinfo (fp, "%pB\n", r->abfd);
 	  len = 0;
 	}
     }
@@ -452,21 +466,21 @@ output_one_cref (FILE *fp, struct cref_hash_entry *h)
 	      putc (' ', fp);
 	      ++len;
 	    }
-	  lfinfo (fp, "%B\n", r->abfd);
+	  lfinfo (fp, "%pB\n", r->abfd);
 	  len = 0;
 	}
     }
 
   for (r = h->refs; r != NULL; r = r->next)
     {
-      if (! r->def && ! r->common)
+      if (!r->def && !r->common)
 	{
 	  while (len < FILECOL)
 	    {
 	      putc (' ', fp);
 	      ++len;
 	    }
-	  lfinfo (fp, "%B\n", r->abfd);
+	  lfinfo (fp, "%pB\n", r->abfd);
 	  len = 0;
 	}
     }
@@ -479,7 +493,7 @@ output_one_cref (FILE *fp, struct cref_hash_entry *h)
 void
 check_nocrossrefs (void)
 {
-  if (! cref_initialized)
+  if (!cref_initialized)
     return;
 
   cref_hash_traverse (&cref_table, check_nocrossref, NULL);
@@ -500,7 +514,7 @@ check_local_sym_xref (lang_input_statement_type *statement)
     return;
 
   if (!bfd_generic_link_read_symbols (abfd))
-    einfo (_("%B%F: could not read symbols: %E\n"), abfd);
+    einfo (_("%F%P: %pB: could not read symbols: %E\n"), abfd);
 
   for (syms = bfd_get_outsymbols (abfd); *syms; ++syms)
     {
@@ -520,15 +534,21 @@ check_local_sym_xref (lang_input_statement_type *statement)
 	    symname = sym->name;
 	  for (ncrs = nocrossref_list; ncrs != NULL; ncrs = ncrs->next)
 	    for (ncr = ncrs->list; ncr != NULL; ncr = ncr->next)
-	      if (strcmp (ncr->name, outsecname) == 0)
-		check_refs (symname, FALSE, sym->section, abfd, ncrs);
+	      {
+		if (strcmp (ncr->name, outsecname) == 0)
+		  check_refs (symname, false, sym->section, abfd, ncrs);
+		/* The NOCROSSREFS_TO command only checks symbols defined in
+		   the first section in the list.  */
+		if (ncrs->onlyfirst)
+		  break;
+	      }
 	}
     }
 }
 
 /* Check one symbol to see if it is a prohibited cross reference.  */
 
-static bfd_boolean
+static bool
 check_nocrossref (struct cref_hash_entry *h, void *ignore ATTRIBUTE_UNUSED)
 {
   struct bfd_link_hash_entry *hl;
@@ -538,43 +558,50 @@ check_nocrossref (struct cref_hash_entry *h, void *ignore ATTRIBUTE_UNUSED)
   struct lang_nocrossref *ncr;
   struct cref_ref *ref;
 
-  hl = bfd_link_hash_lookup (link_info.hash, h->root.string, FALSE,
-			     FALSE, TRUE);
+  hl = bfd_link_hash_lookup (link_info.hash, h->root.string, false,
+			     false, true);
   if (hl == NULL)
     {
-      einfo (_("%P: symbol `%T' missing from main hash table\n"),
+      einfo (_("%P: symbol `%pT' missing from main hash table\n"),
 	     h->root.string);
-      return TRUE;
+      return true;
     }
 
   if (hl->type != bfd_link_hash_defined
       && hl->type != bfd_link_hash_defweak)
-    return TRUE;
+    return true;
 
   defsec = hl->u.def.section->output_section;
   if (defsec == NULL)
-    return TRUE;
-  defsecname = bfd_get_section_name (defsec->owner, defsec);
+    return true;
+  defsecname = bfd_section_name (defsec);
 
   for (ncrs = nocrossref_list; ncrs != NULL; ncrs = ncrs->next)
     for (ncr = ncrs->list; ncr != NULL; ncr = ncr->next)
-      if (strcmp (ncr->name, defsecname) == 0)
-	for (ref = h->refs; ref != NULL; ref = ref->next)
-	  check_refs (hl->root.string, TRUE, hl->u.def.section,
-		      ref->abfd, ncrs);
+      {
+	if (strcmp (ncr->name, defsecname) == 0)
+	  for (ref = h->refs; ref != NULL; ref = ref->next)
+	    check_refs (hl->root.string, true, hl->u.def.section,
+			ref->abfd, ncrs);
+	/* The NOCROSSREFS_TO command only checks symbols defined in the first
+	   section in the list.  */
+	if (ncrs->onlyfirst)
+	  break;
+      }
 
-  return TRUE;
+  return true;
 }
 
 /* The struct is used to pass information from check_refs to
    check_reloc_refs through bfd_map_over_sections.  */
 
-struct check_refs_info {
+struct check_refs_info
+{
   const char *sym_name;
   asection *defsec;
   struct lang_nocrossrefs *ncrs;
   asymbol **asymbols;
-  bfd_boolean global;
+  bool global;
 };
 
 /* This function is called for each symbol defined in a section which
@@ -584,7 +611,7 @@ struct check_refs_info {
 
 static void
 check_refs (const char *name,
-	    bfd_boolean global,
+	    bool global,
 	    asection *sec,
 	    bfd *abfd,
 	    struct lang_nocrossrefs *ncrs)
@@ -598,7 +625,7 @@ check_refs (const char *name,
      BFD might contain a prohibited cross reference.  */
 
   if (!bfd_generic_link_read_symbols (abfd))
-    einfo (_("%B%F: could not read symbols: %E\n"), abfd);
+    einfo (_("%F%P: %pB: could not read symbols: %E\n"), abfd);
 
   info.sym_name = name;
   info.global = global;
@@ -624,17 +651,17 @@ check_reloc_refs (bfd *abfd, asection *sec, void *iarg)
   const char *outdefsecname;
   struct lang_nocrossref *ncr;
   const char *symname;
-  bfd_boolean global;
+  bool global;
   long relsize;
   arelent **relpp;
   long relcount;
   arelent **p, **pend;
 
   outsec = sec->output_section;
-  outsecname = bfd_get_section_name (outsec->owner, outsec);
+  outsecname = bfd_section_name (outsec);
 
   outdefsec = info->defsec->output_section;
-  outdefsecname = bfd_get_section_name (outdefsec->owner, outdefsec);
+  outdefsecname = bfd_section_name (outdefsec);
 
   /* The section where the symbol is defined is permitted.  */
   if (strcmp (outsecname, outdefsecname) == 0)
@@ -660,14 +687,14 @@ check_reloc_refs (bfd *abfd, asection *sec, void *iarg)
 
   relsize = bfd_get_reloc_upper_bound (abfd, sec);
   if (relsize < 0)
-    einfo (_("%B%F: could not read relocs: %E\n"), abfd);
+    einfo (_("%F%P: %pB: could not read relocs: %E\n"), abfd);
   if (relsize == 0)
     return;
 
   relpp = (arelent **) xmalloc (relsize);
   relcount = bfd_canonicalize_reloc (abfd, sec, relpp, info->asymbols);
   if (relcount < 0)
-    einfo (_("%B%F: could not read relocs: %E\n"), abfd);
+    einfo (_("%F%P: %pB: could not read relocs: %E\n"), abfd);
 
   p = relpp;
   pend = p + relcount;
@@ -678,14 +705,14 @@ check_reloc_refs (bfd *abfd, asection *sec, void *iarg)
       if (q->sym_ptr_ptr != NULL
 	  && *q->sym_ptr_ptr != NULL
 	  && ((global
-	       && (bfd_is_und_section (bfd_get_section (*q->sym_ptr_ptr))
-		   || bfd_is_com_section (bfd_get_section (*q->sym_ptr_ptr))
+	       && (bfd_is_und_section (bfd_asymbol_section (*q->sym_ptr_ptr))
+		   || bfd_is_com_section (bfd_asymbol_section (*q->sym_ptr_ptr))
 		   || ((*q->sym_ptr_ptr)->flags & (BSF_GLOBAL
 						   | BSF_WEAK)) != 0))
 	      || (!global
 		  && ((*q->sym_ptr_ptr)->flags & (BSF_LOCAL
 						  | BSF_SECTION_SYM)) != 0
-		  && bfd_get_section (*q->sym_ptr_ptr) == info->defsec))
+		  && bfd_asymbol_section (*q->sym_ptr_ptr) == info->defsec))
 	  && (symname != NULL
 	      ? strcmp (bfd_asymbol_name (*q->sym_ptr_ptr), symname) == 0
 	      : ((*q->sym_ptr_ptr)->flags & BSF_SECTION_SYM) != 0))
@@ -694,7 +721,7 @@ check_reloc_refs (bfd *abfd, asection *sec, void *iarg)
 	     in OUTSECNAME.  This reloc is from a section which is
 	     mapped into a section from which references to OUTSECNAME
 	     are prohibited.  We must report an error.  */
-	  einfo (_("%X%C: prohibited cross reference from %s to `%T' in %s\n"),
+	  einfo (_("%X%P: %C: prohibited cross reference from %s to `%pT' in %s\n"),
 		 abfd, sec, q->address, outsecname,
 		 bfd_asymbol_name (*q->sym_ptr_ptr), outdefsecname);
 	}

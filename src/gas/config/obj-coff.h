@@ -1,7 +1,5 @@
 /* coff object file format
-   Copyright 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997, 1998,
-   1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2009
-   Free Software Foundation, Inc.
+   Copyright (C) 1989-2023 Free Software Foundation, Inc.
 
    This file is part of GAS.
 
@@ -42,16 +40,12 @@
 #endif
 #endif
 
-#ifdef TC_PPC
-#ifdef TE_PE
-#include "coff/powerpc.h"
-#else
-#include "coff/rs6000.h"
-#endif
+#ifdef TC_AARCH64
+#include "coff/aarch64.h"
 #endif
 
-#ifdef TC_SPARC
-#include "coff/sparc.h"
+#ifdef TC_PPC
+#include "coff/rs6000.h"
 #endif
 
 #ifdef TC_I386
@@ -70,23 +64,6 @@
 #endif
 #endif
 
-#ifdef TC_M68K
-#include "coff/m68k.h"
-#ifndef TARGET_FORMAT
-#define TARGET_FORMAT "coff-m68k"
-#endif
-#endif
-
-#ifdef TC_OR32
-#include "coff/or32.h"
-#define TARGET_FORMAT "coff-or32-big"
-#endif
-
-#ifdef TC_I960
-#include "coff/i960.h"
-#define TARGET_FORMAT "coff-Intel-little"
-#endif
-
 #ifdef TC_Z80
 #include "coff/z80.h"
 #define TARGET_FORMAT "coff-z80"
@@ -95,16 +72,6 @@
 #ifdef TC_Z8K
 #include "coff/z8k.h"
 #define TARGET_FORMAT "coff-z8k"
-#endif
-
-#ifdef TC_H8300
-#include "coff/h8300.h"
-#define TARGET_FORMAT "coff-h8300"
-#endif
-
-#ifdef TC_H8500
-#include "coff/h8500.h"
-#define TARGET_FORMAT "coff-h8500"
 #endif
 
 #ifdef TC_SH
@@ -125,13 +92,6 @@
    : (sh_small ? "coff-sh-small" : "coff-sh"))
 
 #endif
-#endif
-
-#ifdef TC_MIPS
-#define COFF_WITH_PE
-#include "coff/mipspe.h"
-#undef  TARGET_FORMAT
-#define TARGET_FORMAT "pe-mips"
 #endif
 
 #ifdef TC_TIC30
@@ -173,15 +133,8 @@
 
 #define OUTPUT_FLAVOR bfd_target_coff_flavour
 
-/* Alter the field names, for now, until we've fixed up the other
-   references to use the new name.  */
-#ifdef TC_I960
-#define TC_SYMFIELD_TYPE	symbolS *
-#define sy_tc			bal
-#endif
-
+/* COFF symbol flags.  See SF_* macros.  */
 #define OBJ_SYMFIELD_TYPE	unsigned long
-#define sy_obj			sy_obj_flags
 
 /* We can't use the predefined section symbols in bfd/section.c, as
    COFF symbols have extra fields.  See bfd/libcoff.h:coff_symbol_type.  */
@@ -229,29 +182,25 @@
 #define SA_SET_SCN_NRELOC(s,v)	(SYM_AUXENT (s)->x_scn.x_nreloc = (v))
 #define SA_SET_SCN_NLINNO(s,v)	(SYM_AUXENT (s)->x_scn.x_nlinno = (v))
 
-/* Internal use only definitions. SF_ stands for symbol flags.
+#ifdef OBJ_XCOFF
+#define SA_GET_SECT_SCNLEN(s)	(SYM_AUXENT (s)->x_sect.x_scnlen)
+#define SA_GET_SECT_NRELOC(s)	(SYM_AUXENT (s)->x_sect.x_nreloc)
+#define SA_SET_SECT_SCNLEN(s,v)	(SYM_AUXENT (s)->x_sect.x_scnlen = (v))
+#define SA_SET_SECT_NRELOC(s,v)	(SYM_AUXENT (s)->x_sect.x_nreloc = (v))
+#endif
 
-   These values can be assigned to sy_symbol.ost_flags field of a symbolS.
+/* Internal use only definitions.  SF_ stands for symbol flags.  These
+   values can be assigned to OBJ_SYMFIELD_TYPE obj field of a symbolS.  */
 
-   You'll break i960 if you shift the SYSPROC bits anywhere else.  for
-   more on the balname/callname hack, see tc-i960.h.  b.out is done
-   differently.  */
-
-#define SF_I960_MASK	0x000001ff	/* Bits 0-8 are used by the i960 port.  */
-#define SF_SYSPROC	0x0000003f	/* bits 0-5 are used to store the sysproc number.  */
-#define SF_IS_SYSPROC	0x00000040	/* bit 6 marks symbols that are sysprocs.  */
-#define SF_BALNAME	0x00000080	/* bit 7 marks BALNAME symbols.  */
-#define SF_CALLNAME	0x00000100	/* bit 8 marks CALLNAME symbols.  */
-				  
 #define SF_NORMAL_MASK	0x0000ffff	/* bits 12-15 are general purpose.  */
-				  
+
 #define SF_STATICS	0x00001000	/* Mark the .text & all symbols.  */
 #define SF_DEFINED	0x00002000	/* Symbol is defined in this file.  */
 #define SF_STRING	0x00004000	/* Symbol name length > 8.  */
 #define SF_LOCAL	0x00008000	/* Symbol must not be emitted.  */
-				  
+
 #define SF_DEBUG_MASK	0xffff0000	/* bits 16-31 are debug info.  */
-				  
+
 #define SF_FUNCTION	0x00010000	/* The symbol is a function.  */
 #define SF_PROCESS	0x00020000	/* Process symbol before write.  */
 #define SF_TAGGED	0x00040000	/* Is associated with a tag.  */
@@ -276,11 +225,6 @@
 #define SF_GET_TAGGED(s)	(SF_GET (s) & SF_TAGGED)
 #define SF_GET_TAG(s)		(SF_GET (s) & SF_TAG)
 #define SF_GET_GET_SEGMENT(s)	(SF_GET (s) & SF_GET_SEGMENT)
-#define SF_GET_I960(s)		(SF_GET (s) & SF_I960_MASK)	/* Used by i960.  */
-#define SF_GET_BALNAME(s)	(SF_GET (s) & SF_BALNAME)	/* Used by i960.  */
-#define SF_GET_CALLNAME(s)	(SF_GET (s) & SF_CALLNAME)	/* Used by i960.  */
-#define SF_GET_IS_SYSPROC(s)	(SF_GET (s) & SF_IS_SYSPROC)	/* Used by i960.  */
-#define SF_GET_SYSPROC(s)	(SF_GET (s) & SF_SYSPROC)	/* Used by i960.  */
 
 /* Modifiers.  */
 #define SF_SET(s,v)		(SF_GET (s) = (v))
@@ -297,11 +241,6 @@
 #define SF_SET_TAGGED(s)	(SF_GET (s) |= SF_TAGGED)
 #define SF_SET_TAG(s)		(SF_GET (s) |= SF_TAG)
 #define SF_SET_GET_SEGMENT(s)	(SF_GET (s) |= SF_GET_SEGMENT)
-#define SF_SET_I960(s,v)	(SF_GET (s) |= ((v) & SF_I960_MASK))	/* Used by i960.  */
-#define SF_SET_BALNAME(s)	(SF_GET (s) |= SF_BALNAME)		/* Used by i960.  */
-#define SF_SET_CALLNAME(s)	(SF_GET (s) |= SF_CALLNAME)		/* Used by i960.  */
-#define SF_SET_IS_SYSPROC(s)	(SF_GET (s) |= SF_IS_SYSPROC)		/* Used by i960.  */
-#define SF_SET_SYSPROC(s,v)	(SF_GET (s) |= ((v) & SF_SYSPROC))	/* Used by i960.  */
 
 
 /*  Line number handling.  */
@@ -311,7 +250,7 @@ extern int coff_n_line_nos;
 extern symbolS *coff_last_function;
 
 #define obj_emit_lineno(WHERE, LINE, FILE_START)	abort ()
-#define obj_app_file(name, app)      c_dot_file_symbol (name, app)
+#define obj_app_file(name)           c_dot_file_symbol (name)
 #define obj_frob_symbol(S,P) 	     coff_frob_symbol (S, & P)
 #define obj_frob_section(S)	     coff_frob_section (S)
 #define obj_frob_file_after_relocs() coff_frob_file_after_relocs ()
@@ -337,12 +276,6 @@ extern symbolS *coff_last_function;
 
 /* Sanity check.  */
 
-#ifdef TC_I960
-#ifndef C_LEAFSTAT
-hey ! Where is the C_LEAFSTAT definition ? i960 - coff support is depending on it.
-#endif /* no C_LEAFSTAT */
-#endif /* TC_I960 */
-
 extern const pseudo_typeS coff_pseudo_table[];
 
 #ifndef obj_pop_insert
@@ -355,7 +288,7 @@ extern const pseudo_typeS coff_pseudo_table[];
    as in start/_start/__start in gcc/libgcc1-test.c.  */
 #define RESOLVE_SYMBOL_REDEFINITION(sym)		\
 (SF_GET_GET_SEGMENT (sym)				\
- ? (sym->sy_frag = frag_now,				\
+ ? (sym->frag = frag_now,				\
     S_SET_VALUE (sym, frag_now_fix ()),			\
     S_SET_SEGMENT (sym, now_seg),			\
     0)							\
@@ -369,17 +302,26 @@ extern const pseudo_typeS coff_pseudo_table[];
 #define INIT_STAB_SECTION(seg) obj_coff_init_stab_section (seg)
 
 /* Store the number of relocations in the section aux entry.  */
+#ifdef OBJ_XCOFF
+#define SET_SECTION_RELOCS(sec, relocs, n)		\
+  do {							\
+    symbolS * sectSym = section_symbol (sec);		\
+    if (S_GET_STORAGE_CLASS (sectSym) == C_DWARF)	\
+      SA_SET_SECT_NRELOC (sectSym, n);			\
+    else						\
+      SA_SET_SCN_NRELOC (sectSym, n);			\
+  } while (0)
+#else
 #define SET_SECTION_RELOCS(sec, relocs, n) \
   SA_SET_SCN_NRELOC (section_symbol (sec), n)
-
-#define obj_app_file(name, app) c_dot_file_symbol (name, app)
+#endif
 
 extern int  S_SET_DATA_TYPE              (symbolS *, int);
 extern int  S_SET_STORAGE_CLASS          (symbolS *, int);
 extern int  S_GET_STORAGE_CLASS          (symbolS *);
 extern void SA_SET_SYM_ENDNDX            (symbolS *, symbolS *);
 extern void coff_add_linesym             (symbolS *);
-extern void c_dot_file_symbol            (const char *, int);
+extern void c_dot_file_symbol            (const char *);
 extern void coff_frob_symbol             (symbolS *, int *);
 extern void coff_adjust_symtab           (void);
 extern void coff_frob_section            (segT);
@@ -395,7 +337,6 @@ extern void pecoff_obj_clear_weak_hook   (symbolS *);
 extern void obj_coff_section             (int);
 extern segT obj_coff_add_segment         (const char *);
 extern void obj_coff_section             (int);
-extern void c_dot_file_symbol            (const char *, int);
 extern segT s_get_segment                (symbolS *);
 #ifndef tc_coff_symbol_emit_hook
 extern void tc_coff_symbol_emit_hook     (symbolS *);

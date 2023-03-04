@@ -1,7 +1,5 @@
-/* *INDENT-OFF* */ /* ATTRIBUTE_PRINTF confuses indent, avoid running it
-		      for now.  */
 /* I/O, string, cleanup, and other random utilities for GDB.
-   Copyright (C) 1986-2013 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -21,114 +19,119 @@
 #ifndef UTILS_H
 #define UTILS_H
 
-#include "cleanups.h"
 #include "exceptions.h"
+#include "gdbsupport/array-view.h"
+#include "gdbsupport/scoped_restore.h"
+#include <chrono>
 
-extern void initialize_utils (void);
+struct completion_match_for_lcd;
+class compiled_regex;
 
 /* String utilities.  */
 
-extern int sevenbit_strings;
+extern bool sevenbit_strings;
 
-extern char *savestring (const char *, size_t);
+/* Modes of operation for strncmp_iw_with_mode.  */
 
-extern int strcmp_iw (const char *, const char *);
+enum class strncmp_iw_mode
+{
+/* Do a strcmp() type operation on STRING1 and STRING2, ignoring any
+   differences in whitespace.  Returns 0 if they match, non-zero if
+   they don't (slightly different than strcmp()'s range of return
+   values).  */
+  NORMAL,
+
+  /* Like NORMAL, but also apply the strcmp_iw hack.  I.e.,
+     string1=="FOO(PARAMS)" matches string2=="FOO".  */
+  MATCH_PARAMS,
+};
+
+/* Helper for strcmp_iw and strncmp_iw.  Exported so that languages
+   can implement both NORMAL and MATCH_PARAMS variants in a single
+   function and defer part of the work to strncmp_iw_with_mode.
+
+   LANGUAGE is used to implement some context-sensitive
+   language-specific comparisons.  For example, for C++,
+   "string1=operator()" should not match "string2=operator" even in
+   MATCH_PARAMS mode.
+
+   MATCH_FOR_LCD is passed down so that the function can mark parts of
+   the symbol name as ignored for completion matching purposes (e.g.,
+   to handle abi tags).  If IGNORE_TEMPLATE_PARAMS is true, all template
+   parameter lists will be ignored when language is C++.  */
+
+extern int strncmp_iw_with_mode
+  (const char *string1, const char *string2, size_t string2_len,
+   strncmp_iw_mode mode, enum language language,
+   completion_match_for_lcd *match_for_lcd = NULL,
+   bool ignore_template_params = false);
+
+/* Do a strncmp() type operation on STRING1 and STRING2, ignoring any
+   differences in whitespace.  STRING2_LEN is STRING2's length.
+   Returns 0 if STRING1 matches STRING2_LEN characters of STRING2,
+   non-zero otherwise (slightly different than strncmp()'s range of
+   return values).  Note: passes language_minimal to
+   strncmp_iw_with_mode, and should therefore be avoided if a more
+   suitable language is available.  */
+extern int strncmp_iw (const char *string1, const char *string2,
+		       size_t string2_len);
+
+/* Do a strcmp() type operation on STRING1 and STRING2, ignoring any
+   differences in whitespace.  Returns 0 if they match, non-zero if
+   they don't (slightly different than strcmp()'s range of return
+   values).
+
+   As an extra hack, string1=="FOO(ARGS)" matches string2=="FOO".
+   This "feature" is useful when searching for matching C++ function
+   names (such as if the user types 'break FOO', where FOO is a
+   mangled C++ function).
+
+   Note: passes language_minimal to strncmp_iw_with_mode, and should
+   therefore be avoided if a more suitable language is available.  */
+extern int strcmp_iw (const char *string1, const char *string2);
 
 extern int strcmp_iw_ordered (const char *, const char *);
-
-extern int streq (const char *, const char *);
-
-extern int subset_compare (char *, char *);
-
-ULONGEST strtoulst (const char *num, const char **trailer, int base);
-
-int compare_positive_ints (const void *ap, const void *bp);
-int compare_strings (const void *ap, const void *bp);
-
-/* This is defined in *-hdep.c, e.g., posix-hdep.c.  */
-extern char *safe_strerror (int);
-
-/* A wrapper for bfd_errmsg to produce a more helpful error message
-   in the case of bfd_error_file_ambiguously recognized.
-   MATCHING, if non-NULL, is the corresponding argument to
-   bfd_check_format_matches, and will be freed.  */
-
-extern const char *gdb_bfd_errmsg (bfd_error_type error_tag, char **matching);
 
 /* Reset the prompt_for_continue clock.  */
 void reset_prompt_for_continue_wait_time (void);
 /* Return the time spent in prompt_for_continue.  */
-struct timeval get_prompt_for_continue_wait_time (void);
+std::chrono::steady_clock::duration get_prompt_for_continue_wait_time ();
 
-/* Parsing utilites.  */
+/* Parsing utilities.  */
 
-extern int parse_pid_to_attach (char *args);
+extern int parse_pid_to_attach (const char *args);
 
 extern int parse_escape (struct gdbarch *, const char **);
 
-char **gdb_buildargv (const char *);
 
 /* Cleanup utilities.  */
 
-extern struct cleanup *make_cleanup_freeargv (char **);
-
-struct dyn_string;
-extern struct cleanup *make_cleanup_dyn_string_delete (struct dyn_string *);
-
-struct ui_file;
-extern struct cleanup *make_cleanup_ui_file_delete (struct ui_file *);
-
-struct ui_out;
-extern struct cleanup *
-  make_cleanup_ui_out_redirect_pop (struct ui_out *uiout);
-
-struct section_addr_info;
-extern struct cleanup *(make_cleanup_free_section_addr_info 
-                        (struct section_addr_info *));
-
-extern struct cleanup *make_cleanup_close (int fd);
-
-extern struct cleanup *make_cleanup_fclose (FILE *file);
-
-extern struct cleanup *make_cleanup_bfd_unref (bfd *abfd);
-
-struct obstack;
-extern struct cleanup *make_cleanup_obstack_free (struct obstack *obstack);
-
-extern struct cleanup *make_cleanup_restore_integer (int *variable);
-extern struct cleanup *make_cleanup_restore_uinteger (unsigned int *variable);
-
-struct target_ops;
-extern struct cleanup *make_cleanup_unpush_target (struct target_ops *ops);
-
-extern struct cleanup *
-  make_cleanup_restore_ui_file (struct ui_file **variable);
-
-extern struct cleanup *make_cleanup_value_free_to_mark (struct value *);
-extern struct cleanup *make_cleanup_value_free (struct value *);
-
-struct so_list;
-extern struct cleanup *make_cleanup_free_so (struct so_list *so);
-
-extern struct cleanup *make_cleanup_restore_current_language (void);
-
-extern struct cleanup *make_cleanup_htab_delete (htab_t htab);
-
-extern void free_current_contents (void *);
-
 extern void init_page_info (void);
 
-extern struct cleanup *make_cleanup_restore_page_info (void);
-extern struct cleanup *
-  set_batch_flag_and_make_cleanup_restore_page_info (void);
+/* Temporarily set BATCH_FLAG and the associated unlimited terminal size.
+   Restore when destroyed.  */
 
-extern struct cleanup *make_bpstat_clear_actions_cleanup (void);
+struct set_batch_flag_and_restore_page_info
+{
+public:
+
+  set_batch_flag_and_restore_page_info ();
+  ~set_batch_flag_and_restore_page_info ();
+
+  DISABLE_COPY_AND_ASSIGN (set_batch_flag_and_restore_page_info);
+
+private:
+
+  /* Note that this doesn't use scoped_restore, because it's important
+     to control the ordering of operations in the destruction, and it
+     was simpler to avoid introducing a new ad hoc class.  */
+  unsigned m_save_lines_per_page;
+  unsigned m_save_chars_per_line;
+  int m_save_batch_flag;
+};
+
 
 /* Path utilities.  */
-
-extern char *gdb_realpath (const char *);
-
-extern char *gdb_realpath_keepfile (const char *);
 
 extern int gdb_filename_fnmatch (const char *pattern, const char *string,
 				 int flags);
@@ -136,7 +139,11 @@ extern int gdb_filename_fnmatch (const char *pattern, const char *string,
 extern void substitute_path_component (char **stringp, const char *from,
 				       const char *to);
 
-char *ldirname (const char *filename);
+std::string ldirname (const char *filename);
+
+extern int count_path_elements (const char *path);
+
+extern const char *strip_leading_path_elements (const char *path, int n);
 
 /* GDB output, ui_file utilities.  */
 
@@ -148,102 +155,108 @@ extern int yquery (const char *, ...) ATTRIBUTE_PRINTF (1, 2);
 
 extern void begin_line (void);
 
-extern void wrap_here (char *);
+extern void wrap_here (int);
 
 extern void reinitialize_more_filter (void);
 
-extern int pagination_enabled;
+/* Return the number of characters in a line.  */
 
-/* Global ui_file streams.  These are all defined in main.c.  */
+extern int get_chars_per_line ();
+
+extern bool pagination_enabled;
+
+/* A flag indicating whether to timestamp debugging messages.  */
+extern bool debug_timestamp;
+
+extern struct ui_file **current_ui_gdb_stdout_ptr (void);
+extern struct ui_file **current_ui_gdb_stdin_ptr (void);
+extern struct ui_file **current_ui_gdb_stderr_ptr (void);
+extern struct ui_file **current_ui_gdb_stdlog_ptr (void);
+
+/* Flush STREAM.  */
+extern void gdb_flush (struct ui_file *stream);
+
+/* The current top level's ui_file streams.  */
+
 /* Normal results */
-extern struct ui_file *gdb_stdout;
+#define gdb_stdout (*current_ui_gdb_stdout_ptr ())
 /* Input stream */
-extern struct ui_file *gdb_stdin;
-/* Serious error notifications */
-extern struct ui_file *gdb_stderr;
-/* Log/debug/trace messages that should bypass normal stdout/stderr
-   filtering.  For moment, always call this stream using
-   *_unfiltered.  In the very near future that restriction shall be
-   removed - either call shall be unfiltered.  (cagney 1999-06-13).  */
-extern struct ui_file *gdb_stdlog;
-/* Target output that should bypass normal stdout/stderr filtering.
-   For moment, always call this stream using *_unfiltered.  In the
-   very near future that restriction shall be removed - either call
-   shall be unfiltered.  (cagney 1999-07-02).  */
+#define gdb_stdin (*current_ui_gdb_stdin_ptr ())
+/* Serious error notifications.  This bypasses the pager, if one is in
+   use.  */
+#define gdb_stderr (*current_ui_gdb_stderr_ptr ())
+/* Log/debug/trace messages that bypasses the pager, if one is in
+   use.  */
+#define gdb_stdlog (*current_ui_gdb_stdlog_ptr ())
+
+/* Truly global ui_file streams.  These are all defined in main.c.  */
+
+/* Target output that should bypass the pager, if one is in use.  */
 extern struct ui_file *gdb_stdtarg;
 extern struct ui_file *gdb_stdtargerr;
 extern struct ui_file *gdb_stdtargin;
 
-/* More generic printf like operations.  Filtered versions may return
-   non-locally on error.  */
+/* Set the screen dimensions to WIDTH and HEIGHT.  */
 
-extern void fputs_filtered (const char *, struct ui_file *);
+extern void set_screen_width_and_height (int width, int height);
 
-extern void fputs_unfiltered (const char *, struct ui_file *);
+/* Generic stdio-like operations.  */
 
-extern int fputc_filtered (int c, struct ui_file *);
+extern void gdb_puts (const char *, struct ui_file *);
 
-extern int fputc_unfiltered (int c, struct ui_file *);
+extern void gdb_putc (int c, struct ui_file *);
 
-extern int putchar_filtered (int c);
+extern void gdb_putc (int c);
 
-extern int putchar_unfiltered (int c);
+extern void gdb_puts (const char *);
 
-extern void puts_filtered (const char *);
+extern void puts_tabular (char *string, int width, int right);
 
-extern void puts_unfiltered (const char *);
+/* Generic printf-like operations.  As an extension over plain
+   printf, these support some GDB-specific format specifiers.
+   Particularly useful here are the styling formatters: '%p[', '%p]'
+   and '%ps'.  See ui_out::message for details.  */
 
-extern void puts_filtered_tabular (char *string, int width, int right);
+extern void gdb_vprintf (const char *, va_list) ATTRIBUTE_PRINTF (1, 0);
 
-extern void puts_debug (char *prefix, char *string, char *suffix);
-
-extern void vprintf_filtered (const char *, va_list) ATTRIBUTE_PRINTF (1, 0);
-
-extern void vfprintf_filtered (struct ui_file *, const char *, va_list)
+extern void gdb_vprintf (struct ui_file *, const char *, va_list)
   ATTRIBUTE_PRINTF (2, 0);
 
-extern void fprintf_filtered (struct ui_file *, const char *, ...)
+extern void gdb_printf (struct ui_file *, const char *, ...)
   ATTRIBUTE_PRINTF (2, 3);
 
-extern void fprintfi_filtered (int, struct ui_file *, const char *, ...)
-  ATTRIBUTE_PRINTF (3, 4);
-
-extern void printf_filtered (const char *, ...) ATTRIBUTE_PRINTF (1, 2);
-
-extern void printfi_filtered (int, const char *, ...) ATTRIBUTE_PRINTF (2, 3);
-
-extern void vprintf_unfiltered (const char *, va_list) ATTRIBUTE_PRINTF (1, 0);
-
-extern void vfprintf_unfiltered (struct ui_file *, const char *, va_list)
-  ATTRIBUTE_PRINTF (2, 0);
-
-extern void fprintf_unfiltered (struct ui_file *, const char *, ...)
-  ATTRIBUTE_PRINTF (2, 3);
+extern void gdb_printf (const char *, ...) ATTRIBUTE_PRINTF (1, 2);
 
 extern void printf_unfiltered (const char *, ...) ATTRIBUTE_PRINTF (1, 2);
 
 extern void print_spaces (int, struct ui_file *);
 
-extern void print_spaces_filtered (int, struct ui_file *);
+extern const char *n_spaces (int);
 
-extern char *n_spaces (int);
+/* Return nonzero if filtered printing is initialized.  */
+extern int filtered_printing_initialized (void);
 
-extern void fputstr_filtered (const char *str, int quotr,
-			      struct ui_file * stream);
+/* Like gdb_printf, but styles the output according to STYLE,
+   when appropriate.  */
 
-extern void fputstr_unfiltered (const char *str, int quotr,
-				struct ui_file * stream);
+extern void fprintf_styled (struct ui_file *stream,
+			    const ui_file_style &style,
+			    const char *fmt,
+			    ...)
+  ATTRIBUTE_PRINTF (3, 4);
 
-extern void fputstrn_filtered (const char *str, int n, int quotr,
-			       struct ui_file * stream);
+/* Like gdb_puts, but styles the output according to STYLE, when
+   appropriate.  */
 
-extern void fputstrn_unfiltered (const char *str, int n, int quotr,
-				 struct ui_file * stream);
+extern void fputs_styled (const char *linebuffer,
+			  const ui_file_style &style,
+			  struct ui_file *stream);
 
-/* Display the host ADDR on STREAM formatted as ``0x%x''.  */
-extern void gdb_print_host_address (const void *addr, struct ui_file *stream);
+/* Like fputs_styled, but uses highlight_style to highlight the
+   parts of STR that match HIGHLIGHT.  */
 
-extern const char *host_address_to_string (const void *addr);
+extern void fputs_highlighted (const char *str, const compiled_regex &highlight,
+			       struct ui_file *stream);
 
 /* Convert CORE_ADDR to string in platform-specific manner.
    This is usually formatted similar to 0x%lx.  */
@@ -255,37 +268,10 @@ extern const char *paddress (struct gdbarch *gdbarch, CORE_ADDR addr);
 extern const char *print_core_address (struct gdbarch *gdbarch,
 				       CORE_ADDR address);
 
-/* Callback hash_f and eq_f for htab_create_alloc or htab_create_alloc_ex.  */
-extern hashval_t core_addr_hash (const void *ap);
-extern int core_addr_eq (const void *ap, const void *bp);
-
-/* %d for LONGEST */
-extern char *plongest (LONGEST l);
-/* %u for ULONGEST */
-extern char *pulongest (ULONGEST l);
-
-extern char *phex (ULONGEST l, int sizeof_l);
-extern char *phex_nz (ULONGEST l, int sizeof_l);
-extern char *int_string (LONGEST, int, int, int, int);
-
-/* Convert a CORE_ADDR into a HEX string with leading zeros.
-   The output from core_addr_to_string() can be passed direct to
-   string_to_core_addr().  */
-extern const char *core_addr_to_string (const CORE_ADDR addr);
-extern const char *core_addr_to_string_nz (const CORE_ADDR addr);
 extern CORE_ADDR string_to_core_addr (const char *my_string);
 
-/* Return a string that contains a number formatted as a hex
-   string.  */
-extern char *hex_string (LONGEST);
-extern char *hex_string_custom (LONGEST, int);
-
-extern void fprintf_symbol_filtered (struct ui_file *, const char *,
-				     enum language, int);
-
-extern void throw_perror_with_name (enum errors errcode, const char *string)
-  ATTRIBUTE_NORETURN;
-extern void perror_with_name (const char *) ATTRIBUTE_NORETURN;
+extern void fprintf_symbol (struct ui_file *, const char *,
+			    enum language, int);
 
 extern void perror_warning_with_name (const char *string);
 
@@ -297,87 +283,63 @@ extern void (*deprecated_error_begin_hook) (void);
 
 /* Message to be printed before the warning message, when a warning occurs.  */
 
-extern char *warning_pre_print;
+extern const char *warning_pre_print;
 
-extern void verror (const char *fmt, va_list ap)
-     ATTRIBUTE_NORETURN ATTRIBUTE_PRINTF (1, 0);
+extern void error_stream (const string_file &) ATTRIBUTE_NORETURN;
 
-extern void error (const char *fmt, ...)
-     ATTRIBUTE_NORETURN ATTRIBUTE_PRINTF (1, 2);
-
-extern void error_stream (struct ui_file *) ATTRIBUTE_NORETURN;
-
-extern void vfatal (const char *fmt, va_list ap)
-     ATTRIBUTE_NORETURN ATTRIBUTE_PRINTF (1, 0);
-
-extern void fatal (const char *fmt, ...)
-     ATTRIBUTE_NORETURN ATTRIBUTE_PRINTF (1, 2);
-
-extern void internal_verror (const char *file, int line, const char *,
-			     va_list ap)
-     ATTRIBUTE_NORETURN ATTRIBUTE_PRINTF (3, 0);
-
-extern void internal_vwarning (const char *file, int line,
+extern void demangler_vwarning (const char *file, int line,
 			       const char *, va_list ap)
      ATTRIBUTE_PRINTF (3, 0);
 
-extern void internal_warning (const char *file, int line,
+extern void demangler_warning (const char *file, int line,
 			      const char *, ...) ATTRIBUTE_PRINTF (3, 4);
 
-extern void warning (const char *, ...) ATTRIBUTE_PRINTF (1, 2);
-
-extern void vwarning (const char *, va_list args) ATTRIBUTE_PRINTF (1, 0);
 
 /* Misc. utilities.  */
-
-/* Allocation and deallocation functions for the libiberty hash table
-   which use obstacks.  */
-void *hashtab_obstack_allocate (void *data, size_t size, size_t count);
-void dummy_obstack_deallocate (void *object, void *data);
 
 #ifdef HAVE_WAITPID
 extern pid_t wait_to_die_with_timeout (pid_t pid, int *status, int timeout);
 #endif
 
-extern int producer_is_gcc_ge_4 (const char *producer);
-
 extern int myread (int, char *, int);
 
-/* Ensure that V is aligned to an N byte boundary (B's assumed to be a
-   power of 2).  Round up/down when necessary.  Examples of correct
-   use include:
+/* Integer exponentiation: Return V1**V2, where both arguments
+   are integers.
 
-   addr = align_up (addr, 8); -- VALUE needs 8 byte alignment
-   write_memory (addr, value, len);
-   addr += len;
+   Requires V1 != 0 if V2 < 0.
+   Returns 1 for 0 ** 0.  */
+extern ULONGEST uinteger_pow (ULONGEST v1, LONGEST v2);
 
-   and:
+/* Resource limits used by getrlimit and setrlimit.  */
 
-   sp = align_down (sp - len, 16); -- Keep SP 16 byte aligned
-   write_memory (sp, value, len);
+enum resource_limit_kind
+  {
+    LIMIT_CUR,
+    LIMIT_MAX
+  };
 
-   Note that uses such as:
+/* Check whether GDB will be able to dump core using the dump_core
+   function.  Returns zero if GDB cannot or should not dump core.
+   If LIMIT_KIND is LIMIT_CUR the user's soft limit will be respected.
+   If LIMIT_KIND is LIMIT_MAX only the hard limit will be respected.  */
 
-   write_memory (addr, value, len);
-   addr += align_up (len, 8);
+extern int can_dump_core (enum resource_limit_kind limit_kind);
 
-   and:
+/* Print a warning that we cannot dump core.  */
 
-   sp -= align_up (len, 8);
-   write_memory (sp, value, len);
+extern void warn_cant_dump_core (const char *reason);
 
-   are typically not correct as they don't ensure that the address (SP
-   or ADDR) is correctly aligned (relying on previous alignment to
-   keep things right).  This is also why the methods are called
-   "align_..." instead of "round_..." as the latter reads better with
-   this incorrect coding style.  */
+/* Dump core trying to increase the core soft limit to hard limit
+   first.  */
 
-extern ULONGEST align_up (ULONGEST v, int n);
-extern ULONGEST align_down (ULONGEST v, int n);
+extern void dump_core (void);
 
-/* Sign extend VALUE.  BIT is the (1-based) index of the bit in VALUE
-   to sign-extend.  */
+/* Copy NBITS bits from SOURCE to DEST starting at the given bit
+   offsets.  Use the bit order as specified by BITS_BIG_ENDIAN.
+   Source and destination buffers must not overlap.  */
 
-extern LONGEST gdb_sign_extend (LONGEST value, int bit);
+extern void copy_bitwise (gdb_byte *dest, ULONGEST dest_offset,
+			  const gdb_byte *source, ULONGEST source_offset,
+			  ULONGEST nbits, int bits_big_endian);
 
 #endif /* UTILS_H */

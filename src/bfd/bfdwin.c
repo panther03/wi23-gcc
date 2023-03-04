@@ -1,6 +1,5 @@
 /* Support for memory-mapped windows into a BFD.
-   Copyright 1995, 1996, 2001, 2002, 2003, 2005, 2007, 2008, 2009, 2011
-   Free Software Foundation, Inc.
+   Copyright (C) 1995-2023 Free Software Foundation, Inc.
    Written by Cygnus Support.
 
    This file is part of BFD, the Binary File Descriptor library.
@@ -105,12 +104,12 @@ bfd_free_window (bfd_window *windowp)
 
 static int ok_to_map = 1;
 
-bfd_boolean
+bool
 bfd_get_file_window (bfd *abfd,
 		     file_ptr offset,
 		     bfd_size_type size,
 		     bfd_window *windowp,
-		     bfd_boolean writable)
+		     bool writable)
 {
   static size_t pagesize;
   bfd_window_internal *i = windowp->i;
@@ -132,7 +131,7 @@ bfd_get_file_window (bfd *abfd,
     {
       i = bfd_zmalloc (sizeof (bfd_window_internal));
       if (i == NULL)
-	return FALSE;
+	return false;
       i->data = NULL;
     }
 #ifdef HAVE_MMAP
@@ -145,11 +144,13 @@ bfd_get_file_window (bfd *abfd,
       int fd;
 
       /* Find the real file and the real offset into it.  */
-      while (abfd->my_archive != NULL)
+      while (abfd->my_archive != NULL
+	     && !bfd_is_thin_archive (abfd->my_archive))
 	{
 	  offset += abfd->origin;
 	  abfd = abfd->my_archive;
 	}
+      offset += abfd->origin;
 
       /* Seek into the file, to ensure it is open if cacheable.  */
       if (abfd->iostream == NULL
@@ -198,7 +199,7 @@ bfd_get_file_window (bfd *abfd,
       i->mapped = 1;
       i->refcount = 1;
       windowp->i = i;
-      return TRUE;
+      return true;
     }
   else if (debug_windows)
     {
@@ -230,7 +231,7 @@ bfd_get_file_window (bfd *abfd,
       if (size_to_alloc == 0)
 	{
 	  windowp->i = i;
-	  return TRUE;
+	  return true;
 	}
       goto free_and_fail;
     }
@@ -253,12 +254,12 @@ bfd_get_file_window (bfd *abfd,
   windowp->data = i->data;
   windowp->size = i->size;
   windowp->i = i;
-  return TRUE;
+  return true;
 
  free_and_fail:
   /* We have a bfd_window_internal, but an error occurred.  Free it. */
   free (i);
-  return FALSE;
+  return false;
 }
 
 #endif /* USE_MMAP */

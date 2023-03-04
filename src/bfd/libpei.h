@@ -1,6 +1,5 @@
 /* Support for the generic parts of PE/PEI; common header information.
-   Copyright 1995, 1996, 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2005,
-   2006, 2007, 2008, 2009  Free Software Foundation, Inc.
+   Copyright (C) 1995-2023 Free Software Foundation, Inc.
    Written by Cygnus Solutions.
 
    This file is part of BFD, the Binary File Descriptor library.
@@ -208,17 +207,17 @@
 
 #ifdef COFF_WITH_pex64
 
-#define GET_OPTHDR_IMAGE_BASE            H_GET_64
-#define PUT_OPTHDR_IMAGE_BASE            H_PUT_64
+#define GET_OPTHDR_IMAGE_BASE		 H_GET_64
+#define PUT_OPTHDR_IMAGE_BASE		 H_PUT_64
 #define GET_OPTHDR_SIZE_OF_STACK_RESERVE H_GET_64
 #define PUT_OPTHDR_SIZE_OF_STACK_RESERVE H_PUT_64
-#define GET_OPTHDR_SIZE_OF_STACK_COMMIT  H_GET_64
-#define PUT_OPTHDR_SIZE_OF_STACK_COMMIT  H_PUT_64
-#define GET_OPTHDR_SIZE_OF_HEAP_RESERVE  H_GET_64
-#define PUT_OPTHDR_SIZE_OF_HEAP_RESERVE  H_PUT_64
-#define GET_OPTHDR_SIZE_OF_HEAP_COMMIT   H_GET_64
-#define PUT_OPTHDR_SIZE_OF_HEAP_COMMIT   H_PUT_64
-#define GET_PDATA_ENTRY                  bfd_get_32
+#define GET_OPTHDR_SIZE_OF_STACK_COMMIT	 H_GET_64
+#define PUT_OPTHDR_SIZE_OF_STACK_COMMIT	 H_PUT_64
+#define GET_OPTHDR_SIZE_OF_HEAP_RESERVE	 H_GET_64
+#define PUT_OPTHDR_SIZE_OF_HEAP_RESERVE	 H_PUT_64
+#define GET_OPTHDR_SIZE_OF_HEAP_COMMIT	 H_GET_64
+#define PUT_OPTHDR_SIZE_OF_HEAP_COMMIT	 H_PUT_64
+#define GET_PDATA_ENTRY			 bfd_get_32
 
 #define _bfd_XX_bfd_copy_private_bfd_data_common	_bfd_pex64_bfd_copy_private_bfd_data_common
 #define _bfd_XX_bfd_copy_private_section_data		_bfd_pex64_bfd_copy_private_section_data
@@ -236,6 +235,10 @@
 #define _bfd_XXi_swap_scnhdr_out			_bfd_pex64i_swap_scnhdr_out
 #define _bfd_XXi_swap_sym_in				_bfd_pex64i_swap_sym_in
 #define _bfd_XXi_swap_sym_out				_bfd_pex64i_swap_sym_out
+#define _bfd_XXi_swap_debugdir_in			_bfd_pex64i_swap_debugdir_in
+#define _bfd_XXi_swap_debugdir_out			_bfd_pex64i_swap_debugdir_out
+#define _bfd_XXi_write_codeview_record			_bfd_pex64i_write_codeview_record
+#define _bfd_XXi_slurp_codeview_record			_bfd_pex64i_slurp_codeview_record
 
 #elif defined COFF_WITH_pep
 
@@ -267,6 +270,80 @@
 #define _bfd_XXi_swap_scnhdr_out			_bfd_pepi_swap_scnhdr_out
 #define _bfd_XXi_swap_sym_in				_bfd_pepi_swap_sym_in
 #define _bfd_XXi_swap_sym_out				_bfd_pepi_swap_sym_out
+#define _bfd_XXi_swap_debugdir_in			_bfd_pepi_swap_debugdir_in
+#define _bfd_XXi_swap_debugdir_out			_bfd_pepi_swap_debugdir_out
+#define _bfd_XXi_write_codeview_record			_bfd_pepi_write_codeview_record
+#define _bfd_XXi_slurp_codeview_record			_bfd_pepi_slurp_codeview_record
+
+#elif defined COFF_WITH_peAArch64
+
+#define GET_OPTHDR_IMAGE_BASE		 H_GET_64
+#define PUT_OPTHDR_IMAGE_BASE		 H_PUT_64
+#define GET_OPTHDR_SIZE_OF_STACK_RESERVE H_GET_64
+#define PUT_OPTHDR_SIZE_OF_STACK_RESERVE H_PUT_64
+#define GET_OPTHDR_SIZE_OF_STACK_COMMIT	 H_GET_64
+#define PUT_OPTHDR_SIZE_OF_STACK_COMMIT	 H_PUT_64
+#define GET_OPTHDR_SIZE_OF_HEAP_RESERVE	 H_GET_64
+#define PUT_OPTHDR_SIZE_OF_HEAP_RESERVE	 H_PUT_64
+#define GET_OPTHDR_SIZE_OF_HEAP_COMMIT	 H_GET_64
+#define PUT_OPTHDR_SIZE_OF_HEAP_COMMIT	 H_PUT_64
+#define GET_PDATA_ENTRY			 bfd_get_32
+
+#define _bfd_XX_bfd_copy_private_bfd_data_common	_bfd_peAArch64_bfd_copy_private_bfd_data_common
+#define _bfd_XX_bfd_copy_private_section_data		_bfd_peAArch64_bfd_copy_private_section_data
+#define _bfd_XX_get_symbol_info				_bfd_peAArch64_get_symbol_info
+#define _bfd_XX_only_swap_filehdr_out			_bfd_peAArch64_only_swap_filehdr_out
+#define _bfd_XX_print_private_bfd_data_common		_bfd_peAArch64_print_private_bfd_data_common
+#define _bfd_XXi_final_link_postscript			_bfd_peAArch64i_final_link_postscript
+#define _bfd_XXi_only_swap_filehdr_out			_bfd_peAArch64i_only_swap_filehdr_out
+#define _bfd_XXi_swap_aouthdr_in			_bfd_peAArch64i_swap_aouthdr_in
+#define _bfd_XXi_swap_aouthdr_out			_bfd_peAArch64i_swap_aouthdr_out
+#define _bfd_XXi_swap_aux_in				_bfd_peAArch64i_swap_aux_in
+#define _bfd_XXi_swap_aux_out				_bfd_peAArch64i_swap_aux_out
+#define _bfd_XXi_swap_lineno_in				_bfd_peAArch64i_swap_lineno_in
+#define _bfd_XXi_swap_lineno_out			_bfd_peAArch64i_swap_lineno_out
+#define _bfd_XXi_swap_scnhdr_out			_bfd_peAArch64i_swap_scnhdr_out
+#define _bfd_XXi_swap_sym_in				_bfd_peAArch64i_swap_sym_in
+#define _bfd_XXi_swap_sym_out				_bfd_peAArch64i_swap_sym_out
+#define _bfd_XXi_swap_debugdir_in			_bfd_peAArch64i_swap_debugdir_in
+#define _bfd_XXi_swap_debugdir_out			_bfd_peAArch64i_swap_debugdir_out
+#define _bfd_XXi_write_codeview_record			_bfd_peAArch64i_write_codeview_record
+#define _bfd_XXi_slurp_codeview_record			_bfd_peAArch64i_slurp_codeview_record
+
+#elif defined COFF_WITH_peLoongArch64
+
+#define GET_OPTHDR_IMAGE_BASE		 H_GET_64
+#define PUT_OPTHDR_IMAGE_BASE		 H_PUT_64
+#define GET_OPTHDR_SIZE_OF_STACK_RESERVE H_GET_64
+#define PUT_OPTHDR_SIZE_OF_STACK_RESERVE H_PUT_64
+#define GET_OPTHDR_SIZE_OF_STACK_COMMIT	 H_GET_64
+#define PUT_OPTHDR_SIZE_OF_STACK_COMMIT	 H_PUT_64
+#define GET_OPTHDR_SIZE_OF_HEAP_RESERVE	 H_GET_64
+#define PUT_OPTHDR_SIZE_OF_HEAP_RESERVE	 H_PUT_64
+#define GET_OPTHDR_SIZE_OF_HEAP_COMMIT	 H_GET_64
+#define PUT_OPTHDR_SIZE_OF_HEAP_COMMIT	 H_PUT_64
+#define GET_PDATA_ENTRY			 bfd_get_32
+
+#define _bfd_XX_bfd_copy_private_bfd_data_common	_bfd_peLoongArch64_bfd_copy_private_bfd_data_common
+#define _bfd_XX_bfd_copy_private_section_data		_bfd_peLoongArch64_bfd_copy_private_section_data
+#define _bfd_XX_get_symbol_info				_bfd_peLoongArch64_get_symbol_info
+#define _bfd_XX_only_swap_filehdr_out			_bfd_peLoongArch64_only_swap_filehdr_out
+#define _bfd_XX_print_private_bfd_data_common		_bfd_peLoongArch64_print_private_bfd_data_common
+#define _bfd_XXi_final_link_postscript			_bfd_peLoongArch64i_final_link_postscript
+#define _bfd_XXi_only_swap_filehdr_out			_bfd_peLoongArch64i_only_swap_filehdr_out
+#define _bfd_XXi_swap_aouthdr_in			_bfd_peLoongArch64i_swap_aouthdr_in
+#define _bfd_XXi_swap_aouthdr_out			_bfd_peLoongArch64i_swap_aouthdr_out
+#define _bfd_XXi_swap_aux_in				_bfd_peLoongArch64i_swap_aux_in
+#define _bfd_XXi_swap_aux_out				_bfd_peLoongArch64i_swap_aux_out
+#define _bfd_XXi_swap_lineno_in				_bfd_peLoongArch64i_swap_lineno_in
+#define _bfd_XXi_swap_lineno_out			_bfd_peLoongArch64i_swap_lineno_out
+#define _bfd_XXi_swap_scnhdr_out			_bfd_peLoongArch64i_swap_scnhdr_out
+#define _bfd_XXi_swap_sym_in				_bfd_peLoongArch64i_swap_sym_in
+#define _bfd_XXi_swap_sym_out				_bfd_peLoongArch64i_swap_sym_out
+#define _bfd_XXi_swap_debugdir_in			_bfd_peLoongArch64i_swap_debugdir_in
+#define _bfd_XXi_swap_debugdir_out			_bfd_peLoongArch64i_swap_debugdir_out
+#define _bfd_XXi_write_codeview_record			_bfd_peLoongArch64i_write_codeview_record
+#define _bfd_XXi_slurp_codeview_record			_bfd_peLoongArch64i_slurp_codeview_record
 
 #else /* !COFF_WITH_pep */
 
@@ -298,6 +375,10 @@
 #define _bfd_XXi_swap_scnhdr_out			_bfd_pei_swap_scnhdr_out
 #define _bfd_XXi_swap_sym_in				_bfd_pei_swap_sym_in
 #define _bfd_XXi_swap_sym_out				_bfd_pei_swap_sym_out
+#define _bfd_XXi_swap_debugdir_in			_bfd_pei_swap_debugdir_in
+#define _bfd_XXi_swap_debugdir_out			_bfd_pei_swap_debugdir_out
+#define _bfd_XXi_write_codeview_record			_bfd_pei_write_codeview_record
+#define _bfd_XXi_slurp_codeview_record			_bfd_pei_slurp_codeview_record
 
 #endif /* !COFF_WITH_pep */
 
@@ -327,30 +408,40 @@
 #define coff_final_link_postscript _bfd_XXi_final_link_postscript
 #endif
 
-void        _bfd_XXi_swap_sym_in (bfd *, void *, void *);
-unsigned    _bfd_XXi_swap_sym_out (bfd *, void *, void *);
-void        _bfd_XXi_swap_aux_in (bfd *, void *, int, int, int, int, void *);
-unsigned    _bfd_XXi_swap_aux_out (bfd *, void *, int, int, int, int, void *);
-void        _bfd_XXi_swap_lineno_in (bfd *, void *, void *);
-unsigned    _bfd_XXi_swap_lineno_out (bfd *, void *, void *);
-void        _bfd_XXi_swap_aouthdr_in (bfd *, void *, void *);
-unsigned    _bfd_XXi_swap_aouthdr_out (bfd *, void *, void *);
-unsigned    _bfd_XXi_swap_scnhdr_out (bfd *, void *, void *);
-bfd_boolean _bfd_XX_print_private_bfd_data_common (bfd *, void *);
-bfd_boolean _bfd_XX_bfd_copy_private_bfd_data_common (bfd *, bfd *);
-void        _bfd_XX_get_symbol_info (bfd *, asymbol *, symbol_info *);
-bfd_boolean _bfd_XXi_final_link_postscript (bfd *, struct coff_final_link_info *);
+void _bfd_XXi_swap_sym_in (bfd *, void *, void *);
+unsigned _bfd_XXi_swap_sym_out (bfd *, void *, void *);
+void _bfd_XXi_swap_aux_in (bfd *, void *, int, int, int, int, void *);
+unsigned _bfd_XXi_swap_aux_out (bfd *, void *, int, int, int, int, void *);
+void _bfd_XXi_swap_lineno_in (bfd *, void *, void *);
+unsigned _bfd_XXi_swap_lineno_out (bfd *, void *, void *);
+void _bfd_XXi_swap_aouthdr_in (bfd *, void *, void *);
+unsigned _bfd_XXi_swap_aouthdr_out (bfd *, void *, void *);
+unsigned _bfd_XXi_swap_scnhdr_out (bfd *, void *, void *);
+bool _bfd_XX_print_private_bfd_data_common (bfd *, void *);
+bool _bfd_XX_bfd_copy_private_bfd_data_common (bfd *, bfd *);
+void _bfd_XX_get_symbol_info (bfd *, asymbol *, symbol_info *);
+bool _bfd_XXi_final_link_postscript (bfd *, struct coff_final_link_info *);
+void _bfd_XXi_swap_debugdir_in (bfd *, void *, void *);
+unsigned _bfd_XXi_swap_debugdir_out (bfd *, void *, void *);
+unsigned _bfd_XXi_write_codeview_record
+  (bfd *, file_ptr, CODEVIEW_INFO *, const char *);
+CODEVIEW_INFO *_bfd_XXi_slurp_codeview_record
+  (bfd * abfd, file_ptr where, unsigned long length, CODEVIEW_INFO *cvinfo,
+   char **pdb);
 
 /* The following are needed only for ONE of pe or pei, but don't
    otherwise vary; peicode.h fixes up ifdefs but we provide the
    prototype.  */
 
-unsigned    _bfd_XX_only_swap_filehdr_out  (bfd *, void *, void *);
-unsigned    _bfd_XXi_only_swap_filehdr_out (bfd *, void *, void *);
-bfd_boolean _bfd_XX_bfd_copy_private_section_data (bfd *, asection *, bfd *, asection *);
+unsigned _bfd_XX_only_swap_filehdr_out  (bfd *, void *, void *);
+unsigned _bfd_XXi_only_swap_filehdr_out (bfd *, void *, void *);
+bool _bfd_XX_bfd_copy_private_section_data
+  (bfd *, asection *, bfd *, asection *);
 
-bfd_boolean _bfd_pe_print_ce_compressed_pdata (bfd *, void *);
-bfd_boolean _bfd_pe64_print_ce_compressed_pdata (bfd *, void *);
-bfd_boolean _bfd_pex64_print_ce_compressed_pdata (bfd *, void *);
-bfd_boolean _bfd_pep_print_ce_compressed_pdata (bfd *, void *);
+bool _bfd_pe_print_ce_compressed_pdata (bfd *, void *);
+bool _bfd_pe64_print_ce_compressed_pdata (bfd *, void *);
+bool _bfd_pex64_print_ce_compressed_pdata (bfd *, void *);
+bool _bfd_peAArch64_print_ce_compressed_pdata (bfd *, void *);
+bool _bfd_peLoongArch64_print_ce_compressed_pdata (bfd *, void *);
+bool _bfd_pep_print_ce_compressed_pdata (bfd *, void *);
 

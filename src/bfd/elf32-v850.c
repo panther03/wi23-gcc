@@ -1,5 +1,5 @@
 /* V850-specific support for 32-bit ELF
-   Copyright 1996-2013 Free Software Foundation, Inc.
+   Copyright (C) 1996-2023 Free Software Foundation, Inc.
 
    This file is part of BFD, the Binary File Descriptor library.
 
@@ -29,6 +29,7 @@
 #include "elf-bfd.h"
 #include "elf/v850.h"
 #include "libiberty.h"
+#include "elf32-v850.h"
 
 /* Sign-extend a 17-bit number.  */
 #define SEXT17(x)	((((x) & 0x1ffff) ^ 0x10000) - 0x10000)
@@ -42,13 +43,13 @@ static reloc_howto_type v850_elf_howto_table[];
    allocate space in the global offset table or procedure linkage
    table.  */
 
-static bfd_boolean
+static bool
 v850_elf_check_relocs (bfd *abfd,
 		       struct bfd_link_info *info,
 		       asection *sec,
 		       const Elf_Internal_Rela *relocs)
 {
-  bfd_boolean ret = TRUE;
+  bool ret = true;
   Elf_Internal_Shdr *symtab_hdr;
   struct elf_link_hash_entry **sym_hashes;
   const Elf_Internal_Rela *rel;
@@ -57,11 +58,11 @@ v850_elf_check_relocs (bfd *abfd,
   int other = 0;
   const char *common = NULL;
 
-  if (info->relocatable)
-    return TRUE;
+  if (bfd_link_relocatable (info))
+    return true;
 
 #ifdef DEBUG
-  _bfd_error_handler ("v850_elf_check_relocs called for section %A in %B",
+  _bfd_error_handler ("v850_elf_check_relocs called for section %pA in %pB",
 		      sec, abfd);
 #endif
 
@@ -83,10 +84,6 @@ v850_elf_check_relocs (bfd *abfd,
 	  while (h->root.type == bfd_link_hash_indirect
 		 || h->root.type == bfd_link_hash_warning)
 	    h = (struct elf_link_hash_entry *) h->root.u.i.link;
-
-	  /* PR15323, ref flags aren't set for references in the same
-	     object.  */
-	  h->root.non_ir_ref = 1;
 	}
 
       r_type = ELF32_R_TYPE (rel->r_info);
@@ -95,21 +92,19 @@ v850_elf_check_relocs (bfd *abfd,
 	default:
 	  break;
 
-        /* This relocation describes the C++ object vtable hierarchy.
-           Reconstruct it for later use during GC.  */
-        case R_V850_GNU_VTINHERIT:
-          if (!bfd_elf_gc_record_vtinherit (abfd, sec, h, rel->r_offset))
-            return FALSE;
-          break;
+	/* This relocation describes the C++ object vtable hierarchy.
+	   Reconstruct it for later use during GC.  */
+	case R_V850_GNU_VTINHERIT:
+	  if (!bfd_elf_gc_record_vtinherit (abfd, sec, h, rel->r_offset))
+	    return false;
+	  break;
 
-        /* This relocation describes which C++ vtable entries
+	/* This relocation describes which C++ vtable entries
 	   are actually used.  Record for later use during GC.  */
-        case R_V850_GNU_VTENTRY:
-          BFD_ASSERT (h != NULL);
-          if (h != NULL
-              && !bfd_elf_gc_record_vtentry (abfd, sec, h, rel->r_addend))
-            return FALSE;
-          break;
+	case R_V850_GNU_VTENTRY:
+	  if (!bfd_elf_gc_record_vtentry (abfd, sec, h, rel->r_addend))
+	    return false;
+	  break;
 
 	case R_V850_SDA_16_16_SPLIT_OFFSET:
 	case R_V850_SDA_16_16_OFFSET:
@@ -149,46 +144,50 @@ v850_elf_check_relocs (bfd *abfd,
 		  && (h->other & V850_OTHER_ERROR) == 0)
 		{
 		  const char * msg;
-		  static char  buff[200]; /* XXX */
+		  char *buff;
 
 		  switch (h->other & V850_OTHER_MASK)
 		    {
 		    default:
-		      msg = _("Variable `%s' cannot occupy in multiple small data regions");
+		      msg = _("variable `%s' cannot occupy in multiple small data regions");
 		      break;
 		    case V850_OTHER_SDA | V850_OTHER_ZDA | V850_OTHER_TDA:
-		      msg = _("Variable `%s' can only be in one of the small, zero, and tiny data regions");
+		      msg = _("variable `%s' can only be in one of the small, zero, and tiny data regions");
 		      break;
 		    case V850_OTHER_SDA | V850_OTHER_ZDA:
-		      msg = _("Variable `%s' cannot be in both small and zero data regions simultaneously");
+		      msg = _("variable `%s' cannot be in both small and zero data regions simultaneously");
 		      break;
 		    case V850_OTHER_SDA | V850_OTHER_TDA:
-		      msg = _("Variable `%s' cannot be in both small and tiny data regions simultaneously");
+		      msg = _("variable `%s' cannot be in both small and tiny data regions simultaneously");
 		      break;
 		    case V850_OTHER_ZDA | V850_OTHER_TDA:
-		      msg = _("Variable `%s' cannot be in both zero and tiny data regions simultaneously");
+		      msg = _("variable `%s' cannot be in both zero and tiny data regions simultaneously");
 		      break;
 		    }
 
-		  sprintf (buff, msg, h->root.root.string);
-		  info->callbacks->warning (info, buff, h->root.root.string,
+		  if (asprintf (&buff, msg, h->root.root.string) < 0)
+		    buff = NULL;
+		  else
+		    msg = buff;
+		  info->callbacks->warning (info, msg, h->root.root.string,
 					    abfd, h->root.u.def.section,
 					    (bfd_vma) 0);
+		  free (buff);
 
 		  bfd_set_error (bfd_error_bad_value);
 		  h->other |= V850_OTHER_ERROR;
-		  ret = FALSE;
+		  ret = false;
 		}
 	    }
 
 	  if (h && h->root.type == bfd_link_hash_common
 	      && h->root.u.c.p
-	      && !strcmp (bfd_get_section_name (abfd, h->root.u.c.p->section), "COMMON"))
+	      && !strcmp (bfd_section_name (h->root.u.c.p->section), "COMMON"))
 	    {
 	      asection * section;
 
 	      section = h->root.u.c.p->section = bfd_make_section_old_way (abfd, common);
-	      section->flags |= SEC_IS_COMMON;
+	      section->flags |= SEC_IS_COMMON | SEC_SMALL_DATA;
 	    }
 
 #ifdef DEBUG
@@ -219,11 +218,11 @@ v850_elf_check_relocs (bfd *abfd,
 
 typedef struct hi16s_location
 {
-  bfd_vma                 addend;
-  bfd_byte *              address;
-  unsigned long           counter;
-  bfd_boolean             found;
-  struct hi16s_location * next;
+  bfd_vma addend;
+  bfd_byte *address;
+  unsigned long counter;
+  bool found;
+  struct hi16s_location *next;
 }
 hi16s_location;
 
@@ -235,7 +234,7 @@ static void
 remember_hi16s_reloc (bfd *abfd, bfd_vma addend, bfd_byte *address)
 {
   hi16s_location * entry = NULL;
-  bfd_size_type amt = sizeof (* free_hi16s);
+  size_t amt = sizeof (* free_hi16s);
 
   /* Find a free structure.  */
   if (free_hi16s == NULL)
@@ -247,7 +246,7 @@ remember_hi16s_reloc (bfd *abfd, bfd_vma addend, bfd_byte *address)
   entry->addend  = addend;
   entry->address = address;
   entry->counter = hi16s_counter ++;
-  entry->found   = FALSE;
+  entry->found   = false;
   entry->next    = previous_hi16s;
   previous_hi16s = entry;
 
@@ -263,7 +262,7 @@ remember_hi16s_reloc (bfd *abfd, bfd_vma addend, bfd_byte *address)
 }
 
 static bfd_byte *
-find_remembered_hi16s_reloc (bfd_vma addend, bfd_boolean *already_found)
+find_remembered_hi16s_reloc (bfd_vma addend, bool *already_found)
 {
   hi16s_location *match = NULL;
   hi16s_location *entry;
@@ -290,7 +289,7 @@ find_remembered_hi16s_reloc (bfd_vma addend, bfd_boolean *already_found)
     * already_found = match->found;
 
   /* Note that this entry has now been used.  */
-  match->found = TRUE;
+  match->found = true;
 
   return addr;
 }
@@ -437,7 +436,7 @@ find_remembered_hi16s_reloc (bfd_vma addend, bfd_boolean *already_found)
      ------------
        0x00006fff   which is wrong (assuming that fred is at 0xffff).  */
 
-static bfd_boolean
+static bool
 v850_elf_perform_lo16_relocation (bfd *abfd, unsigned long *insn,
 				  unsigned long addend)
 {
@@ -448,7 +447,7 @@ v850_elf_perform_lo16_relocation (bfd *abfd, unsigned long *insn,
       || (OVERFLOWS (addend, *insn)
 	  && ((! BIT15_SET (*insn)) || (BIT15_SET (addend)))))
     {
-      bfd_boolean already_updated;
+      bool already_updated;
       bfd_byte *hi16s_address = find_remembered_hi16s_reloc
 	(addend, & already_updated);
 
@@ -464,8 +463,8 @@ v850_elf_perform_lo16_relocation (bfd *abfd, unsigned long *insn,
 	}
       else
 	{
-	  (*_bfd_error_handler) (_("FAILED to find previous HI16 reloc"));
-	  return FALSE;
+	  _bfd_error_handler (_("failed to find previous HI16 reloc"));
+	  return false;
 	}
     }
 #undef OVERFLOWS
@@ -474,7 +473,7 @@ v850_elf_perform_lo16_relocation (bfd *abfd, unsigned long *insn,
   /* Do not complain if value has top bit set, as this has been
      anticipated.  */
   *insn = (*insn + addend) & 0xffff;
-  return TRUE;
+  return true;
 }
 
 /* FIXME:  The code here probably ought to be removed and the code in reloc.c
@@ -494,7 +493,8 @@ v850_elf_perform_relocation (bfd *abfd,
     {
     default:
 #ifdef DEBUG
-      fprintf (stderr, "reloc number %d not recognised\n", r_type);
+      _bfd_error_handler ("%pB: unsupported relocation type %#x",
+			  abfd, r_type);
 #endif
       return bfd_reloc_notsupported;
 
@@ -676,7 +676,7 @@ v850_elf_perform_relocation (bfd *abfd,
 	return bfd_reloc_overflow;
 
       if (addend & 1)
-        return bfd_reloc_dangerous;
+	return bfd_reloc_dangerous;
 
       insn = (addend &~ (bfd_vma) 1) | (insn & 1);
       break;
@@ -895,665 +895,665 @@ static reloc_howto_type v850_elf_howto_table[] =
   /* This reloc does nothing.  */
   HOWTO (R_V850_NONE,			/* Type.  */
 	 0,				/* Rightshift.  */
-	 2,				/* Size (0 = byte, 1 = short, 2 = long).  */
-	 32,				/* Bitsize.  */
-	 FALSE,				/* PC_relative.  */
+	 0,				/* Size.  */
+	 0,				/* Bitsize.  */
+	 false,				/* PC_relative.  */
 	 0,				/* Bitpos.  */
-	 complain_overflow_bitfield,	/* Complain_on_overflow.  */
+	 complain_overflow_dont,	/* Complain_on_overflow.  */
 	 bfd_elf_generic_reloc,		/* Special_function.  */
 	 "R_V850_NONE",			/* Name.  */
-	 FALSE,				/* Partial_inplace.  */
+	 false,				/* Partial_inplace.  */
 	 0,				/* Src_mask.  */
 	 0,				/* Dst_mask.  */
-	 FALSE),			/* PCrel_offset.  */
+	 false),			/* PCrel_offset.  */
 
   /* A PC relative 9 bit branch.  */
   HOWTO (R_V850_9_PCREL,		/* Type.  */
 	 0,				/* Rightshift.  */
-	 1,				/* Size (0 = byte, 1 = short, 2 = long).  */
+	 2,				/* Size.  */
 	 9,				/* Bitsize.  */
-	 TRUE,				/* PC_relative.  */
+	 true,				/* PC_relative.  */
 	 0,				/* Bitpos.  */
 	 complain_overflow_bitfield,	/* Complain_on_overflow.  */
 	 v850_elf_reloc,		/* Special_function.  */
 	 "R_V850_9_PCREL",		/* Name.  */
-	 FALSE,				/* Partial_inplace.  */
+	 false,				/* Partial_inplace.  */
 	 0x00ffffff,			/* Src_mask.  */
 	 0x00ffffff,			/* Dst_mask.  */
-	 TRUE),				/* PCrel_offset.  */
+	 true),				/* PCrel_offset.  */
 
   /* A PC relative 22 bit branch.  */
   HOWTO (R_V850_22_PCREL,		/* Type.  */
 	 0,				/* Rightshift.  */
-	 2,				/* Size (0 = byte, 1 = short, 2 = long).  */
+	 4,				/* Size.  */
 	 22,				/* Bitsize.  */
-	 TRUE,				/* PC_relative.  */
+	 true,				/* PC_relative.  */
 	 0,				/* Bitpos.  */
 	 complain_overflow_signed,	/* Complain_on_overflow.  */
 	 v850_elf_reloc,		/* Special_function.  */
 	 "R_V850_22_PCREL",		/* Name.  */
-	 FALSE,				/* Partial_inplace.  */
+	 false,				/* Partial_inplace.  */
 	 0x07ffff80,			/* Src_mask.  */
 	 0x07ffff80,			/* Dst_mask.  */
-	 TRUE),				/* PCrel_offset.  */
+	 true),				/* PCrel_offset.  */
 
   /* High 16 bits of symbol value.  */
   HOWTO (R_V850_HI16_S,			/* Type.  */
 	 0,				/* Rightshift.  */
-	 1,				/* Size (0 = byte, 1 = short, 2 = long).  */
+	 2,				/* Size.  */
 	 16,				/* Bitsize.  */
-	 FALSE,				/* PC_relative.  */
+	 false,				/* PC_relative.  */
 	 0,				/* Bitpos.  */
 	 complain_overflow_dont,	/* Complain_on_overflow.  */
 	 v850_elf_reloc,		/* Special_function.  */
 	 "R_V850_HI16_S",		/* Name.  */
-	 FALSE,				/* Partial_inplace.  */
+	 false,				/* Partial_inplace.  */
 	 0xffff,			/* Src_mask.  */
 	 0xffff,			/* Dst_mask.  */
-	 FALSE),			/* PCrel_offset.  */
+	 false),			/* PCrel_offset.  */
 
   /* High 16 bits of symbol value.  */
   HOWTO (R_V850_HI16,			/* Type.  */
 	 0,				/* Rightshift.  */
-	 1,				/* Size (0 = byte, 1 = short, 2 = long).  */
+	 2,				/* Size.  */
 	 16,				/* Bitsize.  */
-	 FALSE,				/* PC_relative.  */
+	 false,				/* PC_relative.  */
 	 0,				/* Bitpos.  */
 	 complain_overflow_dont,	/* Complain_on_overflow.  */
 	 v850_elf_reloc,		/* Special_function.  */
 	 "R_V850_HI16",			/* Name.  */
-	 FALSE,				/* Partial_inplace.  */
+	 false,				/* Partial_inplace.  */
 	 0xffff,			/* Src_mask.  */
 	 0xffff,			/* Dst_mask.  */
-	 FALSE),			/* PCrel_offset.  */
+	 false),			/* PCrel_offset.  */
 
   /* Low 16 bits of symbol value.  */
   HOWTO (R_V850_LO16,			/* Type.  */
 	 0,				/* Rightshift.  */
-	 1,				/* Size (0 = byte, 1 = short, 2 = long).  */
+	 2,				/* Size.  */
 	 16,				/* Bitsize.  */
-	 FALSE,				/* PC_relative.  */
+	 false,				/* PC_relative.  */
 	 0,				/* Bitpos.  */
 	 complain_overflow_dont,	/* Complain_on_overflow.  */
 	 v850_elf_reloc,		/* Special_function.  */
 	 "R_V850_LO16",			/* Name.  */
-	 FALSE,				/* Partial_inplace.  */
+	 false,				/* Partial_inplace.  */
 	 0xffff,			/* Src_mask.  */
 	 0xffff,			/* Dst_mask.  */
-	 FALSE),			/* PCrel_offset.  */
+	 false),			/* PCrel_offset.  */
 
   /* Simple 32bit reloc.  */
   HOWTO (R_V850_ABS32,			/* Type.  */
 	 0,				/* Rightshift.  */
-	 2,				/* Size (0 = byte, 1 = short, 2 = long).  */
+	 4,				/* Size.  */
 	 32,				/* Bitsize.  */
-	 FALSE,				/* PC_relative.  */
+	 false,				/* PC_relative.  */
 	 0,				/* Bitpos.  */
 	 complain_overflow_dont,	/* Complain_on_overflow.  */
 	 v850_elf_reloc,		/* Special_function.  */
 	 "R_V850_ABS32",		/* Name.  */
-	 FALSE,				/* Partial_inplace.  */
+	 false,				/* Partial_inplace.  */
 	 0xffffffff,			/* Src_mask.  */
 	 0xffffffff,			/* Dst_mask.  */
-	 FALSE),			/* PCrel_offset.  */
+	 false),			/* PCrel_offset.  */
 
   /* Simple 16bit reloc.  */
   HOWTO (R_V850_16,			/* Type.  */
 	 0,				/* Rightshift.  */
-	 1,				/* Size (0 = byte, 1 = short, 2 = long).  */
+	 2,				/* Size.  */
 	 16,				/* Bitsize.  */
-	 FALSE,				/* PC_relative.  */
+	 false,				/* PC_relative.  */
 	 0,				/* Bitpos.  */
 	 complain_overflow_dont,	/* Complain_on_overflow.  */
 	 bfd_elf_generic_reloc,		/* Special_function.  */
 	 "R_V850_16",			/* Name.  */
-	 FALSE,				/* Partial_inplace.  */
+	 false,				/* Partial_inplace.  */
 	 0xffff,			/* Src_mask.  */
 	 0xffff,			/* Dst_mask.  */
-	 FALSE),			/* PCrel_offset.  */
+	 false),			/* PCrel_offset.  */
 
-  /* Simple 8bit reloc.	 */
+  /* Simple 8bit reloc.  */
   HOWTO (R_V850_8,			/* Type.  */
 	 0,				/* Rightshift.  */
-	 0,				/* Size (0 = byte, 1 = short, 2 = long).  */
+	 1,				/* Size.  */
 	 8,				/* Bitsize.  */
-	 FALSE,				/* PC_relative.  */
+	 false,				/* PC_relative.  */
 	 0,				/* Bitpos.  */
 	 complain_overflow_dont,	/* Complain_on_overflow.  */
 	 bfd_elf_generic_reloc,		/* Special_function.  */
 	 "R_V850_8",			/* Name.  */
-	 FALSE,				/* Partial_inplace.  */
+	 false,				/* Partial_inplace.  */
 	 0xff,				/* Src_mask.  */
 	 0xff,				/* Dst_mask.  */
-	 FALSE),			/* PCrel_offset.  */
+	 false),			/* PCrel_offset.  */
 
   /* 16 bit offset from the short data area pointer.  */
   HOWTO (R_V850_SDA_16_16_OFFSET,	/* Type.  */
 	 0,				/* Rightshift.  */
-	 1,				/* Size (0 = byte, 1 = short, 2 = long).  */
+	 2,				/* Size.  */
 	 16,				/* Bitsize.  */
-	 FALSE,				/* PC_relative.  */
+	 false,				/* PC_relative.  */
 	 0,				/* Bitpos.  */
 	 complain_overflow_dont,	/* Complain_on_overflow.  */
 	 v850_elf_reloc,		/* Special_function.  */
 	 "R_V850_SDA_16_16_OFFSET",	/* Name.  */
-	 FALSE,				/* Partial_inplace.  */
+	 false,				/* Partial_inplace.  */
 	 0xffff,			/* Src_mask.  */
 	 0xffff,			/* Dst_mask.  */
-	 FALSE),			/* PCrel_offset.  */
+	 false),			/* PCrel_offset.  */
 
   /* 15 bit offset from the short data area pointer.  */
   HOWTO (R_V850_SDA_15_16_OFFSET,	/* Type.  */
 	 1,				/* Rightshift.  */
-	 1,				/* Size (0 = byte, 1 = short, 2 = long).  */
+	 2,				/* Size.  */
 	 16,				/* Bitsize.  */
-	 FALSE,				/* PC_relative.  */
+	 false,				/* PC_relative.  */
 	 1,				/* Bitpos.  */
 	 complain_overflow_dont,	/* Complain_on_overflow.  */
 	 v850_elf_reloc,		/* Special_function.  */
 	 "R_V850_SDA_15_16_OFFSET",	/* Name.  */
-	 FALSE,				/* Partial_inplace.  */
+	 false,				/* Partial_inplace.  */
 	 0xfffe,			/* Src_mask.  */
 	 0xfffe,			/* Dst_mask.  */
-	 FALSE),			/* PCrel_offset.  */
+	 false),			/* PCrel_offset.  */
 
   /* 16 bit offset from the zero data area pointer.  */
   HOWTO (R_V850_ZDA_16_16_OFFSET,	/* Type.  */
 	 0,				/* Rightshift.  */
-	 1,				/* Size (0 = byte, 1 = short, 2 = long).  */
+	 2,				/* Size.  */
 	 16,				/* Bitsize.  */
-	 FALSE,				/* PC_relative.  */
+	 false,				/* PC_relative.  */
 	 0,				/* Bitpos.  */
 	 complain_overflow_dont,	/* Complain_on_overflow.  */
 	 v850_elf_reloc,		/* Special_function.  */
 	 "R_V850_ZDA_16_16_OFFSET",	/* Name.  */
-	 FALSE,				/* Partial_inplace.  */
+	 false,				/* Partial_inplace.  */
 	 0xffff,			/* Src_mask.  */
 	 0xffff,			/* Dst_mask.  */
-	 FALSE),			/* PCrel_offset.  */
+	 false),			/* PCrel_offset.  */
 
   /* 15 bit offset from the zero data area pointer.  */
   HOWTO (R_V850_ZDA_15_16_OFFSET,	/* Type.  */
 	 1,				/* Rightshift.  */
-	 1,				/* Size (0 = byte, 1 = short, 2 = long).  */
+	 2,				/* Size.  */
 	 16,				/* Bitsize.  */
-	 FALSE,				/* PC_relative.  */
+	 false,				/* PC_relative.  */
 	 1,				/* Bitpos.  */
 	 complain_overflow_dont,	/* Complain_on_overflow.  */
 	 v850_elf_reloc,		/* Special_function.  */
 	 "R_V850_ZDA_15_16_OFFSET",	/* Name.  */
-	 FALSE,				/* Partial_inplace.  */
+	 false,				/* Partial_inplace.  */
 	 0xfffe,			/* Src_mask.  */
 	 0xfffe,			/* Dst_mask.  */
-	 FALSE),			/* PCrel_offset.  */
+	 false),			/* PCrel_offset.  */
 
   /* 6 bit offset from the tiny data area pointer.  */
   HOWTO (R_V850_TDA_6_8_OFFSET,		/* Type.  */
 	 2,				/* Rightshift.  */
-	 1,				/* Size (0 = byte, 1 = short, 2 = long).  */
+	 2,				/* Size.  */
 	 8,				/* Bitsize.  */
-	 FALSE,				/* PC_relative.  */
+	 false,				/* PC_relative.  */
 	 1,				/* Bitpos.  */
 	 complain_overflow_dont,	/* Complain_on_overflow.  */
 	 v850_elf_reloc,		/* Special_function.  */
 	 "R_V850_TDA_6_8_OFFSET",	/* Name.  */
-	 FALSE,				/* Partial_inplace.  */
+	 false,				/* Partial_inplace.  */
 	 0x7e,				/* Src_mask.  */
 	 0x7e,				/* Dst_mask.  */
-	 FALSE),			/* PCrel_offset.  */
+	 false),			/* PCrel_offset.  */
 
   /* 8 bit offset from the tiny data area pointer.  */
   HOWTO (R_V850_TDA_7_8_OFFSET,		/* Type.  */
 	 1,				/* Rightshift.  */
-	 1,				/* Size (0 = byte, 1 = short, 2 = long).  */
+	 2,				/* Size.  */
 	 8,				/* Bitsize.  */
-	 FALSE,				/* PC_relative.  */
+	 false,				/* PC_relative.  */
 	 0,				/* Bitpos.  */
 	 complain_overflow_dont,	/* Complain_on_overflow.  */
 	 v850_elf_reloc,		/* Special_function.  */
 	 "R_V850_TDA_7_8_OFFSET",	/* Name.  */
-	 FALSE,				/* Partial_inplace.  */
+	 false,				/* Partial_inplace.  */
 	 0x7f,				/* Src_mask.  */
 	 0x7f,				/* Dst_mask.  */
-	 FALSE),			/* PCrel_offset.  */
+	 false),			/* PCrel_offset.  */
 
   /* 7 bit offset from the tiny data area pointer.  */
   HOWTO (R_V850_TDA_7_7_OFFSET,		/* Type.  */
 	 0,				/* Rightshift.  */
-	 1,				/* Size (0 = byte, 1 = short, 2 = long).  */
+	 2,				/* Size.  */
 	 7,				/* Bitsize.  */
-	 FALSE,				/* PC_relative.  */
+	 false,				/* PC_relative.  */
 	 0,				/* Bitpos.  */
 	 complain_overflow_dont,	/* Complain_on_overflow.  */
 	 v850_elf_reloc,		/* Special_function.  */
 	 "R_V850_TDA_7_7_OFFSET",	/* Name.  */
-	 FALSE,				/* Partial_inplace.  */
+	 false,				/* Partial_inplace.  */
 	 0x7f,				/* Src_mask.  */
 	 0x7f,				/* Dst_mask.  */
-	 FALSE),			/* PCrel_offset.  */
+	 false),			/* PCrel_offset.  */
 
   /* 16 bit offset from the tiny data area pointer!  */
   HOWTO (R_V850_TDA_16_16_OFFSET,	/* Type.  */
 	 0,				/* Rightshift.  */
-	 1,				/* Size (0 = byte, 1 = short, 2 = long).  */
+	 2,				/* Size.  */
 	 16,				/* Bitsize.  */
-	 FALSE,				/* PC_relative.  */
+	 false,				/* PC_relative.  */
 	 0,				/* Bitpos.  */
 	 complain_overflow_dont,	/* Complain_on_overflow.  */
 	 v850_elf_reloc,		/* Special_function.  */
 	 "R_V850_TDA_16_16_OFFSET",	/* Name.  */
-	 FALSE,				/* Partial_inplace.  */
+	 false,				/* Partial_inplace.  */
 	 0xffff,			/* Src_mask.  */
 	 0xfff,				/* Dst_mask.  */
-	 FALSE),			/* PCrel_offset.  */
+	 false),			/* PCrel_offset.  */
 
   /* 5 bit offset from the tiny data area pointer.  */
   HOWTO (R_V850_TDA_4_5_OFFSET,		/* Type.  */
 	 1,				/* Rightshift.  */
-	 1,				/* Size (0 = byte, 1 = short, 2 = long).  */
+	 2,				/* Size.  */
 	 5,				/* Bitsize.  */
-	 FALSE,				/* PC_relative.  */
+	 false,				/* PC_relative.  */
 	 0,				/* Bitpos.  */
 	 complain_overflow_dont,	/* Complain_on_overflow.  */
 	 v850_elf_reloc,		/* Special_function.  */
 	 "R_V850_TDA_4_5_OFFSET",	/* Name.  */
-	 FALSE,				/* Partial_inplace.  */
+	 false,				/* Partial_inplace.  */
 	 0x0f,				/* Src_mask.  */
 	 0x0f,				/* Dst_mask.  */
-	 FALSE),			/* PCrel_offset.  */
+	 false),			/* PCrel_offset.  */
 
   /* 4 bit offset from the tiny data area pointer.  */
   HOWTO (R_V850_TDA_4_4_OFFSET,		/* Type.  */
 	 0,				/* Rightshift.  */
-	 1,				/* Size (0 = byte, 1 = short, 2 = long).  */
+	 2,				/* Size.  */
 	 4,				/* Bitsize.  */
-	 FALSE,				/* PC_relative.  */
+	 false,				/* PC_relative.  */
 	 0,				/* Bitpos.  */
 	 complain_overflow_dont,	/* Complain_on_overflow.  */
 	 v850_elf_reloc,		/* Special_function.  */
 	 "R_V850_TDA_4_4_OFFSET",	/* Name.  */
-	 FALSE,				/* Partial_inplace.  */
+	 false,				/* Partial_inplace.  */
 	 0x0f,				/* Src_mask.  */
 	 0x0f,				/* Dst_mask.  */
-	 FALSE),			/* PCrel_offset.  */
+	 false),			/* PCrel_offset.  */
 
   /* 16 bit offset from the short data area pointer.  */
   HOWTO (R_V850_SDA_16_16_SPLIT_OFFSET,	/* Type.  */
 	 0,				/* Rightshift.  */
-	 2,				/* Size (0 = byte, 1 = short, 2 = long).  */
+	 4,				/* Size.  */
 	 16,				/* Bitsize.  */
-	 FALSE,				/* PC_relative.  */
+	 false,				/* PC_relative.  */
 	 0,				/* Bitpos.  */
 	 complain_overflow_dont,	/* Complain_on_overflow.  */
 	 v850_elf_reloc,		/* Special_function.  */
 	 "R_V850_SDA_16_16_SPLIT_OFFSET",/* Name.  */
-	 FALSE,				/* Partial_inplace.  */
+	 false,				/* Partial_inplace.  */
 	 0xfffe0020,			/* Src_mask.  */
 	 0xfffe0020,			/* Dst_mask.  */
-	 FALSE),			/* PCrel_offset.  */
+	 false),			/* PCrel_offset.  */
 
   /* 16 bit offset from the zero data area pointer.  */
   HOWTO (R_V850_ZDA_16_16_SPLIT_OFFSET,	/* Type.  */
 	 0,				/* Rightshift.  */
-	 2,				/* Size (0 = byte, 1 = short, 2 = long).  */
+	 4,				/* Size.  */
 	 16,				/* Bitsize.  */
-	 FALSE,				/* PC_relative.  */
+	 false,				/* PC_relative.  */
 	 0,				/* Bitpos.  */
 	 complain_overflow_dont,	/* Complain_on_overflow.  */
 	 v850_elf_reloc,		/* Special_function.  */
 	 "R_V850_ZDA_16_16_SPLIT_OFFSET",/* Name.  */
-	 FALSE,				/* Partial_inplace.  */
+	 false,				/* Partial_inplace.  */
 	 0xfffe0020,			/* Src_mask.  */
 	 0xfffe0020,			/* Dst_mask.  */
-	 FALSE),			/* PCrel_offset.  */
+	 false),			/* PCrel_offset.  */
 
   /* 6 bit offset from the call table base pointer.  */
   HOWTO (R_V850_CALLT_6_7_OFFSET,	/* Type.  */
 	 0,				/* Rightshift.  */
-	 1,				/* Size (0 = byte, 1 = short, 2 = long).  */
+	 2,				/* Size.  */
 	 7,				/* Bitsize.  */
-	 FALSE,				/* PC_relative.  */
+	 false,				/* PC_relative.  */
 	 0,				/* Bitpos.  */
 	 complain_overflow_dont,	/* Complain_on_overflow.  */
 	 v850_elf_reloc,		/* Special_function.  */
 	 "R_V850_CALLT_6_7_OFFSET",	/* Name.  */
-	 FALSE,				/* Partial_inplace.  */
+	 false,				/* Partial_inplace.  */
 	 0x3f,				/* Src_mask.  */
 	 0x3f,				/* Dst_mask.  */
-	 FALSE),			/* PCrel_offset.  */
+	 false),			/* PCrel_offset.  */
 
   /* 16 bit offset from the call table base pointer.  */
   HOWTO (R_V850_CALLT_16_16_OFFSET,	/* Type.  */
 	 0,				/* Rightshift.  */
-	 1,				/* Size (0 = byte, 1 = short, 2 = long).  */
+	 2,				/* Size.  */
 	 16,				/* Bitsize.  */
-	 FALSE,				/* PC_relative.  */
+	 false,				/* PC_relative.  */
 	 0,				/* Bitpos.  */
 	 complain_overflow_dont,	/* Complain_on_overflow.  */
 	 v850_elf_reloc,		/* Special_function.  */
 	 "R_V850_CALLT_16_16_OFFSET",	/* Name.  */
-	 FALSE,				/* Partial_inplace.  */
+	 false,				/* Partial_inplace.  */
 	 0xffff,			/* Src_mask.  */
 	 0xffff,			/* Dst_mask.  */
-	 FALSE),			/* PCrel_offset.  */
+	 false),			/* PCrel_offset.  */
 
 
   /* GNU extension to record C++ vtable hierarchy */
   HOWTO (R_V850_GNU_VTINHERIT, /* Type.  */
-	 0,                     /* Rightshift.  */
-	 2,                     /* Size (0 = byte, 1 = short, 2 = long).  */
-	 0,                     /* Bitsize.  */
-	 FALSE,                 /* PC_relative.  */
-	 0,                     /* Bitpos.  */
+	 0,			/* Rightshift.  */
+	 4,			/* Size.  */
+	 0,			/* Bitsize.  */
+	 false,			/* PC_relative.  */
+	 0,			/* Bitpos.  */
 	 complain_overflow_dont, /* Complain_on_overflow.  */
-	 NULL,                  /* Special_function.  */
+	 NULL,			/* Special_function.  */
 	 "R_V850_GNU_VTINHERIT", /* Name.  */
-	 FALSE,                 /* Partial_inplace.  */
-	 0,                     /* Src_mask.  */
-	 0,                     /* Dst_mask.  */
-	 FALSE),                /* PCrel_offset.  */
+	 false,			/* Partial_inplace.  */
+	 0,			/* Src_mask.  */
+	 0,			/* Dst_mask.  */
+	 false),		/* PCrel_offset.  */
 
   /* GNU extension to record C++ vtable member usage.  */
-  HOWTO (R_V850_GNU_VTENTRY,     /* Type.  */
-	 0,                     /* Rightshift.  */
-	 2,                     /* Size (0 = byte, 1 = short, 2 = long).  */
-	 0,                     /* Bitsize.  */
-	 FALSE,                 /* PC_relative.  */
-	 0,                     /* Bitpos.  */
+  HOWTO (R_V850_GNU_VTENTRY,	 /* Type.  */
+	 0,			/* Rightshift.  */
+	 4,			/* Size.  */
+	 0,			/* Bitsize.  */
+	 false,			/* PC_relative.  */
+	 0,			/* Bitpos.  */
 	 complain_overflow_dont, /* Complain_on_overflow.  */
-	 _bfd_elf_rel_vtable_reloc_fn,  /* Special_function.  */
-	 "R_V850_GNU_VTENTRY",   /* Name.  */
-	 FALSE,                 /* Partial_inplace.  */
-	 0,                     /* Src_mask.  */
-	 0,                     /* Dst_mask.  */
-	 FALSE),                /* PCrel_offset.  */
+	 _bfd_elf_rel_vtable_reloc_fn,	/* Special_function.  */
+	 "R_V850_GNU_VTENTRY",	 /* Name.  */
+	 false,			/* Partial_inplace.  */
+	 0,			/* Src_mask.  */
+	 0,			/* Dst_mask.  */
+	 false),		/* PCrel_offset.  */
 
   /* Indicates a .longcall pseudo-op.  The compiler will generate a .longcall
      pseudo-op when it finds a function call which can be relaxed.  */
   HOWTO (R_V850_LONGCALL,     /* Type.  */
-	 0,                     /* Rightshift.  */
-	 2,                     /* Size (0 = byte, 1 = short, 2 = long).  */
-	 32,                    /* Bitsize.  */
-	 TRUE,                  /* PC_relative.  */
-	 0,                     /* Bitpos.  */
+	 0,			/* Rightshift.  */
+	 4,			/* Size.  */
+	 32,			/* Bitsize.  */
+	 true,			/* PC_relative.  */
+	 0,			/* Bitpos.  */
 	 complain_overflow_signed, /* Complain_on_overflow.  */
 	 v850_elf_ignore_reloc, /* Special_function.  */
-	 "R_V850_LONGCALL",     /* Name.  */
-	 FALSE,                 /* Partial_inplace.  */
-	 0,                     /* Src_mask.  */
-	 0,                     /* Dst_mask.  */
-	 TRUE),                 /* PCrel_offset.  */
+	 "R_V850_LONGCALL",	/* Name.  */
+	 false,			/* Partial_inplace.  */
+	 0,			/* Src_mask.  */
+	 0,			/* Dst_mask.  */
+	 true),			/* PCrel_offset.  */
 
   /* Indicates a .longjump pseudo-op.  The compiler will generate a
      .longjump pseudo-op when it finds a branch which can be relaxed.  */
   HOWTO (R_V850_LONGJUMP,     /* Type.  */
-	 0,                     /* Rightshift.  */
-	 2,                     /* Size (0 = byte, 1 = short, 2 = long).  */
-	 32,                    /* Bitsize.  */
-	 TRUE,                  /* PC_relative.  */
-	 0,                     /* Bitpos.  */
+	 0,			/* Rightshift.  */
+	 4,			/* Size.  */
+	 32,			/* Bitsize.  */
+	 true,			/* PC_relative.  */
+	 0,			/* Bitpos.  */
 	 complain_overflow_signed, /* Complain_on_overflow.  */
 	 v850_elf_ignore_reloc, /* Special_function.  */
-	 "R_V850_LONGJUMP",     /* Name.  */
-	 FALSE,                 /* Partial_inplace.  */
-	 0,                     /* Src_mask.  */
-	 0,                     /* Dst_mask.  */
-	 TRUE),                 /* PCrel_offset.  */
+	 "R_V850_LONGJUMP",	/* Name.  */
+	 false,			/* Partial_inplace.  */
+	 0,			/* Src_mask.  */
+	 0,			/* Dst_mask.  */
+	 true),			/* PCrel_offset.  */
 
-  HOWTO (R_V850_ALIGN,        /* Type.  */
-	 0,                     /* Rightshift.  */
-	 1,                     /* Size (0 = byte, 1 = short, 2 = long).  */
-	 0,                     /* Bitsize.  */
-	 FALSE,                 /* PC_relative.  */
-	 0,                     /* Bitpos.  */
+  HOWTO (R_V850_ALIGN,	      /* Type.  */
+	 0,			/* Rightshift.  */
+	 2,			/* Size.  */
+	 0,			/* Bitsize.  */
+	 false,			/* PC_relative.  */
+	 0,			/* Bitpos.  */
 	 complain_overflow_unsigned, /* Complain_on_overflow.  */
 	 v850_elf_ignore_reloc, /* Special_function.  */
-	 "R_V850_ALIGN",        /* Name.  */
-	 FALSE,                 /* Partial_inplace.  */
-	 0,                     /* Src_mask.  */
-	 0,                     /* Dst_mask.  */
-	 TRUE),                 /* PCrel_offset.  */
+	 "R_V850_ALIGN",	/* Name.  */
+	 false,			/* Partial_inplace.  */
+	 0,			/* Src_mask.  */
+	 0,			/* Dst_mask.  */
+	 true),			/* PCrel_offset.  */
 
   /* Simple pc-relative 32bit reloc.  */
   HOWTO (R_V850_REL32,			/* Type.  */
 	 0,				/* Rightshift.  */
-	 2,				/* Size (0 = byte, 1 = short, 2 = long).  */
+	 4,				/* Size.  */
 	 32,				/* Bitsize.  */
-	 TRUE,				/* PC_relative.  */
+	 true,				/* PC_relative.  */
 	 0,				/* Bitpos.  */
 	 complain_overflow_dont,	/* Complain_on_overflow.  */
 	 v850_elf_reloc,		/* Special_function.  */
 	 "R_V850_REL32",		/* Name.  */
-	 FALSE,				/* Partial_inplace.  */
+	 false,				/* Partial_inplace.  */
 	 0xffffffff,			/* Src_mask.  */
 	 0xffffffff,			/* Dst_mask.  */
-	 FALSE),			/* PCrel_offset.  */
+	 false),			/* PCrel_offset.  */
 
   /* An ld.bu version of R_V850_LO16.  */
   HOWTO (R_V850_LO16_SPLIT_OFFSET,	/* Type.  */
 	 0,				/* Rightshift.  */
-	 2,				/* Size (0 = byte, 1 = short, 2 = long).  */
+	 4,				/* Size.  */
 	 16,				/* Bitsize.  */
-	 FALSE,				/* PC_relative.  */
+	 false,				/* PC_relative.  */
 	 0,				/* Bitpos.  */
 	 complain_overflow_dont,	/* Complain_on_overflow.  */
 	 v850_elf_reloc,		/* Special_function.  */
 	 "R_V850_LO16_SPLIT_OFFSET",	/* Name.  */
-	 FALSE,				/* Partial_inplace.  */
+	 false,				/* Partial_inplace.  */
 	 0xfffe0020,			/* Src_mask.  */
 	 0xfffe0020,			/* Dst_mask.  */
-	 FALSE),			/* PCrel_offset.  */
+	 false),			/* PCrel_offset.  */
 
   /* A unsigned PC relative 16 bit loop.  */
   HOWTO (R_V850_16_PCREL,		/* Type.  */
 	 0,				/* Rightshift.  */
-	 1,				/* Size (0 = byte, 1 = short, 2 = long).  */
+	 2,				/* Size.  */
 	 16,				/* Bitsize.  */
-	 TRUE,				/* PC_relative.  */
+	 true,				/* PC_relative.  */
 	 0,				/* Bitpos.  */
 	 complain_overflow_bitfield,	/* Complain_on_overflow.  */
 	 v850_elf_reloc,		/* Special_function.  */
 	 "R_V850_16_PCREL",		/* Name.  */
-	 FALSE,				/* Partial_inplace.  */
+	 false,				/* Partial_inplace.  */
 	 0xfffe,			/* Src_mask.  */
 	 0xfffe,			/* Dst_mask.  */
-	 TRUE),				/* PCrel_offset.  */
+	 true),				/* PCrel_offset.  */
 
   /* A PC relative 17 bit branch.  */
   HOWTO (R_V850_17_PCREL,		/* Type.  */
 	 0,				/* Rightshift.  */
-	 2,				/* Size (0 = byte, 1 = short, 2 = long).  */
+	 4,				/* Size.  */
 	 17,				/* Bitsize.  */
-	 TRUE,				/* PC_relative.  */
+	 true,				/* PC_relative.  */
 	 0,				/* Bitpos.  */
 	 complain_overflow_bitfield,	/* Complain_on_overflow.  */
 	 v850_elf_reloc,		/* Special_function.  */
 	 "R_V850_17_PCREL",		/* Name.  */
-	 FALSE,				/* Partial_inplace.  */
+	 false,				/* Partial_inplace.  */
 	 0x0010fffe,			/* Src_mask.  */
 	 0x0010fffe,			/* Dst_mask.  */
-	 TRUE),				/* PCrel_offset.  */
+	 true),				/* PCrel_offset.  */
 
   /* A 23bit offset ld/st.  */
   HOWTO (R_V850_23,			/* type.  */
 	 0,				/* rightshift.  */
-	 2,				/* size (0 = byte, 1 = short, 2 = long).  */
+	 4,				/* size.  */
 	 23,				/* bitsize.  */
-	 FALSE,				/* pc_relative.  */
+	 false,				/* pc_relative.  */
 	 0,				/* bitpos.  */
 	 complain_overflow_dont,	/* complain_on_overflow.  */
 	 v850_elf_reloc,		/* special_function.  */
 	 "R_V850_23",			/* name.  */
-	 FALSE,				/* partial_inplace.  */
+	 false,				/* partial_inplace.  */
 	 0xffff07f0,			/* src_mask.  */
 	 0xffff07f0,			/* dst_mask.  */
-	 FALSE),			/* pcrel_offset.  */
+	 false),			/* pcrel_offset.  */
 
   /* A PC relative 32 bit branch.  */
   HOWTO (R_V850_32_PCREL,		/* type.  */
 	 1,				/* rightshift.  */
-	 2,				/* size (0 = byte, 1 = short, 2 = long).  */
+	 4,				/* size.  */
 	 32,				/* bitsize.  */
-	 TRUE,				/* pc_relative.  */
+	 true,				/* pc_relative.  */
 	 1,				/* bitpos.  */
 	 complain_overflow_signed,	/* complain_on_overflow.  */
 	 v850_elf_reloc,		/* special_function.  */
 	 "R_V850_32_PCREL",		/* name.  */
-	 FALSE,				/* partial_inplace.  */
+	 false,				/* partial_inplace.  */
 	 0xfffffffe,			/* src_mask.  */
 	 0xfffffffe,			/* dst_mask.  */
-	 TRUE),				/* pcrel_offset.  */
+	 true),				/* pcrel_offset.  */
 
-  /* A absolute 32 bit branch.	*/
+  /* A absolute 32 bit branch.  */
   HOWTO (R_V850_32_ABS,			/* type.  */
 	 1,				/* rightshift.  */
-	 2,				/* size (0 = byte, 1 = short, 2 = long).  */
+	 4,				/* size.  */
 	 32,				/* bitsize.  */
-	 TRUE,				/* pc_relative.  */
+	 true,				/* pc_relative.  */
 	 1,				/* bitpos.  */
 	 complain_overflow_signed,	/* complain_on_overflow.  */
 	 v850_elf_reloc,		/* special_function.  */
 	 "R_V850_32_ABS",		/* name.  */
-	 FALSE,				/* partial_inplace.  */
+	 false,				/* partial_inplace.  */
 	 0xfffffffe,			/* src_mask.  */
 	 0xfffffffe,			/* dst_mask.  */
-	 FALSE),			/* pcrel_offset.  */
+	 false),			/* pcrel_offset.  */
 
   /* High 16 bits of symbol value.  */
   HOWTO (R_V850_HI16,			/* Type.  */
 	 0,				/* Rightshift.  */
-	 1,				/* Size (0 = byte, 1 = short, 2 = long).  */
+	 2,				/* Size.  */
 	 16,				/* Bitsize.  */
-	 FALSE,				/* PC_relative.  */
+	 false,				/* PC_relative.  */
 	 0,				/* Bitpos.  */
 	 complain_overflow_dont,	/* Complain_on_overflow.  */
 	 v850_elf_reloc,		/* Special_function.  */
 	 "R_V850_HI16",			/* Name.  */
-	 FALSE,				/* Partial_inplace.  */
+	 false,				/* Partial_inplace.  */
 	 0xffff,			/* Src_mask.  */
 	 0xffff,			/* Dst_mask.  */
-	 FALSE),			/* PCrel_offset.  */
+	 false),			/* PCrel_offset.  */
 
   /* Low 16 bits of symbol value.  */
   HOWTO (R_V850_16_S1,			/* type.  */
 	 1,				/* rightshift.  */
-	 1,				/* size (0 = byte, 1 = short, 2 = long).  */
+	 2,				/* size.  */
 	 16,				/* bitsize.  */
-	 FALSE,				/* pc_relative.  */
+	 false,				/* pc_relative.  */
 	 1,				/* bitpos.  */
 	 complain_overflow_dont,	/* complain_on_overflow.  */
 	 v850_elf_reloc,		/* special_function.  */
 	 "R_V850_16_S1",		/* name.  */
-	 FALSE,				/* partial_inplace.  */
+	 false,				/* partial_inplace.  */
 	 0xfffe,			/* src_mask.  */
 	 0xfffe,			/* dst_mask.  */
-	 FALSE),			/* pcrel_offset.  */
+	 false),			/* pcrel_offset.  */
 
   /* Low 16 bits of symbol value.  */
   HOWTO (R_V850_LO16_S1,		/* type.  */
 	 1,				/* rightshift.  */
-	 1,				/* size (0 = byte, 1 = short, 2 = long).  */
+	 2,				/* size.  */
 	 16,				/* bitsize.  */
-	 FALSE,				/* pc_relative.  */
+	 false,				/* pc_relative.  */
 	 1,				/* bitpos.  */
 	 complain_overflow_dont,	/* complain_on_overflow.  */
 	 v850_elf_reloc,		/* special_function.  */
 	 "R_V850_LO16_S1",		/* name.  */
-	 FALSE,				/* partial_inplace.  */
+	 false,				/* partial_inplace.  */
 	 0xfffe,			/* src_mask.  */
 	 0xfffe,			/* dst_mask.  */
-	 FALSE),			/* pcrel_offset.  */
+	 false),			/* pcrel_offset.  */
 
   /* 16 bit offset from the call table base pointer.  */
   HOWTO (R_V850_CALLT_15_16_OFFSET,	/* type.  */
 	 1,				/* rightshift.  */
-	 1,				/* size (0 = byte, 1 = short, 2 = long).  */
+	 2,				/* size.  */
 	 16,				/* bitsize.  */
-	 FALSE,				/* pc_relative.  */
+	 false,				/* pc_relative.  */
 	 1,				/* bitpos.  */
 	 complain_overflow_dont,	/* complain_on_overflow.  */
 	 v850_elf_reloc,		/* special_function.  */
 	 "R_V850_CALLT_15_16_OFFSET",	/* name.  */
-	 FALSE,				/* partial_inplace.  */
+	 false,				/* partial_inplace.  */
 	 0xfffe,			/* src_mask.  */
 	 0xfffe,			/* dst_mask.  */
-	 FALSE),			/* pcrel_offset.  */
+	 false),			/* pcrel_offset.  */
 
   /* Like R_V850_32 PCREL, but referring to the GOT table entry for
      the symbol.  */
   HOWTO (R_V850_32_GOTPCREL,		/* type.  */
 	 0,				/* rightshift.  */
-	 2,				/* size (0 = byte, 1 = short, 2 = long).  */
+	 4,				/* size.  */
 	 32,				/* bitsize.  */
-	 TRUE,				/* pc_relative.  */
+	 true,				/* pc_relative.  */
 	 0,				/* bitpos.  */
 	 complain_overflow_unsigned,	/* complain_on_overflow.  */
 	 v850_elf_reloc,		/* special_function.  */
 	 "R_V850_32_GOTPCREL",		/* name.  */
-	 FALSE,				/* partial_inplace.  */
+	 false,				/* partial_inplace.  */
 	 0xffffffff,			/* src_mask.  */
 	 0xffffffff,			/* dst_mask.  */
-	 TRUE),				/* pcrel_offset.  */
+	 true),				/* pcrel_offset.  */
 
   /* Like R_V850_SDA_, but referring to the GOT table entry for
      the symbol.  */
   HOWTO (R_V850_16_GOT,			/* type.  */
 	 0,				/* rightshift.  */
-	 2,				/* size (0 = byte, 1 = short, 2 = long).  */
+	 4,				/* size.  */
 	 16,				/* bitsize.  */
-	 FALSE,				/* pc_relative.  */
+	 false,				/* pc_relative.  */
 	 0,				/* bitpos.  */
 	 complain_overflow_unsigned,	/* complain_on_overflow.  */
 	 bfd_elf_generic_reloc,		/* special_function.  */
 	 "R_V850_16_GOT",		/* name.  */
-	 FALSE,				/* partial_inplace.  */
+	 false,				/* partial_inplace.  */
 	 0xffff,			/* src_mask.  */
 	 0xffff,			/* dst_mask.  */
-	 FALSE),			/* pcrel_offset.  */
+	 false),			/* pcrel_offset.  */
 
   HOWTO (R_V850_32_GOT,			/* type.  */
 	 0,				/* rightshift.  */
-	 2,				/* size (0 = byte, 1 = short, 2 = long).  */
+	 4,				/* size.  */
 	 32,				/* bitsize.  */
-	 FALSE,				/* pc_relative.  */
+	 false,				/* pc_relative.  */
 	 0,				/* bitpos.  */
 	 complain_overflow_unsigned,	/* complain_on_overflow.  */
 	 bfd_elf_generic_reloc,		/* special_function.  */
 	 "R_V850_32_GOT",		/* name.  */
-	 FALSE,				/* partial_inplace.  */
+	 false,				/* partial_inplace.  */
 	 0xffffffff,			/* src_mask.  */
 	 0xffffffff,			/* dst_mask.  */
-	 FALSE),			/* pcrel_offset.  */
+	 false),			/* pcrel_offset.  */
 
   /* Like R_V850_22_PCREL, but referring to the procedure linkage table
      entry for the symbol.  */
   HOWTO (R_V850_22_PLT,			/* type.  */
 	 1,				/* rightshift.  */
-	 2,				/* size (0 = byte, 1 = short, 2 = long).  */
+	 4,				/* size.  */
 	 22,				/* bitsize.  */
-	 TRUE,				/* pc_relative.  */
+	 true,				/* pc_relative.  */
 	 7,				/* bitpos.  */
 	 complain_overflow_signed,	/* complain_on_overflow.  */
 	 bfd_elf_generic_reloc,		/* special_function.  */
 	 "R_V850_22_PLT",		/* name.  */
-	 FALSE,				/* partial_inplace.  */
+	 false,				/* partial_inplace.  */
 	 0x07ffff80,			/* src_mask.  */
 	 0x07ffff80,			/* dst_mask.  */
-	 TRUE),				/* pcrel_offset.  */
+	 true),				/* pcrel_offset.  */
 
   HOWTO (R_V850_32_PLT,			/* type.  */
 	 1,				/* rightshift.  */
-	 2,				/* size (0 = byte, 1 = short, 2 = long).  */
+	 4,				/* size.  */
 	 32,				/* bitsize.  */
-	 TRUE,				/* pc_relative.  */
+	 true,				/* pc_relative.  */
 	 1,				/* bitpos.  */
 	 complain_overflow_signed,	/* complain_on_overflow.  */
 	 bfd_elf_generic_reloc,		/* special_function.  */
 	 "R_V850_32_PLT",		/* name.  */
-	 FALSE,				/* partial_inplace.  */
+	 false,				/* partial_inplace.  */
 	 0xffffffff,			/* src_mask.  */
 	 0xffffffff,			/* dst_mask.  */
-	 TRUE),				/* pcrel_offset.  */
+	 true),				/* pcrel_offset.  */
 
   /* This is used only by the dynamic linker.  The symbol should exist
      both in the object being run and in some shared library.  The
@@ -1562,121 +1562,121 @@ static reloc_howto_type v850_elf_howto_table[] =
      run has to have the data at some particular address.  */
   HOWTO (R_V850_COPY,			/* type.  */
 	 0,				/* rightshift.  */
-	 2,				/* size (0 = byte, 1 = short, 2 = long).  */
+	 4,				/* size.  */
 	 32,				/* bitsize.  */
-	 FALSE,				/* pc_relative.  */
+	 false,				/* pc_relative.  */
 	 0,				/* bitpos.  */
 	 complain_overflow_bitfield,	/* complain_on_overflow.  */
 	 bfd_elf_generic_reloc,		/* special_function.  */
 	 "R_V850_COPY",			/* name.  */
-	 FALSE,				/* partial_inplace.  */
+	 false,				/* partial_inplace.  */
 	 0xffffffff,			/* src_mask.  */
 	 0xffffffff,			/* dst_mask.  */
-	 FALSE),			/* pcrel_offset.  */
+	 false),			/* pcrel_offset.  */
 
   /* Like R_M32R_24, but used when setting global offset table
      entries.  */
   HOWTO (R_V850_GLOB_DAT,		/* type.  */
 	 0,				/* rightshift.  */
-	 2,				/* size (0 = byte, 1 = short, 2 = long) */
+	 4,				/* size */
 	 32,				/* bitsize.  */
-	 FALSE,				/* pc_relative.  */
+	 false,				/* pc_relative.  */
 	 0,				/* bitpos.  */
 	 complain_overflow_bitfield,	/* complain_on_overflow.  */
 	 bfd_elf_generic_reloc,		/* special_function.  */
 	 "R_V850_GLOB_DAT",		/* name.  */
-	 FALSE,				/* partial_inplace.  */
+	 false,				/* partial_inplace.  */
 	 0xffffffff,			/* src_mask.  */
 	 0xffffffff,			/* dst_mask.  */
-	 FALSE),			/* pcrel_offset.  */
+	 false),			/* pcrel_offset.  */
 
   /* Marks a procedure linkage table entry for a symbol.  */
   HOWTO (R_V850_JMP_SLOT,		/* type.  */
 	 0,				/* rightshift.  */
-	 2,				/* size (0 = byte, 1 = short, 2 = long) */
+	 4,				/* size */
 	 32,				/* bitsize.  */
-	 FALSE,				/* pc_relative.  */
+	 false,				/* pc_relative.  */
 	 0,				/* bitpos.  */
 	 complain_overflow_bitfield,	/* complain_on_overflow.  */
 	 bfd_elf_generic_reloc,		/* special_function.  */
 	 "R_V850_JMP_SLOT",		/* name.  */
-	 FALSE,				/* partial_inplace.  */
+	 false,				/* partial_inplace.  */
 	 0xffffffff,			/* src_mask.  */
 	 0xffffffff,			/* dst_mask.  */
-	 FALSE),			/* pcrel_offset.  */
+	 false),			/* pcrel_offset.  */
 
   /* Used only by the dynamic linker.  When the object is run, this
      longword is set to the load address of the object, plus the
      addend.  */
   HOWTO (R_V850_RELATIVE,		/* type.  */
 	 0,				/* rightshift.  */
-	 2,				/* size (0 = byte, 1 = short, 2 = long) */
+	 4,				/* size */
 	 32,				/* bitsize.  */
-	 FALSE,				/* pc_relative.  */
+	 false,				/* pc_relative.  */
 	 0,				/* bitpos.  */
 	 complain_overflow_bitfield,	/* complain_on_overflow.  */
 	 bfd_elf_generic_reloc,		/* special_function.  */
 	 "R_V850_RELATIVE",		/* name.  */
-	 FALSE,				/* partial_inplace.  */
+	 false,				/* partial_inplace.  */
 	 0xffffffff,			/* src_mask.  */
 	 0xffffffff,			/* dst_mask.  */
-	 FALSE),			/* pcrel_offset.  */
+	 false),			/* pcrel_offset.  */
 
   HOWTO (R_V850_16_GOTOFF,		/* type.  */
 	 0,				/* rightshift.  */
-	 2,				/* size (0 = byte, 1 = short, 2 = long) */
+	 4,				/* size */
 	 16,				/* bitsize.  */
-	 FALSE,				/* pc_relative.  */
+	 false,				/* pc_relative.  */
 	 0,				/* bitpos.  */
 	 complain_overflow_bitfield,	/* complain_on_overflow.  */
 	 bfd_elf_generic_reloc,		/* special_function.  */
 	 "R_V850_16_GOTOFF",		/* name.  */
-	 FALSE,				/* partial_inplace.  */
+	 false,				/* partial_inplace.  */
 	 0xffff,			/* src_mask.  */
 	 0xffff,			/* dst_mask.  */
-	 FALSE),			/* pcrel_offset.  */
+	 false),			/* pcrel_offset.  */
 
   HOWTO (R_V850_32_GOTOFF,		/* type.  */
 	 0,				/* rightshift.  */
-	 2,				/* size (0 = byte, 1 = short, 2 = long) */
+	 4,				/* size */
 	 32,				/* bitsize.  */
-	 FALSE,				/* pc_relative.  */
+	 false,				/* pc_relative.  */
 	 0,				/* bitpos.  */
 	 complain_overflow_bitfield,	/* complain_on_overflow.  */
 	 bfd_elf_generic_reloc,		/* special_function.  */
 	 "R_V850_32_GOTOFF",		/* name.  */
-	 FALSE,				/* partial_inplace.  */
+	 false,				/* partial_inplace.  */
 	 0xffffffff,			/* src_mask.  */
 	 0xffffffff,			/* dst_mask.  */
-	 FALSE),			/* pcrel_offset.  */
+	 false),			/* pcrel_offset.  */
 
   HOWTO (R_V850_CODE,			/* type.  */
 	 0,				/* rightshift.  */
-	 1,				/* size (0 = byte, 1 = short, 2 = long) */
+	 2,				/* size */
 	 0,				/* bitsize.  */
-	 FALSE,				/* pc_relative.  */
+	 false,				/* pc_relative.  */
 	 0,				/* bitpos.  */
 	 complain_overflow_unsigned,	/* complain_on_overflow.  */
 	 v850_elf_ignore_reloc,		/* special_function.  */
 	 "R_V850_CODE",			/* name.  */
-	 FALSE,				/* partial_inplace.  */
+	 false,				/* partial_inplace.  */
 	 0,				/* src_mask.  */
 	 0,				/* dst_mask.  */
-	 TRUE),				/* pcrel_offset.  */
+	 true),				/* pcrel_offset.  */
 
   HOWTO (R_V850_DATA,			/* type.  */
 	 0,				/* rightshift.  */
-	 1,				/* size (0 = byte, 1 = short, 2 = long) */
+	 2,				/* size */
 	 0,				/* bitsize.  */
-	 FALSE,				/* pc_relative.  */
+	 false,				/* pc_relative.  */
 	 0,				/* bitpos.  */
 	 complain_overflow_unsigned,	/* complain_on_overflow.  */
 	 v850_elf_ignore_reloc,		/* special_function.  */
 	 "R_V850_DATA",			/* name.  */
-	 FALSE,				/* partial_inplace.  */
+	 false,				/* partial_inplace.  */
 	 0,				/* src_mask.  */
 	 0,				/* dst_mask.  */
-	 TRUE),				/* pcrel_offset.  */
+	 true),				/* pcrel_offset.  */
 
 };
 
@@ -1692,63 +1692,63 @@ struct v850_elf_reloc_map
 
 static const struct v850_elf_reloc_map v850_elf_reloc_map[] =
 {
-  { BFD_RELOC_NONE,                        R_V850_NONE                   },
-  { BFD_RELOC_V850_9_PCREL,                R_V850_9_PCREL                },
-  { BFD_RELOC_V850_22_PCREL,               R_V850_22_PCREL               },
-  { BFD_RELOC_HI16_S,                      R_V850_HI16_S                 },
-  { BFD_RELOC_HI16,                        R_V850_HI16                   },
-  { BFD_RELOC_LO16,                        R_V850_LO16                   },
-  { BFD_RELOC_32,                          R_V850_ABS32                  },
-  { BFD_RELOC_32_PCREL,                    R_V850_REL32                  },
-  { BFD_RELOC_16,                          R_V850_16                     },
-  { BFD_RELOC_8,                           R_V850_8                      },
-  { BFD_RELOC_V850_SDA_16_16_OFFSET,       R_V850_SDA_16_16_OFFSET       },
-  { BFD_RELOC_V850_SDA_15_16_OFFSET,       R_V850_SDA_15_16_OFFSET       },
-  { BFD_RELOC_V850_ZDA_16_16_OFFSET,       R_V850_ZDA_16_16_OFFSET       },
-  { BFD_RELOC_V850_ZDA_15_16_OFFSET,       R_V850_ZDA_15_16_OFFSET       },
-  { BFD_RELOC_V850_TDA_6_8_OFFSET,         R_V850_TDA_6_8_OFFSET         },
-  { BFD_RELOC_V850_TDA_7_8_OFFSET,         R_V850_TDA_7_8_OFFSET         },
-  { BFD_RELOC_V850_TDA_7_7_OFFSET,         R_V850_TDA_7_7_OFFSET         },
-  { BFD_RELOC_V850_TDA_16_16_OFFSET,       R_V850_TDA_16_16_OFFSET       },
-  { BFD_RELOC_V850_TDA_4_5_OFFSET,         R_V850_TDA_4_5_OFFSET         },
-  { BFD_RELOC_V850_TDA_4_4_OFFSET,         R_V850_TDA_4_4_OFFSET         },
-  { BFD_RELOC_V850_LO16_SPLIT_OFFSET,      R_V850_LO16_SPLIT_OFFSET      },
+  { BFD_RELOC_NONE,			   R_V850_NONE			 },
+  { BFD_RELOC_V850_9_PCREL,		   R_V850_9_PCREL		 },
+  { BFD_RELOC_V850_22_PCREL,		   R_V850_22_PCREL		 },
+  { BFD_RELOC_HI16_S,			   R_V850_HI16_S		 },
+  { BFD_RELOC_HI16,			   R_V850_HI16			 },
+  { BFD_RELOC_LO16,			   R_V850_LO16			 },
+  { BFD_RELOC_32,			   R_V850_ABS32			 },
+  { BFD_RELOC_32_PCREL,			   R_V850_REL32			 },
+  { BFD_RELOC_16,			   R_V850_16			 },
+  { BFD_RELOC_8,			   R_V850_8			 },
+  { BFD_RELOC_V850_SDA_16_16_OFFSET,	   R_V850_SDA_16_16_OFFSET	 },
+  { BFD_RELOC_V850_SDA_15_16_OFFSET,	   R_V850_SDA_15_16_OFFSET	 },
+  { BFD_RELOC_V850_ZDA_16_16_OFFSET,	   R_V850_ZDA_16_16_OFFSET	 },
+  { BFD_RELOC_V850_ZDA_15_16_OFFSET,	   R_V850_ZDA_15_16_OFFSET	 },
+  { BFD_RELOC_V850_TDA_6_8_OFFSET,	   R_V850_TDA_6_8_OFFSET	 },
+  { BFD_RELOC_V850_TDA_7_8_OFFSET,	   R_V850_TDA_7_8_OFFSET	 },
+  { BFD_RELOC_V850_TDA_7_7_OFFSET,	   R_V850_TDA_7_7_OFFSET	 },
+  { BFD_RELOC_V850_TDA_16_16_OFFSET,	   R_V850_TDA_16_16_OFFSET	 },
+  { BFD_RELOC_V850_TDA_4_5_OFFSET,	   R_V850_TDA_4_5_OFFSET	 },
+  { BFD_RELOC_V850_TDA_4_4_OFFSET,	   R_V850_TDA_4_4_OFFSET	 },
+  { BFD_RELOC_V850_LO16_SPLIT_OFFSET,	   R_V850_LO16_SPLIT_OFFSET	 },
   { BFD_RELOC_V850_SDA_16_16_SPLIT_OFFSET, R_V850_SDA_16_16_SPLIT_OFFSET },
   { BFD_RELOC_V850_ZDA_16_16_SPLIT_OFFSET, R_V850_ZDA_16_16_SPLIT_OFFSET },
-  { BFD_RELOC_V850_CALLT_6_7_OFFSET,       R_V850_CALLT_6_7_OFFSET       },
-  { BFD_RELOC_V850_CALLT_16_16_OFFSET,     R_V850_CALLT_16_16_OFFSET     },
-  { BFD_RELOC_VTABLE_INHERIT,              R_V850_GNU_VTINHERIT          },
-  { BFD_RELOC_VTABLE_ENTRY,                R_V850_GNU_VTENTRY            },
-  { BFD_RELOC_V850_LONGCALL,               R_V850_LONGCALL               },
-  { BFD_RELOC_V850_LONGJUMP,               R_V850_LONGJUMP               },
-  { BFD_RELOC_V850_ALIGN,                  R_V850_ALIGN                  },
-  { BFD_RELOC_V850_16_PCREL,               R_V850_16_PCREL               },
-  { BFD_RELOC_V850_17_PCREL,               R_V850_17_PCREL               },
-  { BFD_RELOC_V850_23,                     R_V850_23                     },
-  { BFD_RELOC_V850_32_PCREL,               R_V850_32_PCREL               },
-  { BFD_RELOC_V850_32_ABS,                 R_V850_32_ABS                 },
-  { BFD_RELOC_V850_16_SPLIT_OFFSET,        R_V850_HI16                   },
-  { BFD_RELOC_V850_16_S1,                  R_V850_16_S1                  },
-  { BFD_RELOC_V850_LO16_S1,                R_V850_LO16_S1                },
-  { BFD_RELOC_V850_CALLT_15_16_OFFSET,     R_V850_CALLT_15_16_OFFSET     },
-  { BFD_RELOC_V850_32_GOTPCREL,            R_V850_32_GOTPCREL            },
-  { BFD_RELOC_V850_16_GOT,                 R_V850_16_GOT                 },
-  { BFD_RELOC_V850_32_GOT,                 R_V850_32_GOT                 },
-  { BFD_RELOC_V850_22_PLT_PCREL,           R_V850_22_PLT                 },
-  { BFD_RELOC_V850_32_PLT_PCREL,           R_V850_32_PLT                 },
-  { BFD_RELOC_V850_COPY,                   R_V850_COPY                   },
-  { BFD_RELOC_V850_GLOB_DAT,               R_V850_GLOB_DAT               },
-  { BFD_RELOC_V850_JMP_SLOT,               R_V850_JMP_SLOT               },
-  { BFD_RELOC_V850_RELATIVE,               R_V850_RELATIVE               },
-  { BFD_RELOC_V850_16_GOTOFF,              R_V850_16_GOTOFF              },
-  { BFD_RELOC_V850_32_GOTOFF,              R_V850_32_GOTOFF              },
-  { BFD_RELOC_V850_CODE,                   R_V850_CODE                   },
-  { BFD_RELOC_V850_DATA,                   R_V850_DATA                   },
+  { BFD_RELOC_V850_CALLT_6_7_OFFSET,	   R_V850_CALLT_6_7_OFFSET	 },
+  { BFD_RELOC_V850_CALLT_16_16_OFFSET,	   R_V850_CALLT_16_16_OFFSET	 },
+  { BFD_RELOC_VTABLE_INHERIT,		   R_V850_GNU_VTINHERIT		 },
+  { BFD_RELOC_VTABLE_ENTRY,		   R_V850_GNU_VTENTRY		 },
+  { BFD_RELOC_V850_LONGCALL,		   R_V850_LONGCALL		 },
+  { BFD_RELOC_V850_LONGJUMP,		   R_V850_LONGJUMP		 },
+  { BFD_RELOC_V850_ALIGN,		   R_V850_ALIGN			 },
+  { BFD_RELOC_V850_16_PCREL,		   R_V850_16_PCREL		 },
+  { BFD_RELOC_V850_17_PCREL,		   R_V850_17_PCREL		 },
+  { BFD_RELOC_V850_23,			   R_V850_23			 },
+  { BFD_RELOC_V850_32_PCREL,		   R_V850_32_PCREL		 },
+  { BFD_RELOC_V850_32_ABS,		   R_V850_32_ABS		 },
+  { BFD_RELOC_V850_16_SPLIT_OFFSET,	   R_V850_HI16			 },
+  { BFD_RELOC_V850_16_S1,		   R_V850_16_S1			 },
+  { BFD_RELOC_V850_LO16_S1,		   R_V850_LO16_S1		 },
+  { BFD_RELOC_V850_CALLT_15_16_OFFSET,	   R_V850_CALLT_15_16_OFFSET	 },
+  { BFD_RELOC_V850_32_GOTPCREL,		   R_V850_32_GOTPCREL		 },
+  { BFD_RELOC_V850_16_GOT,		   R_V850_16_GOT		 },
+  { BFD_RELOC_V850_32_GOT,		   R_V850_32_GOT		 },
+  { BFD_RELOC_V850_22_PLT_PCREL,	   R_V850_22_PLT		 },
+  { BFD_RELOC_V850_32_PLT_PCREL,	   R_V850_32_PLT		 },
+  { BFD_RELOC_V850_COPY,		   R_V850_COPY			 },
+  { BFD_RELOC_V850_GLOB_DAT,		   R_V850_GLOB_DAT		 },
+  { BFD_RELOC_V850_JMP_SLOT,		   R_V850_JMP_SLOT		 },
+  { BFD_RELOC_V850_RELATIVE,		   R_V850_RELATIVE		 },
+  { BFD_RELOC_V850_16_GOTOFF,		   R_V850_16_GOTOFF		 },
+  { BFD_RELOC_V850_32_GOTOFF,		   R_V850_32_GOTOFF		 },
+  { BFD_RELOC_V850_CODE,		   R_V850_CODE			 },
+  { BFD_RELOC_V850_DATA,		   R_V850_DATA			 },
 };
 
 #define V800_RELOC(name,sz,bit,shift,complain,pcrel,resolver)		 \
   HOWTO (name, shift, sz, bit, pcrel, 0, complain_overflow_ ## complain, \
-	 bfd_elf_ ## resolver ## _reloc, #name, FALSE, 0, ~0, FALSE)
+	 bfd_elf_ ## resolver ## _reloc, #name, false, 0, ~0, false)
 
 #define V800_EMPTY(name) EMPTY_HOWTO (name - R_V810_NONE)
 
@@ -1761,92 +1761,92 @@ static const struct v850_elf_reloc_map v850_elf_reloc_map[] =
 
 static reloc_howto_type v800_elf_howto_table[] =
 {
-  V800_RELOC (R_V810_NONE,      0,  0, 0, dont,     FALSE, generic),	/* Type = 0x30 */
-  V800_RELOC (R_V810_BYTE,      0,  8, 0, dont,     FALSE, generic),
-  V800_RELOC (R_V810_HWORD,     1, 16, 0, dont,     FALSE, generic),
-  V800_RELOC (R_V810_WORD,      2, 32, 0, dont,     FALSE, generic),
-  V800_RELOC (R_V810_WLO,       1, 16, 0, dont,     FALSE, generic),
-  V800_RELOC (R_V810_WHI,       1, 16, 0, dont,     FALSE, generic),
-  V800_RELOC (R_V810_WHI1,      1, 16, 0, dont,     FALSE, generic),
-  V800_RELOC (R_V810_GPBYTE,    0,  8, 0, dont,     FALSE, v850),
-  V800_RELOC (R_V810_GPHWORD,   1, 16, 0, dont,     FALSE, v850),
-  V800_RELOC (R_V810_GPWORD,    2, 32, 0, dont,     FALSE, v850),
-  V800_RELOC (R_V810_GPWLO,     1, 16, 0, dont,     FALSE, v850),
-  V800_RELOC (R_V810_GPWHI,     1, 16, 0, dont,     FALSE, v850),
-  V800_RELOC (R_V810_GPWHI1,    1, 16, 0, dont,     FALSE, v850),
-  V800_RELOC (R_V850_HWLO,      1, 16, 0, dont,     FALSE, generic),
+  V800_RELOC (R_V810_NONE,      0,  0, 0, dont,     false, generic),	/* Type = 0x30 */
+  V800_RELOC (R_V810_BYTE,      1,  8, 0, dont,     false, generic),
+  V800_RELOC (R_V810_HWORD,     2, 16, 0, dont,     false, generic),
+  V800_RELOC (R_V810_WORD,      4, 32, 0, dont,     false, generic),
+  V800_RELOC (R_V810_WLO,       2, 16, 0, dont,     false, generic),
+  V800_RELOC (R_V810_WHI,       2, 16, 0, dont,     false, generic),
+  V800_RELOC (R_V810_WHI1,      2, 16, 0, dont,     false, generic),
+  V800_RELOC (R_V810_GPBYTE,    1,  8, 0, dont,     false, v850),
+  V800_RELOC (R_V810_GPHWORD,   2, 16, 0, dont,     false, v850),
+  V800_RELOC (R_V810_GPWORD,    4, 32, 0, dont,     false, v850),
+  V800_RELOC (R_V810_GPWLO,     2, 16, 0, dont,     false, v850),
+  V800_RELOC (R_V810_GPWHI,     2, 16, 0, dont,     false, v850),
+  V800_RELOC (R_V810_GPWHI1,    2, 16, 0, dont,     false, v850),
+  V800_RELOC (R_V850_HWLO,      2, 16, 0, dont,     false, generic),
   V800_EMPTY (R_V810_reserved1),
-  V800_RELOC (R_V850_EP7BIT,    0,  7, 0, unsigned, FALSE, v850),
-  V800_RELOC (R_V850_EPHBYTE,   0,  8, 1, unsigned, FALSE, v850),
-  V800_RELOC (R_V850_EPWBYTE,   0,  8, 2, unsigned, FALSE, v850),
-  V800_RELOC (R_V850_REGHWLO,   1, 16, 0, dont,     FALSE, v850),
+  V800_RELOC (R_V850_EP7BIT,    1,  7, 0, unsigned, false, v850),
+  V800_RELOC (R_V850_EPHBYTE,   1,  8, 1, unsigned, false, v850),
+  V800_RELOC (R_V850_EPWBYTE,   1,  8, 2, unsigned, false, v850),
+  V800_RELOC (R_V850_REGHWLO,   2, 16, 0, dont,     false, v850),
   V800_EMPTY (R_V810_reserved2),
-  V800_RELOC (R_V850_GPHWLO,    1, 16, 0, dont,     FALSE, v850),
+  V800_RELOC (R_V850_GPHWLO,    2, 16, 0, dont,     false, v850),
   V800_EMPTY (R_V810_reserved3),
-  V800_RELOC (R_V850_PCR22,     2, 22, 0, signed,   TRUE,  generic),
-  V800_RELOC (R_V850_BLO,       2, 24, 0, dont,     FALSE, v850),
-  V800_RELOC (R_V850_EP4BIT,    0,  4, 0, unsigned, FALSE, v850),
-  V800_RELOC (R_V850_EP5BIT,    0,  5, 0, unsigned, FALSE, v850),
-  V800_RELOC (R_V850_REGBLO,    2, 24, 0, dont,     FALSE, v850),
-  V800_RELOC (R_V850_GPBLO,     2, 24, 0, dont,     FALSE, v850),
-  V800_RELOC (R_V810_WLO_1,     1, 16, 0, dont,     FALSE, v850),
-  V800_RELOC (R_V810_GPWLO_1,   1, 16, 0, signed,   FALSE, v850),
-  V800_RELOC (R_V850_BLO_1,     2, 16, 0, signed,   FALSE, v850),
-  V800_RELOC (R_V850_HWLO_1,    1, 16, 0, signed,   FALSE, v850),
+  V800_RELOC (R_V850_PCR22,     4, 22, 0, signed,   true,  generic),
+  V800_RELOC (R_V850_BLO,       4, 24, 0, dont,     false, v850),
+  V800_RELOC (R_V850_EP4BIT,    1,  4, 0, unsigned, false, v850),
+  V800_RELOC (R_V850_EP5BIT,    1,  5, 0, unsigned, false, v850),
+  V800_RELOC (R_V850_REGBLO,    4, 24, 0, dont,     false, v850),
+  V800_RELOC (R_V850_GPBLO,     4, 24, 0, dont,     false, v850),
+  V800_RELOC (R_V810_WLO_1,     2, 16, 0, dont,     false, v850),
+  V800_RELOC (R_V810_GPWLO_1,   2, 16, 0, signed,   false, v850),
+  V800_RELOC (R_V850_BLO_1,     4, 16, 0, signed,   false, v850),
+  V800_RELOC (R_V850_HWLO_1,    2, 16, 0, signed,   false, v850),
   V800_EMPTY  (R_V810_reserved4),
-  V800_RELOC (R_V850_GPBLO_1,   2, 16, 1, signed,   FALSE, v850),
-  V800_RELOC (R_V850_GPHWLO_1,  1, 16, 1, signed,   FALSE, v850),
+  V800_RELOC (R_V850_GPBLO_1,   4, 16, 1, signed,   false, v850),
+  V800_RELOC (R_V850_GPHWLO_1,  2, 16, 1, signed,   false, v850),
   V800_EMPTY (R_V810_reserved5),
-  V800_RELOC (R_V850_EPBLO,     2, 16, 1, signed,   FALSE, v850),
-  V800_RELOC (R_V850_EPHWLO,    1, 16, 1, signed,   FALSE, v850),
+  V800_RELOC (R_V850_EPBLO,     4, 16, 1, signed,   false, v850),
+  V800_RELOC (R_V850_EPHWLO,    2, 16, 1, signed,   false, v850),
   V800_EMPTY (R_V810_reserved6),
-  V800_RELOC (R_V850_EPWLO_N,   1, 16, 1, signed,   FALSE, v850),
-  V800_RELOC (R_V850_PC32,      2, 32, 1, signed,   TRUE,  v850),
-  V800_RELOC (R_V850_W23BIT,    2, 23, 1, signed,   FALSE, v850),
-  V800_RELOC (R_V850_GPW23BIT,  2, 23, 1, signed,   FALSE, v850),
-  V800_RELOC (R_V850_EPW23BIT,  2, 23, 1, signed,   FALSE, v850),
-  V800_RELOC (R_V850_B23BIT,    2, 23, 1, signed,   FALSE, v850),
-  V800_RELOC (R_V850_GPB23BIT,  2, 23, 1, signed,   FALSE, v850),
-  V800_RELOC (R_V850_EPB23BIT,  2, 23, 1, signed,   FALSE, v850),
-  V800_RELOC (R_V850_PC16U,     1, 16, 1, unsigned, TRUE,  generic),
-  V800_RELOC (R_V850_PC17,      2, 17, 1, signed,   TRUE,  generic),
-  V800_RELOC (R_V850_DW8,       2,  8, 2, signed,   FALSE, v850),
-  V800_RELOC (R_V850_GPDW8,     2,  8, 2, signed,   FALSE, v850),
-  V800_RELOC (R_V850_EPDW8,     2,  8, 2, signed,   FALSE, v850),
-  V800_RELOC (R_V850_PC9,       1,  9, 3, signed,   TRUE,  v850),
-  V800_RELOC (R_V810_REGBYTE,   0,  8, 0, dont,     FALSE, v850),
-  V800_RELOC (R_V810_REGHWORD,  1, 16, 0, dont,     FALSE, v850),
-  V800_RELOC (R_V810_REGWORD,   2, 32, 0, dont,     FALSE, v850),
-  V800_RELOC (R_V810_REGWLO,    1, 16, 0, dont,     FALSE, v850),
-  V800_RELOC (R_V810_REGWHI,    1, 16, 0, dont,     FALSE, v850),
-  V800_RELOC (R_V810_REGWHI1,   1, 16, 0, dont,     FALSE, v850),
-  V800_RELOC (R_V850_REGW23BIT, 2, 23, 1, signed,   FALSE, v850),
-  V800_RELOC (R_V850_REGB23BIT, 2, 23, 1, signed,   FALSE, v850),
-  V800_RELOC (R_V850_REGDW8,    2,  8, 2, signed,   FALSE, v850),
-  V800_RELOC (R_V810_EPBYTE,    0,  8, 0, dont,     FALSE, v850),
-  V800_RELOC (R_V810_EPHWORD,   1, 16, 0, dont,     FALSE, v850),
-  V800_RELOC (R_V810_EPWORD,    2, 32, 0, dont,     FALSE, v850),
-  V800_RELOC (R_V850_WLO23,     2, 32, 1, dont,     FALSE, v850),
-  V800_RELOC (R_V850_WORD_E,    2, 32, 1, dont,     FALSE, v850),
-  V800_RELOC (R_V850_REGWORD_E, 2, 32, 1, dont,     FALSE, v850),
-  V800_RELOC (R_V850_WORD,      2, 32, 0, dont,     FALSE, v850),
-  V800_RELOC (R_V850_GPWORD,    2, 32, 0, dont,     FALSE, v850),
-  V800_RELOC (R_V850_REGWORD,   2, 32, 0, dont,     FALSE, v850),
-  V800_RELOC (R_V850_EPWORD,    2, 32, 0, dont,     FALSE, v850),
-  V800_RELOC (R_V810_TPBYTE,    0,  8, 0, dont,     FALSE, v850),
-  V800_RELOC (R_V810_TPHWORD,   1, 16, 0, dont,     FALSE, v850),
-  V800_RELOC (R_V810_TPWORD,    2, 32, 0, dont,     FALSE, v850),
-  V800_RELOC (R_V810_TPWLO,     1, 16, 0, dont,     FALSE, v850),
-  V800_RELOC (R_V810_TPWHI,     1, 16, 0, dont,     FALSE, v850),
-  V800_RELOC (R_V810_TPWHI1,    1, 16, 0, dont,     FALSE, v850),
-  V800_RELOC (R_V850_TPHWLO,    1, 16, 1, dont,     FALSE, v850),
-  V800_RELOC (R_V850_TPBLO,     2, 24, 0, dont,     FALSE, v850),
-  V800_RELOC (R_V810_TPWLO_1,   1, 16, 0, signed,   FALSE, v850),
-  V800_RELOC (R_V850_TPBLO_1,   2, 16, 0, signed,   FALSE, v850),
-  V800_RELOC (R_V850_TPHWLO_1,  1, 16, 0, signed,   FALSE, v850),
-  V800_RELOC (R_V850_TP23BIT,   2, 23, 0, signed,   FALSE, v850),
-  V800_RELOC (R_V850_TPW23BIT,  2, 23, 0, signed,   FALSE, v850),
-  V800_RELOC (R_V850_TPDW8,     2,  8, 0, signed,   FALSE, v850)
+  V800_RELOC (R_V850_EPWLO_N,   2, 16, 1, signed,   false, v850),
+  V800_RELOC (R_V850_PC32,      4, 32, 1, signed,   true,  v850),
+  V800_RELOC (R_V850_W23BIT,    4, 23, 1, signed,   false, v850),
+  V800_RELOC (R_V850_GPW23BIT,  4, 23, 1, signed,   false, v850),
+  V800_RELOC (R_V850_EPW23BIT,  4, 23, 1, signed,   false, v850),
+  V800_RELOC (R_V850_B23BIT,    4, 23, 1, signed,   false, v850),
+  V800_RELOC (R_V850_GPB23BIT,  4, 23, 1, signed,   false, v850),
+  V800_RELOC (R_V850_EPB23BIT,  4, 23, 1, signed,   false, v850),
+  V800_RELOC (R_V850_PC16U,     2, 16, 1, unsigned, true,  generic),
+  V800_RELOC (R_V850_PC17,      4, 17, 1, signed,   true,  generic),
+  V800_RELOC (R_V850_DW8,       4,  8, 2, signed,   false, v850),
+  V800_RELOC (R_V850_GPDW8,     4,  8, 2, signed,   false, v850),
+  V800_RELOC (R_V850_EPDW8,     4,  8, 2, signed,   false, v850),
+  V800_RELOC (R_V850_PC9,       2,  9, 3, signed,   true,  v850),
+  V800_RELOC (R_V810_REGBYTE,   1,  8, 0, dont,     false, v850),
+  V800_RELOC (R_V810_REGHWORD,  2, 16, 0, dont,     false, v850),
+  V800_RELOC (R_V810_REGWORD,   4, 32, 0, dont,     false, v850),
+  V800_RELOC (R_V810_REGWLO,    2, 16, 0, dont,     false, v850),
+  V800_RELOC (R_V810_REGWHI,    2, 16, 0, dont,     false, v850),
+  V800_RELOC (R_V810_REGWHI1,   2, 16, 0, dont,     false, v850),
+  V800_RELOC (R_V850_REGW23BIT, 4, 23, 1, signed,   false, v850),
+  V800_RELOC (R_V850_REGB23BIT, 4, 23, 1, signed,   false, v850),
+  V800_RELOC (R_V850_REGDW8,    4,  8, 2, signed,   false, v850),
+  V800_RELOC (R_V810_EPBYTE,    1,  8, 0, dont,     false, v850),
+  V800_RELOC (R_V810_EPHWORD,   2, 16, 0, dont,     false, v850),
+  V800_RELOC (R_V810_EPWORD,    4, 32, 0, dont,     false, v850),
+  V800_RELOC (R_V850_WLO23,     4, 32, 1, dont,     false, v850),
+  V800_RELOC (R_V850_WORD_E,    4, 32, 1, dont,     false, v850),
+  V800_RELOC (R_V850_REGWORD_E, 4, 32, 1, dont,     false, v850),
+  V800_RELOC (R_V850_WORD,      4, 32, 0, dont,     false, v850),
+  V800_RELOC (R_V850_GPWORD,    4, 32, 0, dont,     false, v850),
+  V800_RELOC (R_V850_REGWORD,   4, 32, 0, dont,     false, v850),
+  V800_RELOC (R_V850_EPWORD,    4, 32, 0, dont,     false, v850),
+  V800_RELOC (R_V810_TPBYTE,    1,  8, 0, dont,     false, v850),
+  V800_RELOC (R_V810_TPHWORD,   2, 16, 0, dont,     false, v850),
+  V800_RELOC (R_V810_TPWORD,    4, 32, 0, dont,     false, v850),
+  V800_RELOC (R_V810_TPWLO,     2, 16, 0, dont,     false, v850),
+  V800_RELOC (R_V810_TPWHI,     2, 16, 0, dont,     false, v850),
+  V800_RELOC (R_V810_TPWHI1,    2, 16, 0, dont,     false, v850),
+  V800_RELOC (R_V850_TPHWLO,    2, 16, 1, dont,     false, v850),
+  V800_RELOC (R_V850_TPBLO,     4, 24, 0, dont,     false, v850),
+  V800_RELOC (R_V810_TPWLO_1,   2, 16, 0, signed,   false, v850),
+  V800_RELOC (R_V850_TPBLO_1,   4, 16, 0, signed,   false, v850),
+  V800_RELOC (R_V850_TPHWLO_1,  2, 16, 0, signed,   false, v850),
+  V800_RELOC (R_V850_TP23BIT,   4, 23, 0, signed,   false, v850),
+  V800_RELOC (R_V850_TPW23BIT,  4, 23, 0, signed,   false, v850),
+  V800_RELOC (R_V850_TPDW8,     4,  8, 0, signed,   false, v850)
 };
 
 /* Map a bfd relocation into the appropriate howto structure.  */
@@ -1888,40 +1888,56 @@ v850_elf_reloc_name_lookup (bfd *abfd ATTRIBUTE_UNUSED,
 
 /* Set the howto pointer for an V850 ELF reloc.  */
 
-static void
-v850_elf_info_to_howto_rel (bfd *abfd ATTRIBUTE_UNUSED,
+static bool
+v850_elf_info_to_howto_rel (bfd *abfd,
 			    arelent *cache_ptr,
 			    Elf_Internal_Rela *dst)
 {
   unsigned int r_type;
 
   r_type = ELF32_R_TYPE (dst->r_info);
-  BFD_ASSERT (r_type < (unsigned int) R_V850_max);
+  if (r_type >= (unsigned int) R_V850_max)
+    {
+      /* xgettext:c-format */
+      _bfd_error_handler (_("%pB: unsupported relocation type %#x"),
+			  abfd, r_type);
+      bfd_set_error (bfd_error_bad_value);
+      return false;
+    }
   cache_ptr->howto = &v850_elf_howto_table[r_type];
+  return true;
 }
 
 /* Set the howto pointer for a V850 ELF reloc (type RELA).  */
 
-static void
-v850_elf_info_to_howto_rela (bfd *abfd ATTRIBUTE_UNUSED,
+static bool
+v850_elf_info_to_howto_rela (bfd *abfd,
 			     arelent * cache_ptr,
 			     Elf_Internal_Rela *dst)
 {
   unsigned int r_type;
 
   r_type = ELF32_R_TYPE (dst->r_info);
-  BFD_ASSERT (r_type < (unsigned int) R_V850_max);
+  if (r_type >= (unsigned int) R_V850_max)
+    {
+      /* xgettext:c-format */
+      _bfd_error_handler (_("%pB: unsupported relocation type %#x"),
+			  abfd, r_type);
+      bfd_set_error (bfd_error_bad_value);
+      return false;
+    }
   cache_ptr->howto = &v850_elf_howto_table[r_type];
+  return true;
 }
 
-static bfd_boolean
+static bool
 v850_elf_is_local_label_name (bfd *abfd ATTRIBUTE_UNUSED, const char *name)
 {
   return (   (name[0] == '.' && (name[1] == 'L' || name[1] == '.'))
 	  || (name[0] == '_' &&  name[1] == '.' && name[2] == 'L' && name[3] == '_'));
 }
 
-static bfd_boolean
+static bool
 v850_elf_is_target_special_symbol (bfd *abfd, asymbol *sym)
 {
   return v850_elf_is_local_label_name (abfd, sym->name);
@@ -2041,14 +2057,14 @@ v850_elf_final_link_relocate (reloc_howto_type *howto,
     case R_V850_SDA_16_16_SPLIT_OFFSET:
     case R_V810_GPWLO_1:
       {
-	unsigned long                gp;
+	unsigned long		     gp;
 	struct bfd_link_hash_entry * h;
 
 	if (sym_sec == NULL)
 	  return bfd_reloc_undefined;
 
 	/* Get the value of __gp.  */
-	h = bfd_link_hash_lookup (info->hash, "__gp", FALSE, FALSE, TRUE);
+	h = bfd_link_hash_lookup (info->hash, "__gp", false, false, true);
 	if (h == NULL
 	    || h->type != bfd_link_hash_defined)
 	  return bfd_reloc_gp_not_found;
@@ -2069,11 +2085,11 @@ v850_elf_final_link_relocate (reloc_howto_type *howto,
     case R_V850_TDA_6_8_OFFSET:
     case R_V850_TDA_16_16_OFFSET:
       {
-	unsigned long                ep;
+	unsigned long		     ep;
 	struct bfd_link_hash_entry * h;
 
 	/* Get the value of __ep.  */
-	h = bfd_link_hash_lookup (info->hash, "__ep", FALSE, FALSE, TRUE);
+	h = bfd_link_hash_lookup (info->hash, "__ep", false, false, true);
 	if (h == NULL
 	    || h->type != bfd_link_hash_defined)
 	  return bfd_reloc_ep_not_found;
@@ -2088,11 +2104,11 @@ v850_elf_final_link_relocate (reloc_howto_type *howto,
 
     case R_V850_CALLT_6_7_OFFSET:
       {
-	unsigned long                ctbp;
+	unsigned long		     ctbp;
 	struct bfd_link_hash_entry * h;
 
 	/* Get the value of __ctbp.  */
-	h = bfd_link_hash_lookup (info->hash, "__ctbp", FALSE, FALSE, TRUE);
+	h = bfd_link_hash_lookup (info->hash, "__ctbp", false, false, true);
 	if (h == NULL
 	    || h->type != bfd_link_hash_defined)
 	  return bfd_reloc_ctbp_not_found;
@@ -2107,14 +2123,14 @@ v850_elf_final_link_relocate (reloc_howto_type *howto,
     case R_V850_CALLT_15_16_OFFSET:
     case R_V850_CALLT_16_16_OFFSET:
       {
-	unsigned long                ctbp;
+	unsigned long		     ctbp;
 	struct bfd_link_hash_entry * h;
 
 	if (sym_sec == NULL)
 	  return bfd_reloc_undefined;
 
 	/* Get the value of __ctbp.  */
-	h = bfd_link_hash_lookup (info->hash, "__ctbp", FALSE, FALSE, TRUE);
+	h = bfd_link_hash_lookup (info->hash, "__ctbp", false, false, true);
 	if (h == NULL
 	    || h->type != bfd_link_hash_defined)
 	  return bfd_reloc_ctbp_not_found;
@@ -2139,7 +2155,8 @@ v850_elf_final_link_relocate (reloc_howto_type *howto,
 
     default:
 #ifdef DEBUG
-      fprintf (stderr, "reloc number %d not recognised\n", r_type);
+      _bfd_error_handler ("%pB: unsupported relocation type %#x",
+	       input_bfd, r_type);
 #endif
       return bfd_reloc_notsupported;
     }
@@ -2150,7 +2167,7 @@ v850_elf_final_link_relocate (reloc_howto_type *howto,
 
 /* Relocate an V850 ELF section.  */
 
-static bfd_boolean
+static int
 v850_elf_relocate_section (bfd *output_bfd,
 			   struct bfd_link_info *info,
 			   bfd *input_bfd,
@@ -2190,8 +2207,8 @@ v850_elf_relocate_section (bfd *output_bfd,
       r_type   = ELF32_R_TYPE (rel->r_info);
 
       if (r_type == R_V850_GNU_VTENTRY
-          || r_type == R_V850_GNU_VTINHERIT)
-        continue;
+	  || r_type == R_V850_GNU_VTINHERIT)
+	continue;
 
       if (bfd_get_arch (input_bfd) == bfd_arch_v850_rh850)
 	howto = v800_elf_howto_table + (r_type - R_V810_NONE);
@@ -2211,7 +2228,7 @@ v850_elf_relocate_section (bfd *output_bfd,
 	}
       else
 	{
-	  bfd_boolean unresolved_reloc, warned;
+	  bool unresolved_reloc, warned, ignored;
 
 	  /* Note - this check is delayed until now as it is possible and
 	     valid to have a file without any symbols but with relocs that
@@ -2222,20 +2239,20 @@ v850_elf_relocate_section (bfd *output_bfd,
 		(info, "no hash table available",
 		 NULL, input_bfd, input_section, (bfd_vma) 0);
 
-	      return FALSE;
+	      return false;
 	    }
 
 	  RELOC_FOR_GLOBAL_SYMBOL (info, input_bfd, input_section, rel,
 				   r_symndx, symtab_hdr, sym_hashes,
 				   h, sec, relocation,
-				   unresolved_reloc, warned);
+				   unresolved_reloc, warned, ignored);
 	}
 
       if (sec != NULL && discarded_section (sec))
 	RELOC_AGAINST_DISCARDED_SECTION (info, input_bfd, input_section,
 					 rel, 1, relend, howto, 0, contents);
 
-      if (info->relocatable)
+      if (bfd_link_relocatable (info))
 	continue;
 
       /* FIXME: We should use the addend, but the COFF relocations don't.  */
@@ -2257,24 +2274,20 @@ v850_elf_relocate_section (bfd *output_bfd,
 	      name = (bfd_elf_string_from_elf_section
 		      (input_bfd, symtab_hdr->sh_link, sym->st_name));
 	      if (name == NULL || *name == '\0')
-		name = bfd_section_name (input_bfd, sec);
+		name = bfd_section_name (sec);
 	    }
 
 	  switch ((int) r)
 	    {
 	    case bfd_reloc_overflow:
-	      if (! ((*info->callbacks->reloc_overflow)
-		     (info, (h ? &h->root : NULL), name, howto->name,
-		      (bfd_vma) 0, input_bfd, input_section,
-		      rel->r_offset)))
-		return FALSE;
+	      (*info->callbacks->reloc_overflow)
+		(info, (h ? &h->root : NULL), name, howto->name,
+		 (bfd_vma) 0, input_bfd, input_section, rel->r_offset);
 	      break;
 
 	    case bfd_reloc_undefined:
-	      if (! ((*info->callbacks->undefined_symbol)
-		     (info, name, input_bfd, input_section,
-		      rel->r_offset, TRUE)))
-		return FALSE;
+	      (*info->callbacks->undefined_symbol)
+		(info, name, input_bfd, input_section, rel->r_offset, true);
 	      break;
 
 	    case bfd_reloc_outofrange:
@@ -2306,16 +2319,14 @@ v850_elf_relocate_section (bfd *output_bfd,
 	      /* fall through */
 
 	    common_error:
-	      if (!((*info->callbacks->warning)
-		    (info, msg, name, input_bfd, input_section,
-		     rel->r_offset)))
-		return FALSE;
+	      (*info->callbacks->warning) (info, msg, name, input_bfd,
+					   input_section, rel->r_offset);
 	      break;
 	    }
 	}
     }
 
-  return TRUE;
+  return true;
 }
 
 static asection *
@@ -2336,9 +2347,345 @@ v850_elf_gc_mark_hook (asection *sec,
   return _bfd_elf_gc_mark_hook (sec, info, rel, h, sym);
 }
 
+static void
+v850_set_note (bfd * abfd, asection * s, enum v850_notes note, unsigned int val)
+{
+  bfd_byte * data = s->contents + ((note - 1) * SIZEOF_V850_NOTE);
+
+  bfd_put_32 (abfd, 4, data + 0);
+  bfd_put_32 (abfd, 4, data + 4);
+  bfd_put_32 (abfd, note, data + 8);
+  memcpy (data + 12, V850_NOTE_NAME, 4);
+  bfd_put_32 (abfd, val, data + 16);
+}
+
+/* Create the note section if not already present.  This is done early so
+   that the linker maps the sections to the right place in the output.  */
+
+static asection *
+v850_elf_make_note_section (bfd * abfd)
+{
+  asection *s;
+  bfd_byte *data;
+  flagword flags;
+  enum v850_notes id;
+
+  /* Make the note section.  */
+  flags = SEC_READONLY | SEC_HAS_CONTENTS | SEC_IN_MEMORY | SEC_MERGE;
+
+  s = bfd_make_section_anyway_with_flags (abfd, V850_NOTE_SECNAME, flags);
+  if (s == NULL)
+    return NULL;
+
+  if (!bfd_set_section_alignment (s, 2))
+    return NULL;
+
+  /* Allocate space for all known notes.  */
+  if (!bfd_set_section_size (s, NUM_V850_NOTES * SIZEOF_V850_NOTE))
+    return NULL;
+
+  data = bfd_zalloc (abfd, NUM_V850_NOTES * SIZEOF_V850_NOTE);
+  if (data == NULL)
+    return NULL;
+
+  s->contents = data;
+
+  /* Provide default (= uninitilaised) values for all of the notes.  */
+  for (id = V850_NOTE_ALIGNMENT; id <= NUM_V850_NOTES; id++)
+    v850_set_note (abfd, s, id,  0);
+
+  return s;
+}
+
+/* Create the note section if not already present.  This is done early so
+   that the linker maps the sections to the right place in the output.  */
+
+bool
+v850_elf_create_sections (struct bfd_link_info * info)
+{
+  bfd * ibfd;
+
+  /* If we already have a note section, do not make another.  */
+  for (ibfd = info->input_bfds; ibfd != NULL; ibfd = ibfd->link.next)
+    if (bfd_get_section_by_name (ibfd, V850_NOTE_SECNAME) != NULL)
+      return true;
+
+  return v850_elf_make_note_section (info->input_bfds) != NULL;
+}
+
+bool
+v850_elf_set_note (bfd * abfd, unsigned int note, unsigned int val)
+{
+  asection * notes = bfd_get_section_by_name (abfd, V850_NOTE_SECNAME);
+
+  if (val > 2)
+    /* At the moment, no known note has a value over 2.  */
+    return false;
+
+  if (notes == NULL)
+    notes = v850_elf_make_note_section (abfd);
+  if (notes == NULL)
+    return false;
+
+  v850_set_note (abfd, notes, note, val);
+  return true;
+}
+
+/* Copy a v850 note section from one object module to another.  */
+
+static void
+v850_elf_copy_notes (bfd *ibfd, bfd *obfd)
+{
+  asection * onotes;
+  asection * inotes;
+
+  /* If the output bfd does not have a note section, then
+     skip the merge.  The normal input to output section
+     copying will take care of everythng for us.  */
+  if ((onotes = bfd_get_section_by_name (obfd, V850_NOTE_SECNAME)) == NULL)
+    return;
+
+  if ((inotes = bfd_get_section_by_name (ibfd, V850_NOTE_SECNAME)) == NULL)
+    return;
+
+  if (bfd_section_size (inotes) == bfd_section_size (onotes))
+    {
+      bfd_byte * icont;
+      bfd_byte * ocont;
+
+      if ((icont = elf_section_data (inotes)->this_hdr.contents) == NULL)
+	BFD_ASSERT (bfd_malloc_and_get_section (ibfd, inotes, & icont));
+
+      if ((ocont = elf_section_data (onotes)->this_hdr.contents) == NULL)
+	/* If the output is being stripped then it is possible for
+	   the notes section to disappear.  In this case do nothing.  */
+	return;
+
+      /* Copy/overwrite notes from the input to the output.  */
+      memcpy (ocont, icont, bfd_section_size (onotes));
+    }
+}
+
+/* Copy backend specific data from one object module to another.  */
+
+static bool
+v850_elf_copy_private_bfd_data (bfd *ibfd, bfd *obfd)
+{
+  v850_elf_copy_notes (ibfd, obfd);
+  return _bfd_elf_copy_private_bfd_data (ibfd, obfd);
+}
+#define bfd_elf32_bfd_copy_private_bfd_data	v850_elf_copy_private_bfd_data
+
+static bool
+v850_elf_merge_notes (bfd * ibfd, bfd *obfd)
+{
+  asection * onotes;
+  asection * inotes;
+  bool result = true;
+
+  /* If the output bfd does not have a note section, then
+     skip the merge.  The normal input to output section
+     copying will take care of everythng for us.  */
+  if ((onotes = bfd_get_section_by_name (obfd, V850_NOTE_SECNAME)) == NULL)
+    return true;
+
+  if ((inotes = bfd_get_section_by_name (ibfd, V850_NOTE_SECNAME)) != NULL)
+    {
+      enum v850_notes id;
+      bfd_byte * icont;
+      bfd_byte * ocont;
+
+      BFD_ASSERT (bfd_section_size (inotes) == bfd_section_size (onotes));
+
+      if ((icont = elf_section_data (inotes)->this_hdr.contents) == NULL)
+	BFD_ASSERT (bfd_malloc_and_get_section (ibfd, inotes, & icont));
+
+      if ((ocont = elf_section_data (onotes)->this_hdr.contents) == NULL)
+	BFD_ASSERT (bfd_malloc_and_get_section (obfd, onotes, & ocont));
+
+      for (id = V850_NOTE_ALIGNMENT; id <= NUM_V850_NOTES; id++)
+	{
+	  unsigned int ival;
+	  unsigned int oval;
+	  bfd_byte * idata = icont + ((id - 1) * SIZEOF_V850_NOTE) + 16;
+	  bfd_byte * odata = ocont + ((id - 1) * SIZEOF_V850_NOTE) + 16;
+
+	  ival = bfd_get_32 (ibfd, idata);
+	  oval = bfd_get_32 (obfd, odata);
+
+	  if (ival == 0 || ival == oval)
+	    continue;
+
+	  if (oval == 0)
+	    {
+	      bfd_put_32 (obfd, ival, odata);
+	      v850_set_note (obfd, onotes, id, ival);
+	      continue;
+	    }
+
+	  /* We have a mismatch.  The ABI defines how to handle
+	     this siutation on a per note type basis.  */
+	  switch (id)
+	    {
+	    case V850_NOTE_ALIGNMENT:
+	      if (oval == EF_RH850_DATA_ALIGN4)
+		{
+		  _bfd_error_handler
+		    /* xgettext:c-format */
+		    (_("error: %pB needs 8-byte alignment but %pB is set for 4-byte alignment"),
+				      ibfd, obfd);
+		  result = false;
+		}
+	      else
+		/* ibfd uses 4-byte alignment, obfd uses 8-byte alignment.
+		   Leave the obfd alignment as it is.  */
+		BFD_ASSERT (oval == EF_RH850_DATA_ALIGN8);
+
+	      break;
+
+	    case V850_NOTE_DATA_SIZE:
+	      if (oval == EF_RH850_DOUBLE32)
+		{
+		  _bfd_error_handler
+		    /* xgettext:c-format */
+		    (_("error: %pB uses 64-bit doubles but "
+		       "%pB uses 32-bit doubles"), ibfd, obfd);
+		  result = false;
+		}
+	      else
+		/* ibfd uses 32-bit doubles, obfd uses 64-bit doubles.
+		   This is acceptable.  Honest, that is what the ABI says.  */
+		BFD_ASSERT (oval == EF_RH850_DOUBLE64);
+	      break;
+
+	    case V850_NOTE_FPU_INFO:
+	      if (oval == EF_RH850_FPU20)
+		{
+		  _bfd_error_handler
+		    /* xgettext:c-format */
+		    (_("error: %pB uses FPU-3.0 but %pB only supports FPU-2.0"),
+		     ibfd, obfd);
+		  result = false;
+		}
+	      else
+		/* ibfd uses FPU-2.0, obfd uses FPU-3.0.  Leave obfd as it is.  */
+		BFD_ASSERT (oval == EF_RH850_FPU30);
+
+	      break;
+
+	    default:
+	      /* None of the other conflicts matter.
+		 Stick with the current output values.  */
+	      break;
+	    }
+	}
+
+      /* FIXME:  We should also check for conflicts between the notes
+	 and the EF flags in the ELF header.  */
+    }
+
+  return result;
+}
+
+static void
+print_v850_note (bfd * abfd, FILE * file, bfd_byte * data, enum v850_notes id)
+{
+  unsigned int value = bfd_get_32 (abfd, data + ((id - 1) * SIZEOF_V850_NOTE) + 16);
+
+  switch (id)
+    {
+    case V850_NOTE_ALIGNMENT:
+      fprintf (file, _(" alignment of 8-byte entities: "));
+      switch (value)
+	{
+	case EF_RH850_DATA_ALIGN4: fprintf (file, _("4-byte")); break;
+	case EF_RH850_DATA_ALIGN8: fprintf (file, _("8-byte")); break;
+	case 0:  fprintf (file, _("not set")); break;
+	default: fprintf (file, _("unknown: %x"), value); break;
+	}
+      fputc ('\n', file);
+      break;
+
+    case V850_NOTE_DATA_SIZE:
+      fprintf (file, _(" size of doubles: "));
+      switch (value)
+	{
+	case EF_RH850_DOUBLE32: fprintf (file, _("4-bytes")); break;
+	case EF_RH850_DOUBLE64: fprintf (file, _("8-bytes")); break;
+	case 0:  fprintf (file, _("not set")); break;
+	default: fprintf (file, _("unknown: %x"), value); break;
+	}
+      fputc ('\n', file);
+      break;
+
+    case V850_NOTE_FPU_INFO:
+      fprintf (file, _(" FPU support required: "));
+      switch (value)
+	{
+	case EF_RH850_FPU20: fprintf (file, _("FPU-2.0")); break;
+	case EF_RH850_FPU30: fprintf (file, _("FPU-3.0")); break;
+	case 0:  fprintf (file, _("none")); break;
+	default: fprintf (file, _("unknown: %x"), value); break;
+	}
+      fputc ('\n', file);
+      break;
+
+    case V850_NOTE_SIMD_INFO:
+      fprintf (file, _("SIMD use: "));
+      switch (value)
+	{
+	case EF_RH850_SIMD: fprintf (file, _("yes")); break;
+	case 0:  fprintf (file, _("no")); break;
+	default: fprintf (file, _("unknown: %x"), value); break;
+	}
+      fputc ('\n', file);
+      break;
+
+    case V850_NOTE_CACHE_INFO:
+      fprintf (file, _("CACHE use: "));
+      switch (value)
+	{
+	case EF_RH850_CACHE: fprintf (file, _("yes")); break;
+	case 0:  fprintf (file, _("no")); break;
+	default: fprintf (file, _("unknown: %x"), value); break;
+	}
+      fputc ('\n', file);
+      break;
+
+    case V850_NOTE_MMU_INFO:
+      fprintf (file, _("MMU use: "));
+      switch (value)
+	{
+	case EF_RH850_MMU: fprintf (file, _("yes")); break;
+	case 0:  fprintf (file, _("no")); break;
+	default: fprintf (file, _("unknown: %x"), value); break;
+	}
+      fputc ('\n', file);
+      break;
+
+    default:
+      BFD_ASSERT (0);
+    }
+}
+
+static void
+v850_elf_print_notes (bfd * abfd, FILE * file)
+{
+  asection * notes = bfd_get_section_by_name (abfd, V850_NOTE_SECNAME);
+  enum v850_notes id;
+
+  if (notes == NULL || notes->contents == NULL)
+    return;
+
+  BFD_ASSERT (bfd_section_size (notes) == NUM_V850_NOTES * SIZEOF_V850_NOTE);
+
+  for (id = V850_NOTE_ALIGNMENT; id <= NUM_V850_NOTES; id++)
+    print_v850_note (abfd, file, notes->contents, id);
+}
+
 /* Set the right machine number and architecture.  */
 
-static bfd_boolean
+static bool
 v850_elf_object_p (bfd *abfd)
 {
   enum bfd_architecture arch;
@@ -2368,7 +2715,7 @@ v850_elf_object_p (bfd *abfd)
       break;
 
     default:
-      return FALSE;
+      return false;
     }
 
   return bfd_default_set_arch_mach (abfd, arch, mach);
@@ -2376,9 +2723,8 @@ v850_elf_object_p (bfd *abfd)
 
 /* Store the machine number in the flags field.  */
 
-static void
-v850_elf_final_write_processing (bfd *abfd,
-				 bfd_boolean linker ATTRIBUTE_UNUSED)
+static bool
+v850_elf_final_write_processing (bfd *abfd)
 {
   unsigned long val;
 
@@ -2408,33 +2754,38 @@ v850_elf_final_write_processing (bfd *abfd,
     default:
       break;
     }
+  return _bfd_elf_final_write_processing (abfd);
 }
 
 /* Function to keep V850 specific file flags.  */
 
-static bfd_boolean
+static bool
 v850_elf_set_private_flags (bfd *abfd, flagword flags)
 {
   BFD_ASSERT (!elf_flags_init (abfd)
 	      || elf_elfheader (abfd)->e_flags == flags);
 
   elf_elfheader (abfd)->e_flags = flags;
-  elf_flags_init (abfd) = TRUE;
-  return TRUE;
+  elf_flags_init (abfd) = true;
+  return true;
 }
 
 /* Merge backend specific data from an object file
    to the output object file when linking.  */
 
-static bfd_boolean
-v850_elf_merge_private_bfd_data (bfd *ibfd, bfd *obfd)
+static bool
+v850_elf_merge_private_bfd_data (bfd *ibfd, struct bfd_link_info *info)
 {
+  bfd *obfd = info->output_bfd;
   flagword out_flags;
   flagword in_flags;
+  bool result = true;
 
   if (   bfd_get_flavour (ibfd) != bfd_target_elf_flavour
       || bfd_get_flavour (obfd) != bfd_target_elf_flavour)
-    return TRUE;
+    return true;
+
+  result &= v850_elf_merge_notes (ibfd, obfd);
 
   in_flags = elf_elfheader (ibfd)->e_flags;
   out_flags = elf_elfheader (obfd)->e_flags;
@@ -2448,57 +2799,50 @@ v850_elf_merge_private_bfd_data (bfd *ibfd, bfd *obfd)
 	 unitialised values, which surprise surprise, correspond
 	 to the default values.  */
       if (bfd_get_arch_info (ibfd)->the_default)
-	return TRUE;
+	return true;
 
-      elf_flags_init (obfd) = TRUE;
+      elf_flags_init (obfd) = true;
       elf_elfheader (obfd)->e_flags = in_flags;
 
       if (bfd_get_arch (obfd) == bfd_get_arch (ibfd)
 	  && bfd_get_arch_info (obfd)->the_default)
-	return bfd_set_arch_mach (obfd, bfd_get_arch (ibfd), bfd_get_mach (ibfd));
+	result &= bfd_set_arch_mach (obfd, bfd_get_arch (ibfd), bfd_get_mach (ibfd));
 
-      return TRUE;
+      return result;
     }
 
   /* Check flag compatibility.  */
   if (in_flags == out_flags)
-    return TRUE;
+    return result;
 
   if (bfd_get_arch (obfd) == bfd_arch_v850_rh850)
     {
       if ((in_flags & EF_V800_850E3) != (out_flags & EF_V800_850E3))
 	{
-	  _bfd_error_handler (_("%B: Architecture mismatch with previous modules"),
-			      ibfd);
+	  _bfd_error_handler
+	    (_("%pB: architecture mismatch with previous modules"), ibfd);
 	  elf_elfheader (obfd)->e_flags |= EF_V800_850E3;
 	}
 
-      if ((in_flags & EF_RH850_DATA_ALIGN8) != (out_flags & EF_RH850_DATA_ALIGN8))
-	{
-	  _bfd_error_handler (_("%B: Alignment mismatch with previous modules"),
-			      ibfd);
-	  elf_elfheader (obfd)->e_flags |= EF_RH850_DATA_ALIGN8;
-	}
-
-      return TRUE;
+      return result;
     }
 
   if ((in_flags & EF_V850_ARCH) != (out_flags & EF_V850_ARCH)
       && (in_flags & EF_V850_ARCH) != E_V850_ARCH)
     {
       /* Allow earlier architecture binaries to be linked with later binaries.
-         Set the output binary to the later architecture, except for v850e1,
-         which we set to v850e.  */
+	 Set the output binary to the later architecture, except for v850e1,
+	 which we set to v850e.  */
       if (   (in_flags  & EF_V850_ARCH) == E_V850E1_ARCH
-          && (out_flags & EF_V850_ARCH) == E_V850E_ARCH)
-        return TRUE;
+	  && (out_flags & EF_V850_ARCH) == E_V850E_ARCH)
+	return result;
 
       if (   (in_flags  & EF_V850_ARCH) == E_V850_ARCH
 	  && (out_flags & EF_V850_ARCH) == E_V850E_ARCH)
 	{
 	  elf_elfheader (obfd)->e_flags =
 	    ((out_flags & ~ EF_V850_ARCH) | E_V850E_ARCH);
-	  return TRUE;
+	  return result;
 	}
 
       if ((   (in_flags & EF_V850_ARCH) == E_V850_ARCH
@@ -2507,7 +2851,7 @@ v850_elf_merge_private_bfd_data (bfd *ibfd, bfd *obfd)
 	{
 	  elf_elfheader (obfd)->e_flags =
 	    ((out_flags & ~ EF_V850_ARCH) | E_V850E2_ARCH);
-	  return TRUE;
+	  return result;
 	}
 
       if ((   (in_flags & EF_V850_ARCH) == E_V850_ARCH
@@ -2517,30 +2861,30 @@ v850_elf_merge_private_bfd_data (bfd *ibfd, bfd *obfd)
 	{
 	  elf_elfheader (obfd)->e_flags =
 	    ((out_flags & ~ EF_V850_ARCH) | E_V850E2V3_ARCH);
-	  return TRUE;
+	  return result;
 	}
 
       if ((   (in_flags & EF_V850_ARCH) == E_V850_ARCH
 	   || (in_flags & EF_V850_ARCH) == E_V850E_ARCH
 	   || (in_flags & EF_V850_ARCH) == E_V850E2_ARCH
-           || (in_flags & EF_V850_ARCH) == E_V850E2V3_ARCH)
+	   || (in_flags & EF_V850_ARCH) == E_V850E2V3_ARCH)
 	  && (out_flags & EF_V850_ARCH) == E_V850E3V5_ARCH)
 	{
 	  elf_elfheader (obfd)->e_flags =
 	    ((out_flags & ~ EF_V850_ARCH) | E_V850E3V5_ARCH);
-	  return TRUE;
+	  return result;
 	}
 
-      _bfd_error_handler (_("%B: Architecture mismatch with previous modules"),
-			  ibfd);
+      _bfd_error_handler
+	(_("%pB: architecture mismatch with previous modules"), ibfd);
     }
 
-  return TRUE;
+  return result;
 }
 
 /* Display the flags field.  */
 
-static bfd_boolean
+static bool
 v850_elf_print_private_bfd_data (bfd *abfd, void * ptr)
 {
   FILE * file = (FILE *) ptr;
@@ -2560,9 +2904,6 @@ v850_elf_print_private_bfd_data (bfd *abfd, void * ptr)
 	fprintf (file, _("v850 E3 architecture"));
       else
 	fprintf (file, _("v850 architecture"));
-
-      if (elf_elfheader (abfd)->e_flags & EF_RH850_DATA_ALIGN8)
-	fprintf (file, _(", 8-byte data alignment"));
     }
   else
     {
@@ -2580,7 +2921,9 @@ v850_elf_print_private_bfd_data (bfd *abfd, void * ptr)
 
   fputc ('\n', file);
 
-  return TRUE;
+  v850_elf_print_notes (abfd, file);
+
+  return true;
 }
 
 /* V850 ELF uses four common sections.  One is the usual one, and the
@@ -2590,34 +2933,48 @@ v850_elf_print_private_bfd_data (bfd *abfd, void * ptr)
    respectively, which yields smaller, faster assembler code.  This
    approach is copied from elf32-mips.c.  */
 
-static asection  v850_elf_scom_section;
-static asymbol   v850_elf_scom_symbol;
-static asymbol * v850_elf_scom_symbol_ptr;
-static asection  v850_elf_tcom_section;
-static asymbol   v850_elf_tcom_symbol;
-static asymbol * v850_elf_tcom_symbol_ptr;
-static asection  v850_elf_zcom_section;
-static asymbol   v850_elf_zcom_symbol;
-static asymbol * v850_elf_zcom_symbol_ptr;
+static asection v850_elf_scom_section;
+static const asymbol v850_elf_scom_symbol =
+  GLOBAL_SYM_INIT (".scommon", &v850_elf_scom_section);
+static asection v850_elf_scom_section =
+  BFD_FAKE_SECTION (v850_elf_scom_section, &v850_elf_scom_symbol,
+		    ".scommon", 0,
+		    SEC_IS_COMMON | SEC_SMALL_DATA | SEC_ALLOC | SEC_DATA);
+
+static asection v850_elf_tcom_section;
+static const asymbol v850_elf_tcom_symbol =
+  GLOBAL_SYM_INIT (".tcommon", &v850_elf_tcom_section);
+static asection v850_elf_tcom_section =
+  BFD_FAKE_SECTION (v850_elf_tcom_section, &v850_elf_tcom_symbol,
+		    ".tcommon", 0,
+		    SEC_IS_COMMON | SEC_SMALL_DATA);
+
+static asection v850_elf_zcom_section;
+static const asymbol v850_elf_zcom_symbol =
+  GLOBAL_SYM_INIT (".zcommon", &v850_elf_zcom_section);
+static asection v850_elf_zcom_section =
+  BFD_FAKE_SECTION (v850_elf_zcom_section, &v850_elf_zcom_symbol,
+		    ".zcommon", 0,
+		    SEC_IS_COMMON | SEC_SMALL_DATA);
 
 /* Given a BFD section, try to locate the
    corresponding ELF section index.  */
 
-static bfd_boolean
+static bool
 v850_elf_section_from_bfd_section (bfd *abfd ATTRIBUTE_UNUSED,
 				   asection *sec,
 				   int *retval)
 {
-  if (strcmp (bfd_get_section_name (abfd, sec), ".scommon") == 0)
+  if (strcmp (bfd_section_name (sec), ".scommon") == 0)
     *retval = SHN_V850_SCOMMON;
-  else if (strcmp (bfd_get_section_name (abfd, sec), ".tcommon") == 0)
+  else if (strcmp (bfd_section_name (sec), ".tcommon") == 0)
     *retval = SHN_V850_TCOMMON;
-  else if (strcmp (bfd_get_section_name (abfd, sec), ".zcommon") == 0)
+  else if (strcmp (bfd_section_name (sec), ".zcommon") == 0)
     *retval = SHN_V850_ZCOMMON;
   else
-    return FALSE;
+    return false;
 
-  return TRUE;
+  return true;
 }
 
 /* Handle the special V850 section numbers that a symbol may use.  */
@@ -2658,55 +3015,16 @@ v850_elf_symbol_processing (bfd *abfd, asymbol *asym)
   switch (indx)
     {
     case SHN_V850_SCOMMON:
-      if (v850_elf_scom_section.name == NULL)
-	{
-	  /* Initialize the small common section.  */
-	  v850_elf_scom_section.name           = ".scommon";
-	  v850_elf_scom_section.flags          = SEC_IS_COMMON | SEC_ALLOC | SEC_DATA;
-	  v850_elf_scom_section.output_section = & v850_elf_scom_section;
-	  v850_elf_scom_section.symbol         = & v850_elf_scom_symbol;
-	  v850_elf_scom_section.symbol_ptr_ptr = & v850_elf_scom_symbol_ptr;
-	  v850_elf_scom_symbol.name            = ".scommon";
-	  v850_elf_scom_symbol.flags           = BSF_SECTION_SYM;
-	  v850_elf_scom_symbol.section         = & v850_elf_scom_section;
-	  v850_elf_scom_symbol_ptr             = & v850_elf_scom_symbol;
-	}
       asym->section = & v850_elf_scom_section;
       asym->value = elfsym->internal_elf_sym.st_size;
       break;
 
     case SHN_V850_TCOMMON:
-      if (v850_elf_tcom_section.name == NULL)
-	{
-	  /* Initialize the tcommon section.  */
-	  v850_elf_tcom_section.name           = ".tcommon";
-	  v850_elf_tcom_section.flags          = SEC_IS_COMMON;
-	  v850_elf_tcom_section.output_section = & v850_elf_tcom_section;
-	  v850_elf_tcom_section.symbol         = & v850_elf_tcom_symbol;
-	  v850_elf_tcom_section.symbol_ptr_ptr = & v850_elf_tcom_symbol_ptr;
-	  v850_elf_tcom_symbol.name            = ".tcommon";
-	  v850_elf_tcom_symbol.flags           = BSF_SECTION_SYM;
-	  v850_elf_tcom_symbol.section         = & v850_elf_tcom_section;
-	  v850_elf_tcom_symbol_ptr             = & v850_elf_tcom_symbol;
-	}
       asym->section = & v850_elf_tcom_section;
       asym->value = elfsym->internal_elf_sym.st_size;
       break;
 
     case SHN_V850_ZCOMMON:
-      if (v850_elf_zcom_section.name == NULL)
-	{
-	  /* Initialize the zcommon section.  */
-	  v850_elf_zcom_section.name           = ".zcommon";
-	  v850_elf_zcom_section.flags          = SEC_IS_COMMON;
-	  v850_elf_zcom_section.output_section = & v850_elf_zcom_section;
-	  v850_elf_zcom_section.symbol         = & v850_elf_zcom_symbol;
-	  v850_elf_zcom_section.symbol_ptr_ptr = & v850_elf_zcom_symbol_ptr;
-	  v850_elf_zcom_symbol.name            = ".zcommon";
-	  v850_elf_zcom_symbol.flags           = BSF_SECTION_SYM;
-	  v850_elf_zcom_symbol.section         = & v850_elf_zcom_section;
-	  v850_elf_zcom_symbol_ptr             = & v850_elf_zcom_symbol;
-	}
       asym->section = & v850_elf_zcom_section;
       asym->value = elfsym->internal_elf_sym.st_size;
       break;
@@ -2716,7 +3034,7 @@ v850_elf_symbol_processing (bfd *abfd, asymbol *asym)
 /* Hook called by the linker routine which adds symbols from an object
    file.  We must handle the special v850 section numbers here.  */
 
-static bfd_boolean
+static bool
 v850_elf_add_symbol_hook (bfd *abfd,
 			  struct bfd_link_info *info ATTRIBUTE_UNUSED,
 			  Elf_Internal_Sym *sym,
@@ -2756,24 +3074,24 @@ v850_elf_add_symbol_hook (bfd *abfd,
     {
     case SHN_V850_SCOMMON:
       *secp = bfd_make_section_old_way (abfd, ".scommon");
-      (*secp)->flags |= SEC_IS_COMMON;
+      (*secp)->flags |= SEC_IS_COMMON | SEC_SMALL_DATA;
       *valp = sym->st_size;
       break;
 
     case SHN_V850_TCOMMON:
       *secp = bfd_make_section_old_way (abfd, ".tcommon");
-      (*secp)->flags |= SEC_IS_COMMON;
+      (*secp)->flags |= SEC_IS_COMMON | SEC_SMALL_DATA;
       *valp = sym->st_size;
       break;
 
     case SHN_V850_ZCOMMON:
       *secp = bfd_make_section_old_way (abfd, ".zcommon");
-      (*secp)->flags |= SEC_IS_COMMON;
+      (*secp)->flags |= SEC_IS_COMMON | SEC_SMALL_DATA;
       *valp = sym->st_size;
       break;
     }
 
-  return TRUE;
+  return true;
 }
 
 static int
@@ -2806,45 +3124,49 @@ v850_elf_link_output_symbol_hook (struct bfd_link_info *info ATTRIBUTE_UNUSED,
   return 1;
 }
 
-static bfd_boolean
+static bool
 v850_elf_section_from_shdr (bfd *abfd,
 			    Elf_Internal_Shdr *hdr,
 			    const char *name,
 			    int shindex)
 {
+  flagword flags;
+
   /* There ought to be a place to keep ELF backend specific flags, but
      at the moment there isn't one.  We just keep track of the
      sections by their name, instead.  */
 
   if (! _bfd_elf_make_section_from_shdr (abfd, hdr, name, shindex))
-    return FALSE;
+    return false;
 
+  flags = 0;
   switch (hdr->sh_type)
     {
     case SHT_V850_SCOMMON:
     case SHT_V850_TCOMMON:
     case SHT_V850_ZCOMMON:
-      if (! bfd_set_section_flags (abfd, hdr->bfd_section,
-				   (bfd_get_section_flags (abfd,
-							   hdr->bfd_section)
-				    | SEC_IS_COMMON)))
-	return FALSE;
+      flags = SEC_IS_COMMON;
     }
 
-  return TRUE;
+  if ((hdr->sh_flags & SHF_V850_GPREL) != 0)
+    flags |= SEC_SMALL_DATA;
+
+  return (flags == 0
+	  || bfd_set_section_flags (hdr->bfd_section,
+				    hdr->bfd_section->flags | flags));
 }
 
 /* Set the correct type for a V850 ELF section.  We do this
    by the section name, which is a hack, but ought to work.  */
 
-static bfd_boolean
+static bool
 v850_elf_fake_sections (bfd *abfd ATTRIBUTE_UNUSED,
 			Elf_Internal_Shdr *hdr,
 			asection *sec)
 {
   const char * name;
 
-  name = bfd_get_section_name (abfd, sec);
+  name = bfd_section_name (sec);
 
   if (strcmp (name, ".scommon") == 0)
     hdr->sh_type = SHT_V850_SCOMMON;
@@ -2852,13 +3174,19 @@ v850_elf_fake_sections (bfd *abfd ATTRIBUTE_UNUSED,
     hdr->sh_type = SHT_V850_TCOMMON;
   else if (strcmp (name, ".zcommon") == 0)
     hdr->sh_type = SHT_V850_ZCOMMON;
+  /* Tweak the section type of .note.renesas.  */
+  else if (strcmp (name, V850_NOTE_SECNAME) == 0)
+    {
+      hdr->sh_type = SHT_RENESAS_INFO;
+      hdr->sh_entsize = SIZEOF_V850_NOTE;
+    }
 
-  return TRUE;
+  return true;
 }
 
 /* Delete some bytes from a section while relaxing.  */
 
-static bfd_boolean
+static bool
 v850_elf_relax_delete_bytes (bfd *abfd,
 			     asection *sec,
 			     bfd_vma addr,
@@ -2875,7 +3203,6 @@ v850_elf_relax_delete_bytes (bfd *abfd,
   Elf_Internal_Rela *irel;
   Elf_Internal_Rela *irelend;
   struct elf_link_hash_entry *sym_hash;
-  Elf_Internal_Shdr *shndx_hdr;
   Elf_External_Sym_Shndx *shndx;
 
   symtab_hdr = &elf_tdata (abfd)->symtab_hdr;
@@ -2900,8 +3227,17 @@ v850_elf_relax_delete_bytes (bfd *abfd,
   /* Adjust all the relocs.  */
   irel = elf_section_data (sec)->relocs;
   irelend = irel + sec->reloc_count;
-  shndx_hdr = &elf_tdata (abfd)->symtab_shndx_hdr;
-  shndx = (Elf_External_Sym_Shndx *) shndx_hdr->contents;
+  if (elf_symtab_shndx_list (abfd))
+    {
+      Elf_Internal_Shdr *shndx_hdr;
+
+      shndx_hdr = & elf_symtab_shndx_list (abfd)->hdr;
+      shndx = (Elf_External_Sym_Shndx *) shndx_hdr->contents;
+    }
+  else
+    {
+      shndx = NULL;
+    }
 
   for (; irel < irelend; irel++)
     {
@@ -2938,7 +3274,7 @@ v850_elf_relax_delete_bytes (bfd *abfd,
 #if (DEBUG_RELAX & 2)
 	  {
 	    char * name = bfd_elf_string_from_elf_section
-	                   (abfd, symtab_hdr->sh_link, isym.st_name);
+			   (abfd, symtab_hdr->sh_link, isym.st_name);
 	    fprintf (stderr,
 	       "relax_delete: local: sec: %s, sym: %s (%d), value: %x + %x + %x addend %x\n",
 	       sec->name, name, isym.st_name,
@@ -2973,7 +3309,7 @@ v850_elf_relax_delete_bytes (bfd *abfd,
 	  && (paddr < addr + count || paddr >= toaddr))
 	irel->r_addend += count;
       else if (    (symval < addr + count || symval >= toaddr)
-	        && (paddr >= addr + count && paddr < toaddr))
+		&& (paddr >= addr + count && paddr < toaddr))
 	irel->r_addend -= count;
     }
 
@@ -3060,34 +3396,34 @@ v850_elf_relax_delete_bytes (bfd *abfd,
 	++ shndx;
     }
 
-  return TRUE;
+  return true;
 }
 
-#define NOP_OPCODE 	(0x0000)
-#define MOVHI	    	0x0640				/* 4byte.  */
-#define MOVHI_MASK  	0x07e0
+#define NOP_OPCODE	(0x0000)
+#define MOVHI		0x0640				/* 4byte.  */
+#define MOVHI_MASK	0x07e0
 #define MOVHI_R1(insn)	((insn) & 0x1f)			/* 4byte.  */
 #define MOVHI_R2(insn)	((insn) >> 11)
-#define MOVEA	    	0x0620				/* 2byte.  */
-#define MOVEA_MASK  	0x07e0
+#define MOVEA		0x0620				/* 2byte.  */
+#define MOVEA_MASK	0x07e0
 #define MOVEA_R1(insn)	((insn) & 0x1f)
 #define MOVEA_R2(insn)	((insn) >> 11)
-#define JARL_4	    	0x00040780				/* 4byte.  */
-#define JARL_4_MASK 	0xFFFF07FF
+#define JARL_4		0x00040780				/* 4byte.  */
+#define JARL_4_MASK	0xFFFF07FF
 #define JARL_R2(insn)	(int)(((insn) & (~JARL_4_MASK)) >> 11)
-#define ADD_I       	0x0240					/* 2byte.  */
-#define ADD_I_MASK  	0x07e0
+#define ADD_I		0x0240					/* 2byte.  */
+#define ADD_I_MASK	0x07e0
 #define ADD_I5(insn)	((((insn) & 0x001f) << 11) >> 11)	/* 2byte.  */
 #define ADD_R2(insn)	((insn) >> 11)
-#define JMP_R	    	0x0060					/* 2byte.  */
-#define JMP_R_MASK 	0xFFE0
+#define JMP_R		0x0060					/* 2byte.  */
+#define JMP_R_MASK	0xFFE0
 #define JMP_R1(insn)	((insn) & 0x1f)
 
-static bfd_boolean
+static bool
 v850_elf_relax_section (bfd *abfd,
 			asection *sec,
 			struct bfd_link_info *link_info,
-			bfd_boolean *again)
+			bool *again)
 {
   Elf_Internal_Shdr *symtab_hdr;
   Elf_Internal_Rela *internal_relocs;
@@ -3099,14 +3435,15 @@ v850_elf_relax_section (bfd *abfd,
   bfd_vma addr = 0;
   bfd_vma toaddr;
   int align_pad_size = 0;
-  bfd_boolean result = TRUE;
+  bool result = true;
 
-  *again = FALSE;
+  *again = false;
 
-  if (link_info->relocatable
+  if (bfd_link_relocatable (link_info)
+      || (sec->flags & SEC_HAS_CONTENTS) == 0
       || (sec->flags & SEC_RELOC) == 0
       || sec->reloc_count == 0)
-    return TRUE;
+    return true;
 
   symtab_hdr = & elf_tdata (abfd)->symtab_hdr;
 
@@ -3250,25 +3587,30 @@ v850_elf_relax_section (bfd *abfd,
 		}
 	      else
 		{
-		  ((*_bfd_error_handler)
-		   ("%s: 0x%lx: warning: R_V850_LONGCALL points to unrecognized insns",
-		    bfd_get_filename (abfd), (unsigned long) irel->r_offset));
-
+		  _bfd_error_handler
+		    /* xgettext:c-format */
+		    (_("%pB: %#" PRIx64 ": warning: %s points to "
+		       "unrecognized insns"),
+		     abfd, (uint64_t) irel->r_offset, "R_V850_LONGCALL");
 		  continue;
 		}
 
 	      if (no_match >= 0)
 		{
-		  ((*_bfd_error_handler)
-		   ("%s: 0x%lx: warning: R_V850_LONGCALL points to unrecognized insn 0x%x",
-		    bfd_get_filename (abfd), (unsigned long) irel->r_offset+no_match, insn[no_match]));
-
+		  _bfd_error_handler
+		    /* xgettext:c-format */
+		    (_("%pB: %#" PRIx64 ": warning: %s points to "
+		       "unrecognized insn %#x"),
+		     abfd,
+		     (uint64_t) (irel->r_offset + no_match),
+		     "R_V850_LONGCALL",
+		     insn[no_match]);
 		  continue;
 		}
 
 	      /* Get the reloc for the address from which the register is
-	         being loaded.  This reloc will tell us which function is
-	         actually being called.  */
+		 being loaded.  This reloc will tell us which function is
+		 actually being called.  */
 
 	      for (hi_irelfn = internal_relocs; hi_irelfn < irelend; hi_irelfn ++)
 		{
@@ -3301,9 +3643,11 @@ v850_elf_relax_section (bfd *abfd,
 		  || lo_irelfn == irelend
 		  || irelcall  == irelend)
 		{
-		  ((*_bfd_error_handler)
-		   ("%s: 0x%lx: warning: R_V850_LONGCALL points to unrecognized reloc",
-		    bfd_get_filename (abfd), (unsigned long) irel->r_offset ));
+		  _bfd_error_handler
+		    /* xgettext:c-format */
+		    (_("%pB: %#" PRIx64 ": warning: %s points to "
+		       "unrecognized reloc"),
+		     abfd, (uint64_t) irel->r_offset, "R_V850_LONGCALL");
 
 		  continue;
 		}
@@ -3339,10 +3683,12 @@ v850_elf_relax_section (bfd *abfd,
 
 	      if (symval + irelcall->r_addend != irelcall->r_offset + 4)
 		{
-		  ((*_bfd_error_handler)
-		   ("%s: 0x%lx: warning: R_V850_LONGCALL points to unrecognized reloc 0x%lx",
-		    bfd_get_filename (abfd), (unsigned long) irel->r_offset, irelcall->r_offset ));
-
+		  _bfd_error_handler
+		    /* xgettext:c-format */
+		    (_("%pB: %#" PRIx64 ": warning: %s points to "
+		       "unrecognized reloc %#" PRIx64),
+		     abfd, (uint64_t) irel->r_offset, "R_V850_LONGCALL",
+		     (uint64_t) irelcall->r_offset);
 		  continue;
 		}
 
@@ -3410,12 +3756,12 @@ v850_elf_relax_section (bfd *abfd,
 		continue;
 
 	      /* For simplicity of coding, we are going to modify the section
-	         contents, the section relocs, and the BFD symbol table.  We
-	         must tell the rest of the code not to free up this
-	         information.  It would be possible to instead create a table
-	         of changes which have to be made, as is done in coff-mips.c;
-	         that would be more work, but would require less memory when
-	         the linker is run.  */
+		 contents, the section relocs, and the BFD symbol table.  We
+		 must tell the rest of the code not to free up this
+		 information.  It would be possible to instead create a table
+		 of changes which have to be made, as is done in coff-mips.c;
+		 that would be more work, but would require less memory when
+		 the linker is run.  */
 	      elf_section_data (sec)->relocs = internal_relocs;
 	      elf_section_data (sec)->this_hdr.contents = contents;
 	      symtab_hdr->contents = (bfd_byte *) isymbuf;
@@ -3476,29 +3822,34 @@ v850_elf_relax_section (bfd *abfd,
 		  if (no_match < 0
 		      && ((insn[2] & JMP_R_MASK) != JMP_R
 			   || MOVEA_R2 (insn[1]) != JMP_R1 (insn[2])))
-		    no_match = 4;
+		    no_match = 2;
 		}
 	      else
 		{
-		  ((*_bfd_error_handler)
-		   ("%s: 0x%lx: warning: R_V850_LONGJUMP points to unrecognized insns",
-		    bfd_get_filename (abfd), (unsigned long) irel->r_offset));
-
+		  _bfd_error_handler
+		    /* xgettext:c-format */
+		    (_("%pB: %#" PRIx64 ": warning: %s points to "
+		       "unrecognized insns"),
+		     abfd, (uint64_t) irel->r_offset, "R_V850_LONGJUMP");
 		  continue;
 		}
 
 	      if (no_match >= 0)
 		{
-		  ((*_bfd_error_handler)
-		   ("%s: 0x%lx: warning: R_V850_LONGJUMP points to unrecognized insn 0x%x",
-		    bfd_get_filename (abfd), (unsigned long) irel->r_offset+no_match, insn[no_match]));
-
+		  _bfd_error_handler
+		    /* xgettext:c-format */
+		    (_("%pB: %#" PRIx64 ": warning: %s points to "
+		       "unrecognized insn %#x"),
+		     abfd,
+		     (uint64_t) (irel->r_offset + no_match),
+		     "R_V850_LONGJUMP",
+		     insn[no_match]);
 		  continue;
 		}
 
 	      /* Get the reloc for the address from which the register is
-	         being loaded.  This reloc will tell us which function is
-	         actually being called.  */
+		 being loaded.  This reloc will tell us which function is
+		 actually being called.  */
 	      for (hi_irelfn = internal_relocs; hi_irelfn < irelend; hi_irelfn ++)
 		{
 		  r_type = ELF32_R_TYPE (hi_irelfn->r_info);
@@ -3520,10 +3871,11 @@ v850_elf_relax_section (bfd *abfd,
 	      if (   hi_irelfn == irelend
 		  || lo_irelfn == irelend)
 		{
-		  ((*_bfd_error_handler)
-		   ("%s: 0x%lx: warning: R_V850_LONGJUMP points to unrecognized reloc",
-		    bfd_get_filename (abfd), (unsigned long) irel->r_offset ));
-
+		  _bfd_error_handler
+		    /* xgettext:c-format */
+		    (_("%pB: %#" PRIx64 ": warning: %s points to "
+		       "unrecognized reloc"),
+		     abfd, (uint64_t) irel->r_offset, "R_V850_LONGJUMP");
 		  continue;
 		}
 
@@ -3531,7 +3883,7 @@ v850_elf_relax_section (bfd *abfd,
 	      if (ELF32_R_SYM (hi_irelfn->r_info) < symtab_hdr->sh_info)
 		{
 		  Elf_Internal_Sym *  isym;
-		  asection *          sym_sec;
+		  asection *	      sym_sec;
 
 		  /* A local symbol.  */
 		  isym = isymbuf + ELF32_R_SYM (hi_irelfn->r_info);
@@ -3608,12 +3960,12 @@ v850_elf_relax_section (bfd *abfd,
 		continue;
 
 	      /* For simplicity of coding, we are going to modify the section
-	         contents, the section relocs, and the BFD symbol table.  We
-	         must tell the rest of the code not to free up this
-	         information.  It would be possible to instead create a table
-	         of changes which have to be made, as is done in coff-mips.c;
-	         that would be more work, but would require less memory when
-	         the linker is run.  */
+		 contents, the section relocs, and the BFD symbol table.  We
+		 must tell the rest of the code not to free up this
+		 information.  It would be possible to instead create a table
+		 of changes which have to be made, as is done in coff-mips.c;
+		 that would be more work, but would require less memory when
+		 the linker is run.  */
 	      elf_section_data (sec)->relocs = internal_relocs;
 	      elf_section_data (sec)->this_hdr.contents = contents;
 	      symtab_hdr->contents = (bfd_byte *) isymbuf;
@@ -3721,22 +4073,19 @@ v850_elf_relax_section (bfd *abfd,
     }
 
  finish:
-  if (internal_relocs != NULL
-      && elf_section_data (sec)->relocs != internal_relocs)
+  if (elf_section_data (sec)->relocs != internal_relocs)
     free (internal_relocs);
 
-  if (contents != NULL
-      && elf_section_data (sec)->this_hdr.contents != (unsigned char *) contents)
+  if (elf_section_data (sec)->this_hdr.contents != (unsigned char *) contents)
     free (contents);
 
-  if (isymbuf != NULL
-      && symtab_hdr->contents != (bfd_byte *) isymbuf)
+  if (symtab_hdr->contents != (bfd_byte *) isymbuf)
     free (isymbuf);
 
   return result;
 
  error_return:
-  result = FALSE;
+  result = false;
   goto finish;
 }
 
@@ -3745,32 +4094,32 @@ static const struct bfd_elf_special_section v850_elf_special_sections[] =
   { STRING_COMMA_LEN (".call_table_data"), 0, SHT_PROGBITS,     (SHF_ALLOC + SHF_WRITE) },
   { STRING_COMMA_LEN (".call_table_text"), 0, SHT_PROGBITS,     (SHF_ALLOC + SHF_WRITE
 								 + SHF_EXECINSTR) },
-  { STRING_COMMA_LEN (".rosdata"),        -2, SHT_PROGBITS,     (SHF_ALLOC
+  { STRING_COMMA_LEN (".rosdata"),	  -2, SHT_PROGBITS,	(SHF_ALLOC
 								 + SHF_V850_GPREL) },
-  { STRING_COMMA_LEN (".rozdata"),        -2, SHT_PROGBITS,     (SHF_ALLOC
+  { STRING_COMMA_LEN (".rozdata"),	  -2, SHT_PROGBITS,	(SHF_ALLOC
 								 + SHF_V850_R0REL) },
-  { STRING_COMMA_LEN (".sbss"),           -2, SHT_NOBITS,       (SHF_ALLOC + SHF_WRITE
+  { STRING_COMMA_LEN (".sbss"),		  -2, SHT_NOBITS,	(SHF_ALLOC + SHF_WRITE
 								 + SHF_V850_GPREL) },
-  { STRING_COMMA_LEN (".scommon"),        -2, SHT_V850_SCOMMON, (SHF_ALLOC + SHF_WRITE
+  { STRING_COMMA_LEN (".scommon"),	  -2, SHT_V850_SCOMMON, (SHF_ALLOC + SHF_WRITE
 								 + SHF_V850_GPREL) },
-  { STRING_COMMA_LEN (".sdata"),          -2, SHT_PROGBITS,     (SHF_ALLOC + SHF_WRITE
+  { STRING_COMMA_LEN (".sdata"),	  -2, SHT_PROGBITS,	(SHF_ALLOC + SHF_WRITE
 								 + SHF_V850_GPREL) },
-  { STRING_COMMA_LEN (".tbss"),           -2, SHT_NOBITS,       (SHF_ALLOC + SHF_WRITE
+  { STRING_COMMA_LEN (".tbss"),		  -2, SHT_NOBITS,	(SHF_ALLOC + SHF_WRITE
 								 + SHF_V850_EPREL) },
-  { STRING_COMMA_LEN (".tcommon"),        -2, SHT_V850_TCOMMON, (SHF_ALLOC + SHF_WRITE
+  { STRING_COMMA_LEN (".tcommon"),	  -2, SHT_V850_TCOMMON, (SHF_ALLOC + SHF_WRITE
 								 + SHF_V850_R0REL) },
-  { STRING_COMMA_LEN (".tdata"),          -2, SHT_PROGBITS,     (SHF_ALLOC + SHF_WRITE
+  { STRING_COMMA_LEN (".tdata"),	  -2, SHT_PROGBITS,	(SHF_ALLOC + SHF_WRITE
 								 + SHF_V850_EPREL) },
-  { STRING_COMMA_LEN (".zbss"),           -2, SHT_NOBITS,       (SHF_ALLOC + SHF_WRITE
+  { STRING_COMMA_LEN (".zbss"),		  -2, SHT_NOBITS,	(SHF_ALLOC + SHF_WRITE
 								 + SHF_V850_R0REL) },
-  { STRING_COMMA_LEN (".zcommon"),        -2, SHT_V850_ZCOMMON, (SHF_ALLOC + SHF_WRITE
+  { STRING_COMMA_LEN (".zcommon"),	  -2, SHT_V850_ZCOMMON, (SHF_ALLOC + SHF_WRITE
 								 + SHF_V850_R0REL) },
-  { STRING_COMMA_LEN (".zdata"),          -2, SHT_PROGBITS,     (SHF_ALLOC + SHF_WRITE
+  { STRING_COMMA_LEN (".zdata"),	  -2, SHT_PROGBITS,	(SHF_ALLOC + SHF_WRITE
 								 + SHF_V850_R0REL) },
-  { NULL,                     0,           0, 0,                0 }
+  { NULL,		      0,	   0, 0,		0 }
 };
 
-#define TARGET_LITTLE_SYM			bfd_elf32_v850_vec
+#define TARGET_LITTLE_SYM			v850_elf32_vec
 #define TARGET_LITTLE_NAME			"elf32-v850"
 #define ELF_ARCH				bfd_arch_v850
 #define ELF_MACHINE_CODE			EM_V850
@@ -3781,27 +4130,27 @@ static const struct bfd_elf_special_section v850_elf_special_sections[] =
 #define elf_info_to_howto_rel			v850_elf_info_to_howto_rel
 
 #define elf_backend_check_relocs		v850_elf_check_relocs
-#define elf_backend_relocate_section    	v850_elf_relocate_section
+#define elf_backend_relocate_section		v850_elf_relocate_section
 #define elf_backend_object_p			v850_elf_object_p
-#define elf_backend_final_write_processing 	v850_elf_final_write_processing
-#define elf_backend_section_from_bfd_section 	v850_elf_section_from_bfd_section
+#define elf_backend_final_write_processing	v850_elf_final_write_processing
+#define elf_backend_section_from_bfd_section	v850_elf_section_from_bfd_section
 #define elf_backend_symbol_processing		v850_elf_symbol_processing
 #define elf_backend_add_symbol_hook		v850_elf_add_symbol_hook
-#define elf_backend_link_output_symbol_hook 	v850_elf_link_output_symbol_hook
+#define elf_backend_link_output_symbol_hook	v850_elf_link_output_symbol_hook
 #define elf_backend_section_from_shdr		v850_elf_section_from_shdr
 #define elf_backend_fake_sections		v850_elf_fake_sections
-#define elf_backend_gc_mark_hook                v850_elf_gc_mark_hook
+#define elf_backend_gc_mark_hook		v850_elf_gc_mark_hook
 #define elf_backend_special_sections		v850_elf_special_sections
 
-#define elf_backend_can_gc_sections 1
-#define elf_backend_rela_normal 1
+#define elf_backend_can_gc_sections		1
+#define elf_backend_rela_normal			1
 
 #define bfd_elf32_bfd_is_local_label_name	v850_elf_is_local_label_name
 #define bfd_elf32_bfd_is_target_special_symbol	v850_elf_is_target_special_symbol
 
 #define bfd_elf32_bfd_reloc_type_lookup		v850_elf_reloc_type_lookup
-#define bfd_elf32_bfd_reloc_name_lookup	        v850_elf_reloc_name_lookup
-#define bfd_elf32_bfd_merge_private_bfd_data 	v850_elf_merge_private_bfd_data
+#define bfd_elf32_bfd_reloc_name_lookup		v850_elf_reloc_name_lookup
+#define bfd_elf32_bfd_merge_private_bfd_data	v850_elf_merge_private_bfd_data
 #define bfd_elf32_bfd_set_private_flags		v850_elf_set_private_flags
 #define bfd_elf32_bfd_print_private_bfd_data	v850_elf_print_private_bfd_data
 #define bfd_elf32_bfd_relax_section		v850_elf_relax_section
@@ -3817,20 +4166,20 @@ static const struct bfd_elf_special_section v850_elf_special_sections[] =
 
 static const struct v850_elf_reloc_map v800_elf_reloc_map[] =
 {
-  { BFD_RELOC_NONE,                   R_V810_NONE    },
-  { BFD_RELOC_8,                      R_V810_BYTE    },
-  { BFD_RELOC_16,                     R_V810_HWORD   },
-  { BFD_RELOC_32,                     R_V810_WORD    },
-  { BFD_RELOC_LO16,                   R_V810_WLO     },
-  { BFD_RELOC_HI16,                   R_V810_WHI     },
-  { BFD_RELOC_HI16_S,                 R_V810_WHI1    },
-  { BFD_RELOC_V850_32_PCREL,          R_V850_PC32    },
-  { BFD_RELOC_V850_22_PCREL,          R_V850_PCR22   },
-  { BFD_RELOC_V850_17_PCREL,          R_V850_PC17    },
-  { BFD_RELOC_V850_16_PCREL,          R_V850_PC16U   },
+  { BFD_RELOC_NONE,		      R_V810_NONE    },
+  { BFD_RELOC_8,		      R_V810_BYTE    },
+  { BFD_RELOC_16,		      R_V810_HWORD   },
+  { BFD_RELOC_32,		      R_V810_WORD    },
+  { BFD_RELOC_LO16,		      R_V810_WLO     },
+  { BFD_RELOC_HI16,		      R_V810_WHI     },
+  { BFD_RELOC_HI16_S,		      R_V810_WHI1    },
+  { BFD_RELOC_V850_32_PCREL,	      R_V850_PC32    },
+  { BFD_RELOC_V850_22_PCREL,	      R_V850_PCR22   },
+  { BFD_RELOC_V850_17_PCREL,	      R_V850_PC17    },
+  { BFD_RELOC_V850_16_PCREL,	      R_V850_PC16U   },
   { BFD_RELOC_V850_9_PCREL,	      R_V850_PC9     },
-  { BFD_RELOC_V850_LO16_S1,           R_V810_WLO_1   }, /* Or R_V850_HWLO or R_V850_HWLO_1.  */
-  { BFD_RELOC_V850_23,                R_V850_WLO23   },
+  { BFD_RELOC_V850_LO16_S1,	      R_V810_WLO_1   }, /* Or R_V850_HWLO or R_V850_HWLO_1.  */
+  { BFD_RELOC_V850_23,		      R_V850_WLO23   },
   { BFD_RELOC_V850_LO16_SPLIT_OFFSET, R_V850_BLO     },
   { BFD_RELOC_V850_ZDA_16_16_OFFSET,  R_V810_HWORD   },
   { BFD_RELOC_V850_TDA_16_16_OFFSET,  R_V810_HWORD   },
@@ -3882,30 +4231,34 @@ v800_elf_reloc_name_lookup (bfd * abfd, const char * r_name)
 
 /* Set the howto pointer in CACHE_PTR for a V800 ELF reloc.  */
 
-static void
-v800_elf_info_to_howto (bfd *               abfd,
-			arelent *           cache_ptr,
+static bool
+v800_elf_info_to_howto (bfd *		    abfd,
+			arelent *	    cache_ptr,
 			Elf_Internal_Rela * dst)
 {
   unsigned int r_type = ELF32_R_TYPE (dst->r_info);
 
-  BFD_ASSERT (bfd_get_arch (abfd) == bfd_arch_v850_rh850);
-
-  BFD_ASSERT (r_type < (unsigned int) R_V800_max);
-
   if (r_type == R_V800_NONE)
     r_type = R_V810_NONE;
 
-  BFD_ASSERT (r_type >= (unsigned int) R_V810_NONE);
-  r_type -= R_V810_NONE;
-  BFD_ASSERT (r_type < ARRAY_SIZE (v800_elf_howto_table));
+  if (bfd_get_arch (abfd) != bfd_arch_v850_rh850
+      || r_type >= (unsigned int) R_V800_max
+      || r_type < (unsigned int) R_V810_NONE
+      || (r_type - R_V810_NONE) >= ARRAY_SIZE (v800_elf_howto_table))
+    {
+      /* xgettext:c-format */
+      _bfd_error_handler (_("%pB: unsupported relocation type %#x"),
+			  abfd, r_type);
+      bfd_set_error (bfd_error_bad_value);
+      return false;
+    }
 
-  cache_ptr->howto = v800_elf_howto_table + r_type;
+  cache_ptr->howto = v800_elf_howto_table + (r_type - R_V810_NONE);
+  return true;
 }
 
-
 #undef  TARGET_LITTLE_SYM
-#define TARGET_LITTLE_SYM			bfd_elf32_v850_rh850_vec
+#define TARGET_LITTLE_SYM			v800_elf32_vec
 #undef  TARGET_LITTLE_NAME
 #define TARGET_LITTLE_NAME			"elf32-v850-rh850"
 #undef  ELF_ARCH

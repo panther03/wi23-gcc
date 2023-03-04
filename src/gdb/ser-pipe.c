@@ -1,5 +1,5 @@
 /* Serial interface for a pipe to a separate program
-   Copyright (C) 1999-2013 Free Software Foundation, Inc.
+   Copyright (C) 1999-2023 Free Software Foundation, Inc.
 
    Contributed by Cygnus Solutions.
 
@@ -27,17 +27,15 @@
 
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <sys/time.h>
+#include "gdbsupport/gdb_sys_time.h"
 #include <fcntl.h>
-#include "gdb_string.h"
-#include "filestuff.h"
+#include "gdbsupport/filestuff.h"
+#include "gdbsupport/pathstuff.h"
 
 #include <signal.h>
 
 static int pipe_open (struct serial *scb, const char *name);
 static void pipe_close (struct serial *scb);
-
-extern void _initialize_ser_pipe (void);
 
 struct pipe_state
   {
@@ -63,6 +61,12 @@ pipe_open (struct serial *scb, const char *name)
   int pdes[2];
   int err_pdes[2];
   int pid;
+
+  if (*name == '|')
+    {
+      name++;
+      name = skip_spaces (name);
+    }
 
   if (gdb_socketpair_cloexec (AF_UNIX, SOCK_STREAM, 0, pdes) < 0)
     return -1;
@@ -125,7 +129,9 @@ pipe_open (struct serial *scb, const char *name)
 	}
 
       close_most_fds ();
-      execl ("/bin/sh", "sh", "-c", name, (char *) 0);
+
+      const char *shellfile = get_shell ();
+      execl (shellfile, shellfile, "-c", name, (char *) 0);
       _exit (127);
     }
 
@@ -134,7 +140,7 @@ pipe_open (struct serial *scb, const char *name)
   if (err_pdes[1] != -1)
     close (err_pdes[1]);
   /* :end chunk */
-  state = XMALLOC (struct pipe_state);
+  state = XNEW (struct pipe_state);
   state->pid = pid;
   scb->fd = pdes[0];
   scb->error_fd = err_pdes[0];
@@ -149,7 +155,7 @@ pipe_open (struct serial *scb, const char *name)
 static void
 pipe_close (struct serial *scb)
 {
-  struct pipe_state *state = scb->state;
+  struct pipe_state *state = (struct pipe_state *) scb->state;
 
   close (scb->fd);
   scb->fd = -1;
@@ -206,32 +212,34 @@ gdb_pipe (int pdes[2])
 #endif
 }
 
-void
-_initialize_ser_pipe (void)
+static const struct serial_ops pipe_ops =
 {
-  struct serial_ops *ops = XMALLOC (struct serial_ops);
+  "pipe",
+  pipe_open,
+  pipe_close,
+  NULL,
+  ser_base_readchar,
+  ser_base_write,
+  ser_base_flush_output,
+  ser_base_flush_input,
+  ser_base_send_break,
+  ser_base_raw,
+  ser_base_get_tty_state,
+  ser_base_copy_tty_state,
+  ser_base_set_tty_state,
+  ser_base_print_tty_state,
+  ser_base_setbaudrate,
+  ser_base_setstopbits,
+  ser_base_setparity,
+  ser_base_drain_output,
+  ser_base_async,
+  ser_unix_read_prim,
+  ser_unix_write_prim
+};
 
-  memset (ops, 0, sizeof (struct serial_ops));
-  ops->name = "pipe";
-  ops->next = 0;
-  ops->open = pipe_open;
-  ops->close = pipe_close;
-  ops->readchar = ser_base_readchar;
-  ops->write = ser_base_write;
-  ops->flush_output = ser_base_flush_output;
-  ops->flush_input = ser_base_flush_input;
-  ops->send_break = ser_base_send_break;
-  ops->go_raw = ser_base_raw;
-  ops->get_tty_state = ser_base_get_tty_state;
-  ops->copy_tty_state = ser_base_copy_tty_state;
-  ops->set_tty_state = ser_base_set_tty_state;
-  ops->print_tty_state = ser_base_print_tty_state;
-  ops->noflush_set_tty_state = ser_base_noflush_set_tty_state;
-  ops->setbaudrate = ser_base_setbaudrate;
-  ops->setstopbits = ser_base_setstopbits;
-  ops->drain_output = ser_base_drain_output;
-  ops->async = ser_base_async;
-  ops->read_prim = ser_unix_read_prim;
-  ops->write_prim = ser_unix_write_prim;
-  serial_add_interface (ops);
+void _initialize_ser_pipe ();
+void
+_initialize_ser_pipe ()
+{
+  serial_add_interface (&pipe_ops);
 }

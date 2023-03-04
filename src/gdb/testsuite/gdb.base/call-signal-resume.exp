@@ -1,4 +1,4 @@
-# Copyright 2008-2013 Free Software Foundation, Inc.
+# Copyright 2008-2023 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -20,30 +20,24 @@
 # 2) Inferior is stopped at a signal.  Upon resumption it should continue
 #    with that signal, regardless of whatever the hand-called function did.
 
-if [target_info exists gdb,noinferiorio] {
-    verbose "Skipping call-signal-resume.exp because of no fileio capabilities."
-    continue
-}
-
 if [target_info exists gdb,nosignals] {
     verbose "Skipping call-signal-resume.exp because of nosignals."
-    continue
+    return
 }
 
 
 standard_testfile call-signals.c
 
 if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable {debug}] != "" } {
-     untested call-signal-resume.exp
+     untested "failed to compile"
      return -1
 }
 
 # Some targets can't do function calls, so don't even bother with this
 # test.
 if [target_info exists gdb,cannot_call_functions] {
-    setup_xfail "*-*-*" 2416
-    fail "This target can not call functions"
-    continue
+    unsupported "this target can not call functions"
+    return
 }
 
 proc get_dummy_frame_number { } {
@@ -62,7 +56,6 @@ proc get_dummy_frame_number { } {
 clean_restart ${binfile}
 
 if { ![runto_main] } {
-    fail "Can't run to main"
     return 0
 }
 
@@ -72,15 +65,10 @@ gdb_test "continue" "Continuing.*Breakpoint \[0-9\]*, stop_one.*" \
 
 # Call function (causing the program to get a signal), and see if gdb handles
 # it properly.
-gdb_test_multiple "call gen_signal ()" \
-	"inferior function call signaled" {
-    -re "\[\r\n\]*no signal\[\r\n\]+$gdb_prompt $" {
-	unsupported "inferior function call signaled"
-	return 0
-    }
-    -re "\[\r\n\]*The program being debugged was signaled.*\[\r\n\]+$gdb_prompt $" {
-	pass "inferior function call signaled"
-    }
+if {[gdb_test "call gen_signal ()"  \
+	 "\[\r\n\]*The program being debugged was signaled.*" \
+	 "inferior function call signaled"] != 0} {
+    return 0
 }
 
 set frame_number [get_dummy_frame_number]
@@ -128,18 +116,17 @@ gdb_test "call null_hand_call ()" "Breakpoint \[0-9\]*, null_hand_call.*" \
 
 set frame_number [get_dummy_frame_number]
 if { "$frame_number" == "" } {
-    fail "dummy stack frame number"
+    fail "dummy stack frame number, two"
     setup_xfail "*-*-*"
     # Need something.
     set frame_number 0
 } else {
-    pass "dummy stack frame number"
+    pass "dummy stack frame number, two"
 }
 
 # Pop the dummy frame.
 gdb_test "frame $frame_number" ".*"
-gdb_test_no_output "set confirm off"
-gdb_test "return" ""
+gdb_test "return" "" "return, two"
 
 # Continue again, this time we should get to the signal handler.
 
@@ -151,5 +138,3 @@ gdb_test "continue" "Breakpoint \[0-9\]*, handle_signal.*" \
 
 gdb_test "continue" "$inferior_exited_re normally." \
     "continue to program exit"
-
-return 0

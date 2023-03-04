@@ -1,9 +1,6 @@
 /* Script for -z combreloc: combine and sort reloc sections */
-OUTPUT_FORMAT("elf32-littlearm", "elf32-bigarm",
-	      "elf32-littlearm")
 OUTPUT_ARCH(arm)
 ENTRY(_start)
-SEARCH_DIR("/home/meadori/Code/install/arm-none-eabi/lib");
 SECTIONS
 {
   /* Read-only sections, merged into text segment: */
@@ -17,7 +14,7 @@ SECTIONS
   .gnu.version    : { *(.gnu.version) }
   .gnu.version_d  : { *(.gnu.version_d) }
   .gnu.version_r  : { *(.gnu.version_r) }
-  .rel.dyn        :
+  .rel.dyn ALIGN (0x100) :
     {
       *(.rel.init)
       *(.rel.text .rel.text.* .rel.gnu.linkonce.t.*)
@@ -37,7 +34,7 @@ SECTIONS
       PROVIDE_HIDDEN (__rela_iplt_start = .);
       PROVIDE_HIDDEN (__rela_iplt_end = .);
     }
-  .rela.dyn       :
+  .rela.dyn ALIGN (0x100) :
     {
       *(.rela.init)
       *(.rela.text .rela.text.* .rela.gnu.linkonce.t.*)
@@ -68,8 +65,9 @@ SECTIONS
     *(.text.exit .text.exit.*)
     *(.text.startup .text.startup.*)
     *(.text.hot .text.hot.*)
+    *(SORT(.text.sorted.*))
     *(.text .stub .text.* .gnu.linkonce.t.*)
-    /* .gnu.warning sections are handled specially by elf32.em.  */
+    /* .gnu.warning sections are handled specially by elf.em.  */
     *(.gnu.warning)
     *(.glue_7t) *(.glue_7) *(.vfp11_veneer) *(.v4_bx)
   }
@@ -180,7 +178,6 @@ SECTIONS
    . = ALIGN(. != 0 ? 32 / 8 : 1);
   }
   _bss_end__ = . ; __bss_end__ = . ;
-  . = ALIGN(32 / 8);
   . = ALIGN(32 / 8);
   __end__ = . ;
   _end = .; PROVIDE (end = .);

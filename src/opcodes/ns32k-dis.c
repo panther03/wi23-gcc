@@ -1,6 +1,5 @@
 /* Print National Semiconductor 32000 instructions.
-   Copyright 1986, 1988, 1991, 1992, 1994, 1998, 2001, 2002, 2005, 2007,
-   2009  Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    This file is part of the GNU opcodes library.
 
@@ -21,7 +20,7 @@
 
 #include "sysdep.h"
 #include "bfd.h"
-#include "dis-asm.h"
+#include "disassemble.h"
 #if !defined(const) && !defined(__STDC__)
 #define const
 #endif
@@ -58,7 +57,7 @@ struct private
   bfd_byte *max_fetched;
   bfd_byte the_buffer[MAXLEN];
   bfd_vma insn_start;
-  jmp_buf bailout;
+  OPCODES_SIGJMP_BUF bailout;
 };
 
 
@@ -83,7 +82,7 @@ fetch_data (struct disassemble_info *info, bfd_byte *addr)
   if (status != 0)
     {
       (*info->memory_error_func) (status, start, info);
-      longjmp (priv->bailout, 1);
+      OPCODES_SIGLONGJMP (priv->bailout, 1);
     }
   else
     priv->max_fetched = addr;
@@ -263,9 +262,11 @@ list_search (int reg_value, const struct ns32k_option *optionP, char *result)
 static int
 bit_extract (bfd_byte *buffer, int offset, int count)
 {
-  int result;
-  int bit;
+  unsigned int result;
+  unsigned int bit;
 
+  if (offset < 0 || count < 0)
+    return 0;
   buffer += offset >> 3;
   offset &= 7;
   bit = 1;
@@ -290,9 +291,11 @@ bit_extract (bfd_byte *buffer, int offset, int count)
 static int
 bit_extract_simple (bfd_byte *buffer, int offset, int count)
 {
-  int result;
-  int bit;
+  unsigned int result;
+  unsigned int bit;
 
+  if (offset < 0 || count < 0)
+    return 0;
   buffer += offset >> 3;
   offset &= 7;
   bit = 1;
@@ -314,18 +317,18 @@ bit_extract_simple (bfd_byte *buffer, int offset, int count)
 static void
 bit_copy (bfd_byte *buffer, int offset, int count, char *to)
 {
+  if (offset < 0 || count < 0)
+    return;
   for (; count > 8; count -= 8, to++, offset += 8)
     *to = bit_extract (buffer, offset, 8);
   *to = bit_extract (buffer, offset, count);
 }
 
 static int
-sign_extend (int value, int bits)
+sign_extend (unsigned int value, unsigned int bits)
 {
-  value = value & ((1 << bits) - 1);
-  return (value & (1 << (bits - 1))
-	  ? value | (~((1 << bits) - 1))
-	  : value);
+  unsigned int sign = 1u << (bits - 1);
+  return ((value & (sign + sign - 1)) ^ sign) - sign;
 }
 
 static void
@@ -344,9 +347,7 @@ flip_bytes (char *ptr, int count)
 }
 
 /* Given a character C, does it represent a general addressing mode?  */
-#define Is_gen(c) \
-  ((c) == 'F' || (c) == 'L' || (c) == 'B' \
-   || (c) == 'W' || (c) == 'D' || (c) == 'A' || (c) == 'I' || (c) == 'Z')
+#define Is_gen(c) (strchr ("FLBWDAIZf", (c)) != NULL)
 
 /* Adressing modes.  */
 #define Adrmod_index_byte        0x1c
@@ -414,7 +415,7 @@ invalid_float (bfd_byte *p, int len)
 #else
 /* Assumes the bytes have been swapped to local order.  */
 typedef union
-{ 
+{
   double d;
   float f;
   struct { unsigned m:23, e:8, :1;} sf;
@@ -445,7 +446,7 @@ invalid_float (float_type_u *p, int len)
    bit position of the addressing extension.  BUFFER contains the
    instruction.  ADDR is where BUFFER was read from.  Put the disassembled
    version of the operand in RESULT.  INDEX_OFFSET is the bit position
-   of the index byte (it contains garbage if this operand is not a
+   of the index byte (it contains -1 if this operand is not a
    general operand using scaled indexed addressing mode).  */
 
 static int
@@ -473,6 +474,7 @@ print_insn_arg (int d,
     case 'f':
       /* A "gen" operand but 5 bits from the end of instruction.  */
       ioffset -= 5;
+      /* Fall through.  */
     case 'Z':
     case 'F':
     case 'L':
@@ -522,9 +524,7 @@ print_insn_arg (int d,
 	  /* Immediate.  */
 	  switch (d)
 	    {
-	    case 'I':
-	    case 'Z':
-	    case 'A':
+	    default:
 	      /* I and Z are output operands and can`t be immediate
 	         A is an address and we can`t have the address of
 	         an immediate either. We don't know how much to increase
@@ -606,7 +606,7 @@ print_insn_arg (int d,
 	  /* Memory space disp(PC).  */
 	  disp1 = get_displacement (buffer, aoffsetp);
 	  *result++ = NEXT_IS_ADDR;
-	  sprintf_vma (result, addr + disp1);
+	  sprintf (result, "%" PRIx64, (uint64_t) (addr + disp1));
 	  result += strlen (result);
 	  *result++ = NEXT_IS_ADDR;
 	  *result = '\0';
@@ -619,7 +619,7 @@ print_insn_arg (int d,
 	    int bit_index;
 	    static const char *ind = "bwdq";
 	    char *off;
-	    
+
 	    /* Scaled index basemode[R0 -- R7:B,W,D,Q].  */
 	    bit_index = bit_extract (buffer, index_offset - 8, 3);
 	    print_insn_arg (d, index_offset, aoffsetp, buffer, addr,
@@ -665,7 +665,8 @@ print_insn_arg (int d,
       break;
     case 'p':
       *result++ = NEXT_IS_ADDR;
-      sprintf_vma (result, addr + get_displacement (buffer, aoffsetp));
+      sprintf (result, "%" PRIx64,
+	       (uint64_t) (addr + get_displacement (buffer, aoffsetp)));
       result += strlen (result);
       *result++ = NEXT_IS_ADDR;
       *result = '\0';
@@ -746,7 +747,7 @@ print_insn_ns32k (bfd_vma memaddr, disassemble_info *info)
   info->private_data = & priv;
   priv.max_fetched = priv.the_buffer;
   priv.insn_start = memaddr;
-  if (setjmp (priv.bailout) != 0)
+  if (OPCODES_SIGSETJMP (priv.bailout) != 0)
     /* Error return.  */
     return -1;
 
@@ -788,14 +789,12 @@ print_insn_ns32k (bfd_vma memaddr, disassemble_info *info)
   if (*d)
     {
       /* Offset in bits of the first thing beyond each index byte.
-	 Element 0 is for operand A and element 1 is for operand B.
-	 The rest are irrelevant, but we put them here so we don't
-	 index outside the array.  */
-      int index_offset[MAX_ARGS];
+	 Element 0 is for operand A and element 1 is for operand B.  */
+      int index_offset[2];
 
       /* 0 for operand A, 1 for operand B, greater for other args.  */
       int whicharg = 0;
-      
+
       (*dis_info->fprintf_func)(dis_info->stream, "\t");
 
       maxarg = 0;
@@ -804,9 +803,12 @@ print_insn_ns32k (bfd_vma memaddr, disassemble_info *info)
 	 if we are using scaled indexed addressing mode, since the index
 	 bytes occur right after the basic instruction, not as part
 	 of the addressing extension.  */
-      if (Is_gen(d[1]))
+      index_offset[0] = -1;
+      index_offset[1] = -1;
+      if (Is_gen (d[1]))
 	{
-	  int addr_mode = bit_extract (buffer, ioffset - 5, 5);
+	  int bitoff = d[1] == 'f' ? 10 : 5;
+	  int addr_mode = bit_extract (buffer, ioffset - bitoff, 5);
 
 	  if (Adrmod_is_index (addr_mode))
 	    {
@@ -815,7 +817,7 @@ print_insn_ns32k (bfd_vma memaddr, disassemble_info *info)
 	    }
 	}
 
-      if (d[2] && Is_gen(d[3]))
+      if (d[2] && Is_gen (d[3]))
 	{
 	  int addr_mode = bit_extract (buffer, ioffset - 10, 5);
 
@@ -829,15 +831,18 @@ print_insn_ns32k (bfd_vma memaddr, disassemble_info *info)
       while (*d)
 	{
 	  argnum = *d - '1';
+	  if (argnum >= MAX_ARGS)
+	    abort ();
 	  d++;
-	  if (argnum > maxarg && argnum < MAX_ARGS)
+	  if (argnum > maxarg)
 	    maxarg = argnum;
 	  ioffset = print_insn_arg (*d, ioffset, &aoffset, buffer,
 				    memaddr, arg_bufs[argnum],
-				    index_offset[whicharg]);
+				    whicharg > 1 ? -1 : index_offset[whicharg]);
 	  d++;
 	  whicharg++;
 	}
+
       for (argnum = 0; argnum <= maxarg; argnum++)
 	{
 	  bfd_vma addr;

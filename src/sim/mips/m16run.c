@@ -11,16 +11,20 @@
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
     GNU General Public License for more details.
- 
+
     You should have received a copy of the GNU General Public License
     along with this program; if not, see <http://www.gnu.org/licenses/>.
- 
+
     */
+
+/* This must come before any other includes.  */
+#include "defs.h"
 
 #include "sim-main.h"
 #include "m16_idecode.h"
 #include "m32_idecode.h"
 #include "bfd.h"
+#include "sim-engine.h"
 
 
 #define SD sd
@@ -33,7 +37,7 @@ sim_engine_run (SIM_DESC sd,
 		int siggnal) /* ignore */
 {
   sim_cpu *cpu = STATE_CPU (sd, next_cpu_nr);
-  address_word cia = CIA_GET (cpu);
+  address_word cia = CPU_PC_GET (cpu);
 
   while (1)
     {
@@ -54,19 +58,15 @@ sim_engine_run (SIM_DESC sd,
 	  nia = m32_idecode_issue (sd, instruction_0, cia);
 	}
 
-#if defined (ENGINE_ISSUE_POSTFIX_HOOK)
-      ENGINE_ISSUE_POSTFIX_HOOK ();
-#endif
-
       /* Update the instruction address */
       cia = nia;
 
       /* process any events */
       if (sim_events_tick (sd))
         {
-          CIA_SET (CPU, cia);
+          CPU_PC_SET (CPU, cia);
           sim_events_process (sd);
-	  cia = CIA_GET (CPU);
+	  cia = CPU_PC_GET (CPU);
         }
 
     }

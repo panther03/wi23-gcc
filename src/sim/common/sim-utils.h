@@ -1,5 +1,5 @@
 /* Miscellaneous simulator utilities.
-   Copyright (C) 1997-2013 Free Software Foundation, Inc.
+   Copyright (C) 1997-2023 Free Software Foundation, Inc.
    Contributed by Cygnus Support.
 
 This file is part of GDB, the GNU debugger.
@@ -19,6 +19,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 #ifndef SIM_UTILS_H
 #define SIM_UTILS_H
+
+#include "ansidecl.h"
 
 /* Memory management with an allocator that clears memory before use. */
 
@@ -45,7 +47,7 @@ unsigned long sim_elapsed_time_since (SIM_ELAPSED_TIME start);
 
 /* Utilities for manipulating the load image.  */
 
-SIM_RC sim_analyze_program (SIM_DESC sd, char *prog_name,
+SIM_RC sim_analyze_program (SIM_DESC sd, const char *prog_name,
 			    struct bfd *prog_bfd);
 
 /* Load program PROG into the simulator using the function DO_LOAD.
@@ -60,22 +62,17 @@ SIM_RC sim_analyze_program (SIM_DESC sd, char *prog_name,
    write the program sections at LMA interpreted as a virtual address.
    This is still accommodated for backward compatibility reasons. */
 
-typedef int sim_write_fn PARAMS ((SIM_DESC sd, SIM_ADDR mem,
-				      const unsigned char *buf, int length));
+typedef struct host_callback_struct host_callback;
+typedef uint64_t sim_write_fn (SIM_DESC sd, uint64_t mem,
+			       const void *buf, uint64_t length);
 struct bfd *sim_load_file (SIM_DESC sd, const char *myname,
-			   host_callback *callback, char *prog,
+			   host_callback *callback, const char *prog,
 			   struct bfd *prog_bfd, int verbose_p,
 			   int lma_p, sim_write_fn do_load);
 
 /* Internal version of sim_do_command, include formatting */
-void sim_do_commandf (SIM_DESC sd, const char *fmt, ...);
-
-
-/* These are defined in callback.c as cover functions to the vprintf
-   callbacks.  */
-
-void sim_cb_printf (host_callback *, const char *, ...);
-void sim_cb_eprintf (host_callback *, const char *, ...);
+void sim_do_commandf (SIM_DESC sd, const char *fmt, ...)
+    ATTRIBUTE_PRINTF (2, 3);
 
 
 /* sim-basics.h defines a number of enumerations, convert each of them

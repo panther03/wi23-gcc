@@ -1,7 +1,6 @@
 // output.h -- manage the output file for gold   -*- C++ -*-
 
-// Copyright 2006, 2007, 2008, 2009, 2010, 2011, 2013
-// Free Software Foundation, Inc.
+// Copyright (C) 2006-2023 Free Software Foundation, Inc.
 // Written by Ian Lance Taylor <iant@google.com>.
 
 // This file is part of gold.
@@ -24,6 +23,7 @@
 #ifndef GOLD_OUTPUT_H
 #define GOLD_OUTPUT_H
 
+#include <algorithm>
 #include <list>
 #include <vector>
 
@@ -38,7 +38,6 @@ namespace gold
 class General_options;
 class Object;
 class Symbol;
-class Output_file;
 class Output_merge_base;
 class Output_section;
 class Relocatable_relocs;
@@ -49,6 +48,131 @@ template<int size, bool big_endian>
 class Sized_relobj;
 template<int size, bool big_endian>
 class Sized_relobj_file;
+
+// This class represents the output file.
+
+class Output_file
+{
+ public:
+  Output_file(const char* name);
+
+  // Indicate that this is a temporary file which should not be
+  // output.
+  void
+  set_is_temporary()
+  { this->is_temporary_ = true; }
+
+  // Try to open an existing file. Returns false if the file doesn't
+  // exist, has a size of 0 or can't be mmaped.  This method is
+  // thread-unsafe.  If BASE_NAME is not NULL, use the contents of
+  // that file as the base for incremental linking.
+  bool
+  open_base_file(const char* base_name, bool writable);
+
+  // Open the output file.  FILE_SIZE is the final size of the file.
+  // If the file already exists, it is deleted/truncated.  This method
+  // is thread-unsafe.
+  void
+  open(off_t file_size);
+
+  // Resize the output file.  This method is thread-unsafe.
+  void
+  resize(off_t file_size);
+
+  // Close the output file (flushing all buffered data) and make sure
+  // there are no errors.  This method is thread-unsafe.
+  void
+  close();
+
+  // Return the size of this file.
+  off_t
+  filesize()
+  { return this->file_size_; }
+
+  // Return the name of this file.
+  const char*
+  filename()
+  { return this->name_; }
+
+  // We currently always use mmap which makes the view handling quite
+  // simple.  In the future we may support other approaches.
+
+  // Write data to the output file.
+  void
+  write(off_t offset, const void* data, size_t len)
+  { memcpy(this->base_ + offset, data, len); }
+
+  // Get a buffer to use to write to the file, given the offset into
+  // the file and the size.
+  unsigned char*
+  get_output_view(off_t start, size_t size)
+  {
+    gold_assert(start >= 0
+		&& start + static_cast<off_t>(size) <= this->file_size_);
+    return this->base_ + start;
+  }
+
+  // VIEW must have been returned by get_output_view.  Write the
+  // buffer to the file, passing in the offset and the size.
+  void
+  write_output_view(off_t, size_t, unsigned char*)
+  { }
+
+  // Get a read/write buffer.  This is used when we want to write part
+  // of the file, read it in, and write it again.
+  unsigned char*
+  get_input_output_view(off_t start, size_t size)
+  { return this->get_output_view(start, size); }
+
+  // Write a read/write buffer back to the file.
+  void
+  write_input_output_view(off_t, size_t, unsigned char*)
+  { }
+
+  // Get a read buffer.  This is used when we just want to read part
+  // of the file back it in.
+  const unsigned char*
+  get_input_view(off_t start, size_t size)
+  { return this->get_output_view(start, size); }
+
+  // Release a read bfufer.
+  void
+  free_input_view(off_t, size_t, const unsigned char*)
+  { }
+
+ private:
+  // Map the file into memory or, if that fails, allocate anonymous
+  // memory.
+  void
+  map();
+
+  // Allocate anonymous memory for the file.
+  bool
+  map_anonymous();
+
+  // Map the file into memory.
+  bool
+  map_no_anonymous(bool);
+
+  // Unmap the file from memory (and flush to disk buffers).
+  void
+  unmap();
+
+  // File name.
+  const char* name_;
+  // File descriptor.
+  int o_;
+  // File size.
+  off_t file_size_;
+  // Base of file mapped into memory.
+  unsigned char* base_;
+  // True iff base_ points to a memory buffer rather than an output file.
+  bool map_is_anonymous_;
+  // True if base_ was allocated using new rather than mmap.
+  bool map_is_allocated_;
+  // True if this is a temporary file which should not be output.
+  bool is_temporary_;
+};
 
 // An abtract class for data which has to go into the output file.
 
@@ -676,13 +800,6 @@ class Output_section_data : public Output_data
 		section_offset_type* poutput) const
   { return this->do_output_offset(object, shndx, offset, poutput); }
 
-  // Return whether this is the merge section for the input section
-  // SHNDX in OBJECT.  This should return true when output_offset
-  // would return true for some values of OFFSET.
-  bool
-  is_merge_section_for(const Relobj* object, unsigned int shndx) const
-  { return this->do_is_merge_section_for(object, shndx); }
-
   // Write the contents to a buffer.  This is used for sections which
   // require postprocessing, such as compression.
   void
@@ -714,11 +831,6 @@ class Output_section_data : public Output_data
   virtual bool
   do_output_offset(const Relobj*, unsigned int, section_offset_type,
 		   section_offset_type*) const
-  { return false; }
-
-  // The child class may implement is_merge_section_for.
-  virtual bool
-  do_is_merge_section_for(const Relobj*, unsigned int) const
   { return false; }
 
   // The child class may implement write_to_buffer.  Most child
@@ -1163,11 +1275,6 @@ class Output_reloc<elfcpp::SHT_REL, dynamic, size, big_endian>
 	      r2) const
   { return this->compare(r2) < 0; }
 
- private:
-  // Record that we need a dynamic symbol index.
-  void
-  set_needs_dynsym_index();
-
   // Return the symbol index.
   unsigned int
   get_symbol_index() const;
@@ -1175,6 +1282,11 @@ class Output_reloc<elfcpp::SHT_REL, dynamic, size, big_endian>
   // Return the output address.
   Address
   get_address() const;
+
+ private:
+  // Record that we need a dynamic symbol index.
+  void
+  set_needs_dynsym_index();
 
   // Codes for local_sym_index_.
   enum
@@ -1500,6 +1612,40 @@ class Output_data_reloc_base : public Output_data_reloc_generic
   void
   do_write(Output_file*);
 
+  // Generic implementation of do_write, allowing a customized
+  // class for writing the output relocation (e.g., for MIPS-64).
+  template<class Output_reloc_writer>
+  void
+  do_write_generic(Output_file* of)
+  {
+    const off_t off = this->offset();
+    const off_t oview_size = this->data_size();
+    unsigned char* const oview = of->get_output_view(off, oview_size);
+
+    if (this->sort_relocs())
+      {
+	gold_assert(dynamic);
+	std::sort(this->relocs_.begin(), this->relocs_.end(),
+		  Sort_relocs_comparison());
+      }
+
+    unsigned char* pov = oview;
+    for (typename Relocs::const_iterator p = this->relocs_.begin();
+	 p != this->relocs_.end();
+	 ++p)
+      {
+	Output_reloc_writer::write(p, pov);
+	pov += reloc_size;
+      }
+
+    gold_assert(pov - oview == oview_size);
+
+    of->write_output_view(off, oview_size, oview);
+
+    // We no longer need the relocation entries.
+    this->relocs_.clear();
+  }
+
   // Set the entry size and the link.
   void
   do_adjust_output_section(Output_section* os);
@@ -1713,6 +1859,17 @@ class Output_data_reloc<elfcpp::SHT_REL, dynamic, size, big_endian>
   {
     this->add(od, Output_reloc_type(relobj, local_sym_index, type, shndx,
 				    address, true, true, false, false));
+  }
+
+  void
+  add_local_relative(Sized_relobj<size, big_endian>* relobj,
+		     unsigned int local_sym_index, unsigned int type,
+		     Output_data* od, unsigned int shndx, Address address,
+		     bool use_plt_offset)
+  {
+    this->add(od, Output_reloc_type(relobj, local_sym_index, type, shndx,
+				    address, true, true, false,
+				    use_plt_offset));
   }
 
   // Add a local relocation which does not use a symbol for the relocation,
@@ -2302,60 +2459,67 @@ class Output_data_got : public Output_data_got_base
     this->free_list_.init(data_size, false);
   }
 
-  // Add an entry for a global symbol to the GOT.  Return true if this
-  // is a new GOT entry, false if the symbol was already in the GOT.
+  // Add an entry for a global symbol GSYM plus ADDEND to the GOT.
+  // Return true if this is a new GOT entry, false if the symbol plus
+  // addend was already in the GOT.
   bool
-  add_global(Symbol* gsym, unsigned int got_type);
+  add_global(Symbol* gsym, unsigned int got_type, uint64_t addend = 0);
 
   // Like add_global, but use the PLT offset of the global symbol if
   // it has one.
   bool
-  add_global_plt(Symbol* gsym, unsigned int got_type);
+  add_global_plt(Symbol* gsym, unsigned int got_type, uint64_t addend = 0);
 
   // Like add_global, but for a TLS symbol where the value will be
   // offset using Target::tls_offset_for_global.
   bool
-  add_global_tls(Symbol* gsym, unsigned int got_type)
-  { return add_global_plt(gsym, got_type); }
+  add_global_tls(Symbol* gsym, unsigned int got_type, uint64_t addend = 0)
+  { return this->add_global_plt(gsym, got_type, addend); }
 
-  // Add an entry for a global symbol to the GOT, and add a dynamic
-  // relocation of type R_TYPE for the GOT entry.
+  // Add an entry for a global symbol GSYM plus ADDEND to the GOT, and
+  // add a dynamic relocation of type R_TYPE for the GOT entry.
   void
   add_global_with_rel(Symbol* gsym, unsigned int got_type,
-		      Output_data_reloc_generic* rel_dyn, unsigned int r_type);
+		      Output_data_reloc_generic* rel_dyn, unsigned int r_type,
+		      uint64_t addend = 0);
 
-  // Add a pair of entries for a global symbol to the GOT, and add
-  // dynamic relocations of type R_TYPE_1 and R_TYPE_2, respectively.
+  // Add a pair of entries for a global symbol GSYM plus ADDEND to the
+  // GOT, and add dynamic relocations of type R_TYPE_1 and R_TYPE_2,
+  // respectively.
   void
   add_global_pair_with_rel(Symbol* gsym, unsigned int got_type,
 			   Output_data_reloc_generic* rel_dyn,
-			   unsigned int r_type_1, unsigned int r_type_2);
+			   unsigned int r_type_1, unsigned int r_type_2,
+			   uint64_t addend = 0);
 
-  // Add an entry for a local symbol to the GOT.  This returns true if
-  // this is a new GOT entry, false if the symbol already has a GOT
+  // Add an entry for a local symbol plus ADDEND to the GOT.  This returns
+  // true if this is a new GOT entry, false if the symbol already has a GOT
   // entry.
   bool
-  add_local(Relobj* object, unsigned int sym_index, unsigned int got_type);
+  add_local(Relobj* object, unsigned int sym_index, unsigned int got_type,
+	    uint64_t addend = 0);
 
   // Like add_local, but use the PLT offset of the local symbol if it
   // has one.
   bool
-  add_local_plt(Relobj* object, unsigned int sym_index, unsigned int got_type);
+  add_local_plt(Relobj* object, unsigned int sym_index, unsigned int got_type,
+		uint64_t addend = 0);
 
   // Like add_local, but for a TLS symbol where the value will be
   // offset using Target::tls_offset_for_local.
   bool
-  add_local_tls(Relobj* object, unsigned int sym_index, unsigned int got_type)
-  { return add_local_plt(object, sym_index, got_type); }
+  add_local_tls(Relobj* object, unsigned int sym_index, unsigned int got_type,
+		uint64_t addend = 0)
+  { return this->add_local_plt(object, sym_index, got_type, addend); }
 
-  // Add an entry for a local symbol to the GOT, and add a dynamic
+  // Add an entry for a local symbol plus ADDEND to the GOT, and add a dynamic
   // relocation of type R_TYPE for the GOT entry.
   void
   add_local_with_rel(Relobj* object, unsigned int sym_index,
 		     unsigned int got_type, Output_data_reloc_generic* rel_dyn,
-		     unsigned int r_type);
+		     unsigned int r_type, uint64_t addend = 0);
 
-  // Add a pair of entries for a local symbol to the GOT, and add
+  // Add a pair of entries for a local symbol plus ADDEND to the GOT, and add
   // a dynamic relocation of type R_TYPE using the section symbol of
   // the output section to which input section SHNDX maps, on the first.
   // The first got entry will have a value of zero, the second the
@@ -2364,17 +2528,18 @@ class Output_data_got : public Output_data_got_base
   add_local_pair_with_rel(Relobj* object, unsigned int sym_index,
 			  unsigned int shndx, unsigned int got_type,
 			  Output_data_reloc_generic* rel_dyn,
-			  unsigned int r_type);
+			  unsigned int r_type, uint64_t addend = 0);
 
-  // Add a pair of entries for a local symbol to the GOT, and add
-  // a dynamic relocation of type R_TYPE using STN_UNDEF on the first.
-  // The first got entry will have a value of zero, the second the
-  // value of the local symbol offset by Target::tls_offset_for_local.
+  // Add a pair of entries for a local symbol plus ADDEND to the GOT,
+  // and add a dynamic relocation of type R_TYPE using STN_UNDEF on
+  // the first.  The first got entry will have a value of zero, the
+  // second the value of the local symbol plus ADDEND offset by
+  // Target::tls_offset_for_local.
   void
   add_local_tls_pair(Relobj* object, unsigned int sym_index,
 		     unsigned int got_type,
 		     Output_data_reloc_generic* rel_dyn,
-		     unsigned int r_type);
+		     unsigned int r_type, uint64_t addend = 0);
 
   // Add a constant to the GOT.  This returns the offset of the new
   // entry from the start of the GOT.
@@ -2395,14 +2560,15 @@ class Output_data_got : public Output_data_got_base
     this->replace_got_entry(i, Got_entry(constant));
   }
 
-  // Reserve a slot in the GOT for a local symbol.
+  // Reserve a slot in the GOT for a local symbol plus ADDEND.
   void
   reserve_local(unsigned int i, Relobj* object, unsigned int sym_index,
-		unsigned int got_type);
+		unsigned int got_type, uint64_t addend = 0);
 
-  // Reserve a slot in the GOT for a global symbol.
+  // Reserve a slot in the GOT for a global symbol plus ADDEND.
   void
-  reserve_global(unsigned int i, Symbol* gsym, unsigned int got_type);
+  reserve_global(unsigned int i, Symbol* gsym, unsigned int got_type,
+		 uint64_t addend = 0);
 
  protected:
   // Write out the GOT table.
@@ -2436,20 +2602,21 @@ class Output_data_got : public Output_data_got_base
    public:
     // Create a zero entry.
     Got_entry()
-      : local_sym_index_(RESERVED_CODE), use_plt_or_tls_offset_(false)
+      : local_sym_index_(RESERVED_CODE), use_plt_or_tls_offset_(false),
+	addend_(0)
     { this->u_.constant = 0; }
 
     // Create a global symbol entry.
-    Got_entry(Symbol* gsym, bool use_plt_or_tls_offset)
+    Got_entry(Symbol* gsym, bool use_plt_or_tls_offset, uint64_t addend)
       : local_sym_index_(GSYM_CODE),
-	use_plt_or_tls_offset_(use_plt_or_tls_offset)
+	use_plt_or_tls_offset_(use_plt_or_tls_offset), addend_(addend)
     { this->u_.gsym = gsym; }
 
     // Create a local symbol entry.
     Got_entry(Relobj* object, unsigned int local_sym_index,
-	      bool use_plt_or_tls_offset)
+	      bool use_plt_or_tls_offset, uint64_t addend)
       : local_sym_index_(local_sym_index),
-	use_plt_or_tls_offset_(use_plt_or_tls_offset)
+	use_plt_or_tls_offset_(use_plt_or_tls_offset), addend_(addend)
     {
       gold_assert(local_sym_index != GSYM_CODE
 		  && local_sym_index != CONSTANT_CODE
@@ -2466,7 +2633,8 @@ class Output_data_got : public Output_data_got_base
 
     // Write the GOT entry to an output view.
     void
-    write(unsigned int got_indx, unsigned char* pov) const;
+    write(Output_data_got_base* got, unsigned int got_indx,
+	  unsigned char* pov) const;
 
    private:
     enum
@@ -2491,6 +2659,8 @@ class Output_data_got : public Output_data_got_base
     // Whether to use the PLT offset of the symbol if it has one.
     // For TLS symbols, whether to offset the symbol value.
     bool use_plt_or_tls_offset_ : 1;
+    // The addend.
+    uint64_t addend_;
   };
 
   typedef std::vector<Got_entry> Got_entries;
@@ -2578,6 +2748,15 @@ class Output_data_dynamic : public Output_section_data
   add_string(elfcpp::DT tag, const std::string& str)
   { this->add_string(tag, str.c_str()); }
 
+  // Add a new dynamic entry with custom value.
+  void
+  add_custom(elfcpp::DT tag)
+  { this->add_entry(Dynamic_entry(tag)); }
+
+  // Get a dynamic entry offset.
+  unsigned int
+  get_entry_offset(elfcpp::DT tag) const;
+
  protected:
   // Adjust the output section to set the entry size.
   void
@@ -2642,6 +2821,11 @@ class Output_data_dynamic : public Output_section_data
       : tag_(tag), offset_(DYNAMIC_STRING)
     { this->u_.str = str; }
 
+    // Create an entry with a custom value.
+    Dynamic_entry(elfcpp::DT tag)
+      : tag_(tag), offset_(DYNAMIC_CUSTOM)
+    { }
+
     // Return the tag of this entry.
     elfcpp::DT
     tag() const
@@ -2662,10 +2846,12 @@ class Output_data_dynamic : public Output_section_data
       DYNAMIC_NUMBER = -1U,
       // Section size.
       DYNAMIC_SECTION_SIZE = -2U,
-      // Symbol adress.
+      // Symbol address.
       DYNAMIC_SYMBOL = -3U,
       // String.
-      DYNAMIC_STRING = -4U
+      DYNAMIC_STRING = -4U,
+      // Custom value.
+      DYNAMIC_CUSTOM = -5U
       // Any other value indicates a section address plus OFFSET.
     };
 
@@ -2847,7 +3033,7 @@ class Output_section_lookup_maps
  public:
   Output_section_lookup_maps()
     : is_valid_(true), merge_sections_by_properties_(),
-      merge_sections_by_id_(), relaxed_input_sections_by_id_()
+      relaxed_input_sections_by_id_()
   { }
 
   // Whether the maps are valid.
@@ -2865,7 +3051,6 @@ class Output_section_lookup_maps
   clear()
   {
     this->merge_sections_by_properties_.clear();
-    this->merge_sections_by_id_.clear();
     this->relaxed_input_sections_by_id_.clear();
     // A cleared map is valid.
     this->is_valid_ = true;
@@ -2882,17 +3067,6 @@ class Output_section_lookup_maps
     return p != this->merge_sections_by_properties_.end() ? p->second : NULL;
   }
 
-  // Find a merge section by section ID of a merge input section.  Return NULL
-  // if none is found.
-  Output_merge_base*
-  find_merge_section(const Object* object, unsigned int shndx) const
-  {
-    gold_assert(this->is_valid_);
-    Merge_sections_by_id::const_iterator p =
-      this->merge_sections_by_id_.find(Const_section_id(object, shndx));
-    return p != this->merge_sections_by_id_.end() ? p->second : NULL;
-  }
-
   // Add a merge section pointed by POMB with properties MSP.
   void
   add_merge_section(const Merge_section_properties& msp,
@@ -2904,22 +3078,9 @@ class Output_section_lookup_maps
     gold_assert(result.second);
   }
 
-  // Add a mapping from a merged input section in OBJECT with index SHNDX
-  // to a merge output section pointed by POMB.
-  void
-  add_merge_input_section(const Object* object, unsigned int shndx,
-			  Output_merge_base* pomb)
-  {
-    Const_section_id csid(object, shndx);
-    std::pair<Const_section_id, Output_merge_base*> value(csid, pomb);
-    std::pair<Merge_sections_by_id::iterator, bool> result =
-      this->merge_sections_by_id_.insert(value);
-    gold_assert(result.second);
-  }
-
   // Find a relaxed input section of OBJECT with index SHNDX.
   Output_relaxed_input_section*
-  find_relaxed_input_section(const Object* object, unsigned int shndx) const
+  find_relaxed_input_section(const Relobj* object, unsigned int shndx) const
   {
     gold_assert(this->is_valid_);
     Relaxed_input_sections_by_id::const_iterator p =
@@ -2942,10 +3103,6 @@ class Output_section_lookup_maps
   }
 
  private:
-  typedef Unordered_map<Const_section_id, Output_merge_base*,
-			Const_section_id_hash>
-    Merge_sections_by_id;
-
   typedef Unordered_map<Merge_section_properties, Output_merge_base*,
 			Merge_section_properties::hash,
 			Merge_section_properties::equal_to>
@@ -2959,8 +3116,6 @@ class Output_section_lookup_maps
   bool is_valid_;
   // Merge sections by merge section properties.
   Merge_sections_by_properties merge_sections_by_properties_;
-  // Merge sections by section IDs.
-  Merge_sections_by_id merge_sections_by_id_;
   // Relaxed sections by section IDs.
   Relaxed_input_sections_by_id relaxed_input_sections_by_id_;
 };
@@ -3120,6 +3275,11 @@ class Output_section : public Output_data
   // Update the output section flags based on input section flags.
   void
   update_flags_for_input_section(elfcpp::Elf_Xword flags);
+
+  // Set the output section flags.
+  void
+  set_flags(elfcpp::Elf_Xword flags)
+  { this->flags_ = flags; }
 
   // Return the entsize field.
   uint64_t
@@ -3751,11 +3911,6 @@ class Output_section : public Output_data
 		  section_offset_type offset,
 		  section_offset_type* poutput) const;
 
-    // Return whether this is the merge section for the input section
-    // SHNDX in OBJECT.
-    bool
-    is_merge_section_for(const Relobj* object, unsigned int shndx) const;
-
     // Write out the data.  This does nothing for an input section.
     void
     write(Output_file*);
@@ -3952,6 +4107,16 @@ class Output_section : public Output_data
   Input_section_list&
   input_sections()
   { return this->input_sections_; }
+
+  // For -r and --emit-relocs, we need to keep track of the associated
+  // relocation section.
+  Output_section*
+  reloc_section() const
+  { return this->reloc_section_; }
+
+  void
+  set_reloc_section(Output_section* os)
+  { this->reloc_section_ = os; }
 
  protected:
   // Return the output section--i.e., the object itself.
@@ -4280,7 +4445,7 @@ class Output_section : public Output_data
 
   // Find the merge section into which an input section with index SHNDX in
   // OBJECT has been added.  Return NULL if none found.
-  Output_section_data*
+  const Output_section_data*
   find_merge_section(const Relobj* object, unsigned int shndx) const;
 
   // Build a relaxation map.
@@ -4440,6 +4605,8 @@ class Output_section : public Output_data
   Output_fill* free_space_fill_;
   // Amount added as patch space for incremental linking.
   off_t patch_space_;
+  // Associated relocation section, when emitting relocations.
+  Output_section* reloc_section_;
 };
 
 // An output segment.  PT_LOAD segments are built from collections of
@@ -4492,6 +4659,16 @@ class Output_segment
   off_t
   offset() const
   { return this->offset_; }
+
+  // Return the segment alignment.
+  uint64_t
+  align() const
+  { return this->align_; }
+
+  // Set the segment alignment.
+  void
+  set_align(uint64_t align)
+  { this->align_ = align; }
 
   // Whether this is a segment created to hold large data sections.
   bool
@@ -4558,6 +4735,7 @@ class Output_segment
   first_section_load_address() const
   {
     const Output_section* os = this->first_section();
+    gold_assert(os != NULL);
     return os->has_load_address() ? os->load_address() : os->address();
   }
 
@@ -4613,6 +4791,13 @@ class Output_segment
       this->min_p_align_ = align;
   }
 
+  // Set the memory size of this segment.
+  void
+  set_size(uint64_t size)
+  {
+    this->memsz_ = size;
+  }
+
   // Set the offset of this segment based on the section.  This should
   // only be called for a non-PT_LOAD segment.
   void
@@ -4661,8 +4846,8 @@ class Output_segment
   // Set the section addresses in an Output_data_list.
   uint64_t
   set_section_list_addresses(Layout*, bool reset, Output_data_list*,
-			     uint64_t addr, off_t* poff, unsigned int* pshndx,
-			     bool* in_tls);
+			     uint64_t addr, off_t* poff, off_t* fpoff,
+			     unsigned int* pshndx, bool* in_tls);
 
   // Return the number of Output_sections in an Output_data_list.
   unsigned int
@@ -4707,6 +4892,8 @@ class Output_segment
   uint64_t paddr_;
   // The size of the segment in memory.
   uint64_t memsz_;
+  // The segment alignment.
+  uint64_t align_;
   // The maximum section alignment.  The is_max_align_known_ field
   // indicates whether this has been finalized.
   uint64_t max_align_;
@@ -4734,131 +4921,6 @@ class Output_segment
   bool is_large_data_segment_ : 1;
   // Whether this was marked as a unique segment via a linker plugin.
   bool is_unique_segment_ : 1;
-};
-
-// This class represents the output file.
-
-class Output_file
-{
- public:
-  Output_file(const char* name);
-
-  // Indicate that this is a temporary file which should not be
-  // output.
-  void
-  set_is_temporary()
-  { this->is_temporary_ = true; }
-
-  // Try to open an existing file. Returns false if the file doesn't
-  // exist, has a size of 0 or can't be mmaped.  This method is
-  // thread-unsafe.  If BASE_NAME is not NULL, use the contents of
-  // that file as the base for incremental linking.
-  bool
-  open_base_file(const char* base_name, bool writable);
-
-  // Open the output file.  FILE_SIZE is the final size of the file.
-  // If the file already exists, it is deleted/truncated.  This method
-  // is thread-unsafe.
-  void
-  open(off_t file_size);
-
-  // Resize the output file.  This method is thread-unsafe.
-  void
-  resize(off_t file_size);
-
-  // Close the output file (flushing all buffered data) and make sure
-  // there are no errors.  This method is thread-unsafe.
-  void
-  close();
-
-  // Return the size of this file.
-  off_t
-  filesize()
-  { return this->file_size_; }
-
-  // Return the name of this file.
-  const char*
-  filename()
-  { return this->name_; }
-
-  // We currently always use mmap which makes the view handling quite
-  // simple.  In the future we may support other approaches.
-
-  // Write data to the output file.
-  void
-  write(off_t offset, const void* data, size_t len)
-  { memcpy(this->base_ + offset, data, len); }
-
-  // Get a buffer to use to write to the file, given the offset into
-  // the file and the size.
-  unsigned char*
-  get_output_view(off_t start, size_t size)
-  {
-    gold_assert(start >= 0
-		&& start + static_cast<off_t>(size) <= this->file_size_);
-    return this->base_ + start;
-  }
-
-  // VIEW must have been returned by get_output_view.  Write the
-  // buffer to the file, passing in the offset and the size.
-  void
-  write_output_view(off_t, size_t, unsigned char*)
-  { }
-
-  // Get a read/write buffer.  This is used when we want to write part
-  // of the file, read it in, and write it again.
-  unsigned char*
-  get_input_output_view(off_t start, size_t size)
-  { return this->get_output_view(start, size); }
-
-  // Write a read/write buffer back to the file.
-  void
-  write_input_output_view(off_t, size_t, unsigned char*)
-  { }
-
-  // Get a read buffer.  This is used when we just want to read part
-  // of the file back it in.
-  const unsigned char*
-  get_input_view(off_t start, size_t size)
-  { return this->get_output_view(start, size); }
-
-  // Release a read bfufer.
-  void
-  free_input_view(off_t, size_t, const unsigned char*)
-  { }
-
- private:
-  // Map the file into memory or, if that fails, allocate anonymous
-  // memory.
-  void
-  map();
-
-  // Allocate anonymous memory for the file.
-  bool
-  map_anonymous();
-
-  // Map the file into memory.
-  bool
-  map_no_anonymous(bool);
-
-  // Unmap the file from memory (and flush to disk buffers).
-  void
-  unmap();
-
-  // File name.
-  const char* name_;
-  // File descriptor.
-  int o_;
-  // File size.
-  off_t file_size_;
-  // Base of file mapped into memory.
-  unsigned char* base_;
-  // True iff base_ points to a memory buffer rather than an output file.
-  bool map_is_anonymous_;
-  // True if base_ was allocated using new rather than mmap.
-  bool map_is_allocated_;
-  // True if this is a temporary file which should not be output.
-  bool is_temporary_;
 };
 
 } // End namespace gold.

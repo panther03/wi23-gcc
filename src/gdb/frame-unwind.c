@@ -1,6 +1,6 @@
 /* Definitions for frame unwinder, for GDB, the GNU debugger.
 
-   Copyright (C) 2003-2013 Free Software Foundation, Inc.
+   Copyright (C) 2003-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -24,11 +24,11 @@
 #include "inline-frame.h"
 #include "value.h"
 #include "regcache.h"
-#include "exceptions.h"
-#include "gdb_assert.h"
-#include "gdb_obstack.h"
-
-static struct gdbarch_data *frame_unwind_data;
+#include "gdbsupport/gdb_obstack.h"
+#include "target.h"
+#include "gdbarch.h"
+#include "dwarf2/frame-tailcall.h"
+#include "cli/cli-cmds.h"
 
 struct frame_unwind_table_entry
 {
@@ -38,26 +38,55 @@ struct frame_unwind_table_entry
 
 struct frame_unwind_table
 {
-  struct frame_unwind_table_entry *list;
+  struct frame_unwind_table_entry *list = nullptr;
   /* The head of the OSABI part of the search list.  */
-  struct frame_unwind_table_entry **osabi_head;
+  struct frame_unwind_table_entry **osabi_head = nullptr;
 };
 
-static void *
-frame_unwind_init (struct obstack *obstack)
+static const registry<gdbarch>::key<struct frame_unwind_table>
+     frame_unwind_data;
+
+/* A helper function to add an unwinder to a list.  LINK says where to
+   install the new unwinder.  The new link is returned.  */
+
+static struct frame_unwind_table_entry **
+add_unwinder (struct obstack *obstack, const struct frame_unwind *unwinder,
+	      struct frame_unwind_table_entry **link)
 {
-  struct frame_unwind_table *table
-    = OBSTACK_ZALLOC (obstack, struct frame_unwind_table);
+  *link = OBSTACK_ZALLOC (obstack, struct frame_unwind_table_entry);
+  (*link)->unwinder = unwinder;
+  return &(*link)->next;
+}
+
+static struct frame_unwind_table *
+get_frame_unwind_table (struct gdbarch *gdbarch)
+{
+  struct frame_unwind_table *table = frame_unwind_data.get (gdbarch);
+  if (table != nullptr)
+    return table;
+
+  table = new frame_unwind_table;
 
   /* Start the table out with a few default sniffers.  OSABI code
      can't override this.  */
-  table->list = OBSTACK_ZALLOC (obstack, struct frame_unwind_table_entry);
-  table->list->unwinder = &dummy_frame_unwind;
-  table->list->next = OBSTACK_ZALLOC (obstack,
-				      struct frame_unwind_table_entry);
-  table->list->next->unwinder = &inline_frame_unwind;
+  struct frame_unwind_table_entry **link = &table->list;
+
+  struct obstack *obstack = gdbarch_obstack (gdbarch);
+  link = add_unwinder (obstack, &dummy_frame_unwind, link);
+  /* The DWARF tailcall sniffer must come before the inline sniffer.
+     Otherwise, we can end up in a situation where a DWARF frame finds
+     tailcall information, but then the inline sniffer claims a frame
+     before the tailcall sniffer, resulting in confusion.  This is
+     safe to do always because the tailcall sniffer can only ever be
+     activated if the newer frame was created using the DWARF
+     unwinder, and it also found tailcall information.  */
+  link = add_unwinder (obstack, &dwarf2_tailcall_frame_unwind, link);
+  link = add_unwinder (obstack, &inline_frame_unwind, link);
+
   /* The insertion point for OSABI sniffers.  */
-  table->osabi_head = &table->list->next->next;
+  table->osabi_head = link;
+  frame_unwind_data.set (gdbarch, table);
+
   return table;
 }
 
@@ -65,7 +94,7 @@ void
 frame_unwind_prepend_unwinder (struct gdbarch *gdbarch,
 				const struct frame_unwind *unwinder)
 {
-  struct frame_unwind_table *table = gdbarch_data (gdbarch, frame_unwind_data);
+  struct frame_unwind_table *table = get_frame_unwind_table (gdbarch);
   struct frame_unwind_table_entry *entry;
 
   /* Insert the new entry at the start of the list.  */
@@ -79,7 +108,7 @@ void
 frame_unwind_append_unwinder (struct gdbarch *gdbarch,
 			      const struct frame_unwind *unwinder)
 {
-  struct frame_unwind_table *table = gdbarch_data (gdbarch, frame_unwind_data);
+  struct frame_unwind_table *table = get_frame_unwind_table (gdbarch);
   struct frame_unwind_table_entry **ip;
 
   /* Find the end of the list and insert the new entry there.  */
@@ -88,48 +117,98 @@ frame_unwind_append_unwinder (struct gdbarch *gdbarch,
   (*ip)->unwinder = unwinder;
 }
 
-/* Iterate through sniffers for THIS_FRAME frame until one returns with an
-   unwinder implementation.  THIS_FRAME->UNWIND must be NULL, it will get set
-   by this function.  Possibly initialize THIS_CACHE.  */
+/* Call SNIFFER from UNWINDER.  If it succeeded set UNWINDER for
+   THIS_FRAME and return 1.  Otherwise the function keeps THIS_FRAME
+   unchanged and returns 0.  */
 
-void
-frame_unwind_find_by_frame (struct frame_info *this_frame, void **this_cache)
+static int
+frame_unwind_try_unwinder (frame_info_ptr this_frame, void **this_cache,
+			  const struct frame_unwind *unwinder)
 {
-  struct gdbarch *gdbarch = get_frame_arch (this_frame);
-  struct frame_unwind_table *table = gdbarch_data (gdbarch, frame_unwind_data);
-  struct frame_unwind_table_entry *entry;
+  int res = 0;
 
-  for (entry = table->list; entry != NULL; entry = entry->next)
+  unsigned int entry_generation = get_frame_cache_generation ();
+
+  frame_prepare_for_sniffer (this_frame, unwinder);
+
+  try
     {
-      struct cleanup *old_cleanup;
-      volatile struct gdb_exception ex;
-      int res = 0;
+      frame_debug_printf ("trying unwinder \"%s\"", unwinder->name);
+      res = unwinder->sniffer (unwinder, this_frame, this_cache);
+    }
+  catch (const gdb_exception &ex)
+    {
+      frame_debug_printf ("caught exception: %s", ex.message->c_str ());
 
-      old_cleanup = frame_prepare_for_sniffer (this_frame, entry->unwinder);
-
-      TRY_CATCH (ex, RETURN_MASK_ERROR)
+      /* Catch all exceptions, caused by either interrupt or error.
+	 Reset *THIS_CACHE, unless something reinitialized the frame
+	 cache meanwhile, in which case THIS_FRAME/THIS_CACHE are now
+	 dangling.  */
+      if (get_frame_cache_generation () == entry_generation)
 	{
-	  res = entry->unwinder->sniffer (entry->unwinder, this_frame,
-					  this_cache);
+	  *this_cache = NULL;
+	  frame_cleanup_after_sniffer (this_frame);
 	}
-      if (ex.reason < 0 && ex.error == NOT_AVAILABLE_ERROR)
+
+      if (ex.error == NOT_AVAILABLE_ERROR)
 	{
 	  /* This usually means that not even the PC is available,
 	     thus most unwinders aren't able to determine if they're
 	     the best fit.  Keep trying.  Fallback prologue unwinders
 	     should always accept the frame.  */
+	  return 0;
 	}
-      else if (ex.reason < 0)
-	throw_exception (ex);
-      else if (res)
-        {
-          discard_cleanups (old_cleanup);
-          return;
-        }
-
-      do_cleanups (old_cleanup);
+      throw;
     }
-  internal_error (__FILE__, __LINE__, _("frame_unwind_find_by_frame failed"));
+
+  if (res)
+    {
+      frame_debug_printf ("yes");
+      return 1;
+    }
+  else
+    {
+      frame_debug_printf ("no");
+      /* Don't set *THIS_CACHE to NULL here, because sniffer has to do
+	 so.  */
+      frame_cleanup_after_sniffer (this_frame);
+      return 0;
+    }
+  gdb_assert_not_reached ("frame_unwind_try_unwinder");
+}
+
+/* Iterate through sniffers for THIS_FRAME frame until one returns with an
+   unwinder implementation.  THIS_FRAME->UNWIND must be NULL, it will get set
+   by this function.  Possibly initialize THIS_CACHE.  */
+
+void
+frame_unwind_find_by_frame (frame_info_ptr this_frame, void **this_cache)
+{
+  FRAME_SCOPED_DEBUG_ENTER_EXIT;
+  frame_debug_printf ("this_frame=%d", frame_relative_level (this_frame));
+
+  struct gdbarch *gdbarch = get_frame_arch (this_frame);
+  struct frame_unwind_table *table = get_frame_unwind_table (gdbarch);
+  struct frame_unwind_table_entry *entry;
+  const struct frame_unwind *unwinder_from_target;
+
+  unwinder_from_target = target_get_unwinder ();
+  if (unwinder_from_target != NULL
+      && frame_unwind_try_unwinder (this_frame, this_cache,
+				   unwinder_from_target))
+    return;
+
+  unwinder_from_target = target_get_tailcall_unwinder ();
+  if (unwinder_from_target != NULL
+      && frame_unwind_try_unwinder (this_frame, this_cache,
+				   unwinder_from_target))
+    return;
+
+  for (entry = table->list; entry != NULL; entry = entry->next)
+    if (frame_unwind_try_unwinder (this_frame, this_cache, entry->unwinder))
+      return;
+
+  internal_error (_("frame_unwind_find_by_frame failed"));
 }
 
 /* A default frame sniffer which always accepts the frame.  Used by
@@ -137,20 +216,44 @@ frame_unwind_find_by_frame (struct frame_info *this_frame, void **this_cache)
 
 int
 default_frame_sniffer (const struct frame_unwind *self,
-		       struct frame_info *this_frame,
+		       frame_info_ptr this_frame,
 		       void **this_prologue_cache)
 {
   return 1;
 }
 
-/* A default frame unwinder stop_reason callback that always claims
-   the frame is unwindable.  */
+/* The default frame unwinder stop_reason callback.  */
 
 enum unwind_stop_reason
-default_frame_unwind_stop_reason (struct frame_info *this_frame,
+default_frame_unwind_stop_reason (frame_info_ptr this_frame,
 				  void **this_cache)
 {
-  return UNWIND_NO_REASON;
+  struct frame_id this_id = get_frame_id (this_frame);
+
+  if (this_id == outer_frame_id)
+    return UNWIND_OUTERMOST;
+  else
+    return UNWIND_NO_REASON;
+}
+
+/* See frame-unwind.h.  */
+
+CORE_ADDR
+default_unwind_pc (struct gdbarch *gdbarch, frame_info_ptr next_frame)
+{
+  int pc_regnum = gdbarch_pc_regnum (gdbarch);
+  CORE_ADDR pc = frame_unwind_register_unsigned (next_frame, pc_regnum);
+  pc = gdbarch_addr_bits_remove (gdbarch, pc);
+  return pc;
+}
+
+/* See frame-unwind.h.  */
+
+CORE_ADDR
+default_unwind_sp (struct gdbarch *gdbarch, frame_info_ptr next_frame)
+{
+  int sp_regnum = gdbarch_sp_regnum (gdbarch);
+  return frame_unwind_register_unsigned (next_frame, sp_regnum);
 }
 
 /* Helper functions for value-based register unwinding.  These return
@@ -159,19 +262,19 @@ default_frame_unwind_stop_reason (struct frame_info *this_frame,
 /* Return a value which indicates that FRAME did not save REGNUM.  */
 
 struct value *
-frame_unwind_got_optimized (struct frame_info *frame, int regnum)
+frame_unwind_got_optimized (frame_info_ptr frame, int regnum)
 {
   struct gdbarch *gdbarch = frame_unwind_arch (frame);
-  struct type *reg_type = register_type (gdbarch, regnum);
+  struct type *type = register_type (gdbarch, regnum);
 
-  return allocate_optimized_out_value (reg_type);
+  return value::allocate_optimized_out (type);
 }
 
 /* Return a value which indicates that FRAME copied REGNUM into
    register NEW_REGNUM.  */
 
 struct value *
-frame_unwind_got_register (struct frame_info *frame,
+frame_unwind_got_register (frame_info_ptr frame,
 			   int regnum, int new_regnum)
 {
   return value_of_register_lazy (frame, new_regnum);
@@ -181,12 +284,12 @@ frame_unwind_got_register (struct frame_info *frame,
    ADDR.  */
 
 struct value *
-frame_unwind_got_memory (struct frame_info *frame, int regnum, CORE_ADDR addr)
+frame_unwind_got_memory (frame_info_ptr frame, int regnum, CORE_ADDR addr)
 {
   struct gdbarch *gdbarch = frame_unwind_arch (frame);
   struct value *v = value_at_lazy (register_type (gdbarch, regnum), addr);
 
-  set_value_stack (v, 1);
+  v->set_stack (true);
   return v;
 }
 
@@ -194,27 +297,28 @@ frame_unwind_got_memory (struct frame_info *frame, int regnum, CORE_ADDR addr)
    REGNUM has a known constant (computed) value of VAL.  */
 
 struct value *
-frame_unwind_got_constant (struct frame_info *frame, int regnum,
+frame_unwind_got_constant (frame_info_ptr frame, int regnum,
 			   ULONGEST val)
 {
   struct gdbarch *gdbarch = frame_unwind_arch (frame);
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   struct value *reg_val;
 
-  reg_val = value_zero (register_type (gdbarch, regnum), not_lval);
-  store_unsigned_integer (value_contents_writeable (reg_val),
+  reg_val = value::zero (register_type (gdbarch, regnum), not_lval);
+  store_unsigned_integer (reg_val->contents_writeable ().data (),
 			  register_size (gdbarch, regnum), byte_order, val);
   return reg_val;
 }
 
 struct value *
-frame_unwind_got_bytes (struct frame_info *frame, int regnum, gdb_byte *buf)
+frame_unwind_got_bytes (frame_info_ptr frame, int regnum, const gdb_byte *buf)
 {
   struct gdbarch *gdbarch = frame_unwind_arch (frame);
   struct value *reg_val;
 
-  reg_val = value_zero (register_type (gdbarch, regnum), not_lval);
-  memcpy (value_contents_raw (reg_val), buf, register_size (gdbarch, regnum));
+  reg_val = value::zero (register_type (gdbarch, regnum), not_lval);
+  memcpy (reg_val->contents_raw ().data (), buf,
+	  register_size (gdbarch, regnum));
   return reg_val;
 }
 
@@ -223,23 +327,45 @@ frame_unwind_got_bytes (struct frame_info *frame, int regnum, gdb_byte *buf)
    CORE_ADDR to a target address if necessary.  */
 
 struct value *
-frame_unwind_got_address (struct frame_info *frame, int regnum,
+frame_unwind_got_address (frame_info_ptr frame, int regnum,
 			  CORE_ADDR addr)
 {
   struct gdbarch *gdbarch = frame_unwind_arch (frame);
   struct value *reg_val;
 
-  reg_val = value_zero (register_type (gdbarch, regnum), not_lval);
-  pack_long (value_contents_writeable (reg_val),
+  reg_val = value::zero (register_type (gdbarch, regnum), not_lval);
+  pack_long (reg_val->contents_writeable ().data (),
 	     register_type (gdbarch, regnum), addr);
   return reg_val;
 }
 
-/* -Wmissing-prototypes */
-extern initialize_file_ftype _initialize_frame_unwind;
+/* Implement "maintenance info frame-unwinders" command.  */
 
-void
-_initialize_frame_unwind (void)
+static void
+maintenance_info_frame_unwinders (const char *args, int from_tty)
 {
-  frame_unwind_data = gdbarch_data_register_pre_init (frame_unwind_init);
+  struct gdbarch *gdbarch = target_gdbarch ();
+  struct frame_unwind_table *table = get_frame_unwind_table (gdbarch);
+
+  for (struct frame_unwind_table_entry *entry = table->list; entry != NULL;
+       entry = entry->next)
+    {
+      const char *name = entry->unwinder->name;
+      const char *type = frame_type_str (entry->unwinder->type);
+
+      gdb_printf (gdb_stdout, "%-16s\t%-16s\n", name, type);
+    }
+}
+
+void _initialize_frame_unwind ();
+void
+_initialize_frame_unwind ()
+{
+  /* Add "maint info frame-unwinders".  */
+  add_cmd ("frame-unwinders",
+	   class_maintenance,
+	   maintenance_info_frame_unwinders,
+	   _("List the frame unwinders currently in effect, "
+	     "starting with the highest priority."),
+	   &maintenanceinfolist);
 }

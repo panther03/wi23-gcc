@@ -1,6 +1,5 @@
 /* Generic stabs parsing for gas.
-   Copyright 1989, 1990, 1991, 1993, 1995, 1996, 1997, 1998, 2000, 2001
-   2002, 2003, 2004, 2005, 2007, 2009  Free Software Foundation, Inc.
+   Copyright (C) 1989-2023 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -35,8 +34,7 @@
 
 int outputting_stabs_line_debug = 0;
 
-static void s_stab_generic (int, char *, char *);
-static void generate_asm_file (int, char *);
+static void generate_asm_file (int, const char *);
 
 /* Allow backends to override the names used for the stab sections.  */
 #ifndef STAB_SECTION_NAME
@@ -47,14 +45,30 @@ static void generate_asm_file (int, char *);
 #define STAB_STRING_SECTION_NAME ".stabstr"
 #endif
 
-/* Non-zero if we're in the middle of a .func function, in which case
-   stabs_generate_asm_lineno emits function relative line number stabs.
-   Otherwise it emits line number stabs with absolute addresses.  Note that
-   both cases only apply to assembler code assembled with -gstabs.  */
-static int in_dot_func_p;
-
-/* Label at start of current function if in_dot_func_p != 0.  */
+/* Label at start of current function if we're in the middle of a
+   .func function, in which case stabs_generate_asm_lineno emits
+   function relative line number stabs.  Otherwise it emits line
+   number stabs with absolute addresses.  Note that both cases only
+   apply to assembler code assembled with -gstabs.  */
 static const char *current_function_label;
+
+/* Current stab section when SEPARATE_STAB_SECTIONS.  */
+static segT cached_sec;
+
+/* State used by generate_asm_file.  */
+static char *last_asm_file;
+static int file_label_count;
+
+/* State used by stabs_generate_asm_lineno.  */
+static int line_label_count;
+static unsigned int prev_lineno;
+static char *prev_line_file;
+
+/* State used by stabs_generate_asm_func.  */
+static bool void_emitted_p;
+
+/* State used by stabs_generate_asm_endfunc.  */
+static int endfunc_label_count;
 
 /*
  * Handle .stabX directives, which used to be open-coded.
@@ -81,7 +95,8 @@ static const char *current_function_label;
 #endif
 
 unsigned int
-get_stab_string_offset (const char *string, const char *stabstr_secname)
+get_stab_string_offset (const char *string, const char *stabstr_secname,
+			bool free_stabstr_secname)
 {
   unsigned int length;
   unsigned int retval;
@@ -98,8 +113,10 @@ get_stab_string_offset (const char *string, const char *stabstr_secname)
   save_seg = now_seg;
   save_subseg = now_subseg;
 
-  /* Create the stab string section.  */
+  /* Create the stab string section, if it doesn't already exist.  */
   seg = subseg_new (stabstr_secname, 0);
+  if (free_stabstr_secname && seg->name != stabstr_secname)
+    free ((char *) stabstr_secname);
 
   retval = seg_info (seg)->stabu.stab_string_size;
   if (retval <= 0)
@@ -108,9 +125,7 @@ get_stab_string_offset (const char *string, const char *stabstr_secname)
       p = frag_more (1);
       *p = 0;
       retval = seg_info (seg)->stabu.stab_string_size = 1;
-      bfd_set_section_flags (stdoutput, seg, SEC_READONLY | SEC_DEBUGGING);
-      if (seg->name == stabstr_secname)
-	seg->name = xstrdup (stabstr_secname);
+      bfd_set_section_flags (seg, SEC_READONLY | SEC_DEBUGGING);
     }
 
   if (length > 0)
@@ -135,10 +150,7 @@ get_stab_string_offset (const char *string, const char *stabstr_secname)
 
 /* Here instead of obj-aout.c because other formats use it too.  */
 void
-aout_process_stab (what, string, type, other, desc)
-     int what;
-     const char *string;
-     int type, other, desc;
+aout_process_stab (int what, const char *string, int type, int other, int desc)
 {
   /* Put the stab information in the symbol table.  */
   symbolS *symbol;
@@ -148,8 +160,7 @@ aout_process_stab (what, string, type, other, desc)
      symbol chain.  This is to avoid "continuation symbols" (where one
      ends in "\" and the debug info is continued in the next .stabs
      directive) from being separated by other random symbols.  */
-  symbol = symbol_create (string, undefined_section, 0,
-			  &zero_address_frag);
+  symbol = symbol_create (string, undefined_section, &zero_address_frag, 0);
   if (what == 's' || what == 'n')
     {
       /* Pick up the value from the input line.  */
@@ -174,13 +185,19 @@ aout_process_stab (what, string, type, other, desc)
 #endif
 
 /* This can handle different kinds of stabs (s,n,d) and different
-   kinds of stab sections.  */
+   kinds of stab sections.  If STAB_SECNAME_OBSTACK_END is non-NULL,
+   then STAB_SECNAME and STABSTR_SECNAME will be freed if possible
+   before this function returns (the former by obstack_free).  */
 
 static void
-s_stab_generic (int what, char *stab_secname, char *stabstr_secname)
+s_stab_generic (int what,
+		const char *stab_secname,
+		const char *stabstr_secname,
+		const char *stab_secname_obstack_end)
 {
   long longint;
-  char *string, *saved_string_obstack_end;
+  const char *string;
+  char *saved_string_obstack_end;
   int type;
   int other;
   int desc;
@@ -203,10 +220,16 @@ s_stab_generic (int what, char *stab_secname, char *stabstr_secname)
       int length;
 
       string = demand_copy_C_string (&length);
+      if (string == NULL)
+	{
+	  as_warn (_(".stab%c: missing string"), what);
+	  ignore_rest_of_line ();
+	  return;
+	}
       /* FIXME: We should probably find some other temporary storage
 	 for string, rather than leaking memory if someone else
 	 happens to use the notes obstack.  */
-      saved_string_obstack_end = notes.next_free;
+      saved_string_obstack_end = obstack_next_free (&notes);
       SKIP_WHITESPACE ();
       if (*input_line_pointer == ',')
 	input_line_pointer++;
@@ -307,16 +330,13 @@ s_stab_generic (int what, char *stab_secname, char *stabstr_secname)
       unsigned int stroff;
       char *p;
 
-      static segT cached_sec;
-      static char *cached_secname;
-
       dot = frag_now_fix ();
 
 #ifdef md_flush_pending_output
       md_flush_pending_output ();
 #endif
 
-      if (cached_secname && !strcmp (cached_secname, stab_secname))
+      if (cached_sec && strcmp (cached_sec->name, stab_secname) == 0)
 	{
 	  seg = cached_sec;
 	  subseg_set (seg, 0);
@@ -324,15 +344,12 @@ s_stab_generic (int what, char *stab_secname, char *stabstr_secname)
       else
 	{
 	  seg = subseg_new (stab_secname, 0);
-	  if (cached_secname)
-	    free (cached_secname);
-	  cached_secname = xstrdup (stab_secname);
 	  cached_sec = seg;
 	}
 
       if (! seg_info (seg)->hadone)
 	{
-	  bfd_set_section_flags (stdoutput, seg,
+	  bfd_set_section_flags (seg,
 				 SEC_READONLY | SEC_RELOC | SEC_DEBUGGING);
 #ifdef INIT_STAB_SECTION
 	  INIT_STAB_SECTION (seg);
@@ -340,13 +357,19 @@ s_stab_generic (int what, char *stab_secname, char *stabstr_secname)
 	  seg_info (seg)->hadone = 1;
 	}
 
-      stroff = get_stab_string_offset (string, stabstr_secname);
-      if (what == 's')
-	{
-	  /* Release the string, if nobody else has used the obstack.  */
-	  if (saved_string_obstack_end == notes.next_free)
-	    obstack_free (&notes, string);
-	}
+      stroff = get_stab_string_offset (string, stabstr_secname,
+				       stab_secname_obstack_end != NULL);
+
+      /* Release the string, if nobody else has used the obstack.  */
+      if (saved_string_obstack_end != NULL
+	  && saved_string_obstack_end == obstack_next_free (&notes))
+	obstack_free (&notes, string);
+      /* Similarly for the section name.  This must be done before
+	 creating symbols below, which uses the notes obstack.  */
+      if (seg->name != stab_secname
+	  && stab_secname_obstack_end != NULL
+	  && stab_secname_obstack_end == obstack_next_free (&notes))
+	obstack_free (&notes, stab_secname);
 
       /* At least for now, stabs in a special stab section are always
 	 output as 12 byte blocks of information.  */
@@ -368,7 +391,7 @@ s_stab_generic (int what, char *stab_secname, char *stabstr_secname)
 	  expressionS exp;
 
 	  /* Arrange for a value representing the current location.  */
-	  symbol = symbol_temp_new (saved_seg, dot, saved_frag);
+	  symbol = symbol_temp_new (saved_seg, saved_frag, dot);
 
 	  exp.X_op = O_symbol;
 	  exp.X_add_symbol = symbol;
@@ -385,6 +408,12 @@ s_stab_generic (int what, char *stab_secname, char *stabstr_secname)
     }
   else
     {
+      if (stab_secname_obstack_end != NULL)
+	{
+	  free ((char *) stabstr_secname);
+	  if (stab_secname_obstack_end == obstack_next_free (&notes))
+	    obstack_free (&notes, stab_secname);
+	}
 #ifdef OBJ_PROCESS_STAB
       OBJ_PROCESS_STAB (0, what, string, type, other, desc);
 #else
@@ -400,7 +429,7 @@ s_stab_generic (int what, char *stab_secname, char *stabstr_secname)
 void
 s_stab (int what)
 {
-  s_stab_generic (what, STAB_SECTION_NAME, STAB_STRING_SECTION_NAME);
+  s_stab_generic (what, STAB_SECTION_NAME, STAB_STRING_SECTION_NAME, NULL);
 }
 
 /* "Extended stabs", used in Solaris only now.  */
@@ -409,13 +438,10 @@ void
 s_xstab (int what)
 {
   int length;
-  char *stab_secname, *stabstr_secname;
-  static char *saved_secname, *saved_strsecname;
+  char *stab_secname, *stabstr_secname, *stab_secname_obstack_end;
 
-  /* @@ MEMORY LEAK: This allocates a copy of the string, but in most
-     cases it will be the same string, so we could release the storage
-     back to the obstack it came from.  */
   stab_secname = demand_copy_C_string (&length);
+  stab_secname_obstack_end = obstack_next_free (&notes);
   SKIP_WHITESPACE ();
   if (*input_line_pointer == ',')
     input_line_pointer++;
@@ -428,20 +454,9 @@ s_xstab (int what)
 
   /* To get the name of the stab string section, simply add "str" to
      the stab section name.  */
-  if (saved_secname == 0 || strcmp (saved_secname, stab_secname))
-    {
-      stabstr_secname = (char *) xmalloc (strlen (stab_secname) + 4);
-      strcpy (stabstr_secname, stab_secname);
-      strcat (stabstr_secname, "str");
-      if (saved_secname)
-	{
-	  free (saved_secname);
-	  free (saved_strsecname);
-	}
-      saved_secname = stab_secname;
-      saved_strsecname = stabstr_secname;
-    }
-  s_stab_generic (what, saved_secname, saved_strsecname);
+  stabstr_secname = concat (stab_secname, "str", (char *) NULL);
+  s_stab_generic (what, stab_secname, stabstr_secname,
+		  stab_secname_obstack_end);
 }
 
 #ifdef S_SET_DESC
@@ -449,8 +464,7 @@ s_xstab (int what)
 /* Frob invented at RMS' request. Set the n_desc of a symbol.  */
 
 void
-s_desc (ignore)
-     int ignore ATTRIBUTE_UNUSED;
+s_desc (int ignore ATTRIBUTE_UNUSED)
 {
   char *name;
   char c;
@@ -458,11 +472,10 @@ s_desc (ignore)
   symbolS *symbolP;
   int temp;
 
-  name = input_line_pointer;
-  c = get_symbol_end ();
+  c = get_symbol_name (&name);
   p = input_line_pointer;
   *p = c;
-  SKIP_WHITESPACE ();
+  SKIP_WHITESPACE_AFTER_NAME ();
   if (*input_line_pointer != ',')
     {
       *p = 0;
@@ -489,20 +502,20 @@ s_desc (ignore)
 void
 stabs_generate_asm_file (void)
 {
-  char *file;
+  const char *file;
   unsigned int lineno;
 
-  as_where (&file, &lineno);
+  file = as_where (&lineno);
   if (use_gnu_debug_info_extensions)
     {
-      const char *dir;
+      char *dir;
       char *dir2;
 
       dir = remap_debug_filename (getpwd ());
-      dir2 = (char *) alloca (strlen (dir) + 2);
-      sprintf (dir2, "%s%s", dir, "/");
+      dir2 = concat (dir, "/", NULL);
       generate_asm_file (N_SO, dir2);
-      xfree ((char *) dir);
+      free (dir2);
+      free (dir);
     }
   generate_asm_file (N_SO, file);
 }
@@ -511,46 +524,41 @@ stabs_generate_asm_file (void)
    TYPE is one of N_SO, N_SOL.  */
 
 static void
-generate_asm_file (int type, char *file)
+generate_asm_file (int type, const char *file)
 {
-  static char *last_file;
-  static int label_count;
-  char *hold;
   char sym[30];
   char *buf;
-  char *tmp = file;
-  char *file_endp = file + strlen (file);
+  const char *tmp = file;
+  const char *file_endp = file + strlen (file);
   char *bufp;
 
-  if (last_file != NULL
-      && filename_cmp (last_file, file) == 0)
+  if (last_asm_file != NULL
+      && filename_cmp (last_asm_file, file) == 0)
     return;
 
   /* Rather than try to do this in some efficient fashion, we just
      generate a string and then parse it again.  That lets us use the
      existing stabs hook, which expect to see a string, rather than
      inventing new ones.  */
-  hold = input_line_pointer;
-
-  sprintf (sym, "%sF%d", FAKE_LABEL_NAME, label_count);
-  ++label_count;
+  sprintf (sym, "%sF%d", FAKE_LABEL_NAME, file_label_count);
+  ++file_label_count;
 
   /* Allocate enough space for the file name (possibly extended with
      doubled up backslashes), the symbol name, and the other characters
      that make up a stabs file directive.  */
-  bufp = buf = (char *) xmalloc (2 * strlen (file) + strlen (sym) + 12);
+  bufp = buf = XNEWVEC (char, 2 * strlen (file) + strlen (sym) + 12);
 
   *bufp++ = '"';
 
   while (tmp < file_endp)
     {
-      char *bslash = strchr (tmp, '\\');
-      size_t len = (bslash) ? (size_t) (bslash - tmp + 1) : strlen (tmp);
+      const char *bslash = strchr (tmp, '\\');
+      size_t len = bslash != NULL ? bslash - tmp + 1 : file_endp - tmp;
 
       /* Double all backslashes, since demand_copy_C_string (used by
 	 s_stab to extract the part in quotes) will try to replace them as
 	 escape sequences.  backslash may appear in a filespec.  */
-      strncpy (bufp, tmp, len);
+      memcpy (bufp, tmp, len);
 
       tmp += len;
       bufp += len;
@@ -561,17 +569,16 @@ generate_asm_file (int type, char *file)
 
   sprintf (bufp, "\",%d,0,0,%s\n", type, sym);
 
-  input_line_pointer = buf;
+  temp_ilp (buf);
   s_stab ('s');
+  restore_ilp ();
+
   colon (sym);
 
-  if (last_file != NULL)
-    free (last_file);
-  last_file = xstrdup (file);
+  free (last_asm_file);
+  last_asm_file = xstrdup (file);
 
   free (buf);
-
-  input_line_pointer = hold;
 }
 
 /* Generate stabs debugging information for the current line.  This is
@@ -580,48 +587,34 @@ generate_asm_file (int type, char *file)
 void
 stabs_generate_asm_lineno (void)
 {
-  static int label_count;
-  char *hold;
-  char *file;
+  const char *file;
   unsigned int lineno;
   char *buf;
   char sym[30];
-  /* Remember the last file/line and avoid duplicates.  */
-  static unsigned int prev_lineno = -1;
-  static char *prev_file = NULL;
 
   /* Rather than try to do this in some efficient fashion, we just
      generate a string and then parse it again.  That lets us use the
      existing stabs hook, which expect to see a string, rather than
      inventing new ones.  */
 
-  hold = input_line_pointer;
-
-  as_where (&file, &lineno);
+  file = as_where (&lineno);
 
   /* Don't emit sequences of stabs for the same line.  */
-  if (prev_file == NULL)
+  if (prev_line_file != NULL
+      && filename_cmp (file, prev_line_file) == 0)
     {
-      /* First time thru.  */
-      prev_file = xstrdup (file);
-      prev_lineno = lineno;
-    }
-  else if (lineno == prev_lineno
-	   && filename_cmp (file, prev_file) == 0)
-    {
-      /* Same file/line as last time.  */
-      return;
+      if (lineno == prev_lineno)
+	/* Same file/line as last time.  */
+	return;
     }
   else
     {
       /* Remember file/line for next time.  */
-      prev_lineno = lineno;
-      if (filename_cmp (file, prev_file) != 0)
-	{
-	  free (prev_file);
-	  prev_file = xstrdup (file);
-	}
+      free (prev_line_file);
+      prev_line_file = xstrdup (file);
     }
+
+  prev_lineno = lineno;
 
   /* Let the world know that we are in the middle of generating a
      piece of stabs line debugging information.  */
@@ -629,26 +622,29 @@ stabs_generate_asm_lineno (void)
 
   generate_asm_file (N_SOL, file);
 
-  sprintf (sym, "%sL%d", FAKE_LABEL_NAME, label_count);
-  ++label_count;
+  sprintf (sym, "%sL%d", FAKE_LABEL_NAME, line_label_count);
+  ++line_label_count;
 
-  if (in_dot_func_p)
+  if (current_function_label)
     {
-      buf = (char *) alloca (100 + strlen (current_function_label));
+      buf = XNEWVEC (char, 100 + strlen (current_function_label));
       sprintf (buf, "%d,0,%d,%s-%s\n", N_SLINE, lineno,
 	       sym, current_function_label);
     }
   else
     {
-      buf = (char *) alloca (100);
+      buf = XNEWVEC (char, 100);
       sprintf (buf, "%d,0,%d,%s\n", N_SLINE, lineno, sym);
     }
-  input_line_pointer = buf;
+
+  temp_ilp (buf);
   s_stab ('n');
+  restore_ilp ();
+
   colon (sym);
 
-  input_line_pointer = hold;
   outputting_stabs_line_debug = 0;
+  free (buf);
 }
 
 /* Emit a function stab.
@@ -657,30 +653,29 @@ stabs_generate_asm_lineno (void)
 void
 stabs_generate_asm_func (const char *funcname, const char *startlabname)
 {
-  static int void_emitted_p;
-  char *hold = input_line_pointer;
   char *buf;
-  char *file;
   unsigned int lineno;
 
   if (! void_emitted_p)
     {
-      input_line_pointer = "\"void:t1=1\",128,0,0,0";
+      temp_ilp ((char *) "\"void:t1=1\",128,0,0,0");
       s_stab ('s');
-      void_emitted_p = 1;
+      restore_ilp ();
+      void_emitted_p = true;
     }
 
-  as_where (&file, &lineno);
+  as_where (&lineno);
   if (asprintf (&buf, "\"%s:F1\",%d,0,%d,%s",
 		funcname, N_FUN, lineno + 1, startlabname) == -1)
     as_fatal ("%s", xstrerror (errno));
-  input_line_pointer = buf;
+
+  temp_ilp (buf);
   s_stab ('s');
+  restore_ilp ();
   free (buf);
 
-  input_line_pointer = hold;
+  free ((char *) current_function_label);
   current_function_label = xstrdup (startlabname);
-  in_dot_func_p = 1;
 }
 
 /* Emit a stab to record the end of a function.  */
@@ -689,22 +684,43 @@ void
 stabs_generate_asm_endfunc (const char *funcname ATTRIBUTE_UNUSED,
 			    const char *startlabname)
 {
-  static int label_count;
-  char *hold = input_line_pointer;
   char *buf;
   char sym[30];
 
-  sprintf (sym, "%sendfunc%d", FAKE_LABEL_NAME, label_count);
-  ++label_count;
+  sprintf (sym, "%sendfunc%d", FAKE_LABEL_NAME, endfunc_label_count);
+  ++endfunc_label_count;
   colon (sym);
 
   if (asprintf (&buf, "\"\",%d,0,0,%s-%s", N_FUN, sym, startlabname) == -1)
     as_fatal ("%s", xstrerror (errno));
-  input_line_pointer = buf;
+
+  temp_ilp (buf);
   s_stab ('s');
+  restore_ilp ();
   free (buf);
 
-  input_line_pointer = hold;
-  in_dot_func_p = 0;
+  free ((char *) current_function_label);
   current_function_label = NULL;
+}
+
+void
+stabs_begin (void)
+{
+  current_function_label = NULL;
+  cached_sec = NULL;
+  last_asm_file = NULL;
+  file_label_count = 0;
+  line_label_count = 0;
+  prev_lineno = -1u;
+  prev_line_file = NULL;
+  void_emitted_p = false;
+  endfunc_label_count = 0;
+}
+
+void
+stabs_end (void)
+{
+  free ((char *) current_function_label);
+  free (last_asm_file);
+  free (prev_line_file);
 }

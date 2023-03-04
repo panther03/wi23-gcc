@@ -1,4 +1,4 @@
-# Copyright (C) 2007-2013 Free Software Foundation, Inc.
+# Copyright (C) 2007-2023 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -113,49 +113,72 @@ proc test_dfp_arithmetic_expressions {} {
     gdb_test "ptype 3 + 2.1dl" " = _Decimal128"
 
     # Reject operation with integral larger than 32-bits
-    gdb_test "p 1.2df + 2ll" "Conversion of large integer to a decimal floating type is not supported."
+    gdb_test "p 1.2dd + 2ll" "= 3.2"
+    gdb_test "p 1.2dd + 2147483648ll" "Conversion of large integer to a decimal floating type is not supported."
+    gdb_test "p 1.2dd + 2147483648ull" "= 2147483649.2"
+    gdb_test "p 1.2dd + 4294967296ull" "Conversion of large integer to a decimal floating type is not supported."
 
     # Reject operation with DFP and Binary FP
     gdb_test "p 1.2df + 1.2f" "Mixing decimal floating types with other floating types is not allowed."
 
     # Test other operations with DFP operands
-    gdb_test "p !0.df" " = 1"
-    gdb_test "p !0.dd" " = 1"
-    gdb_test "p !0.dl" " = 1"
-    gdb_test "p !0.5df" " = 0"
-    gdb_test "p !0.5dd" " = 0"
-    gdb_test "p !0.5dl" " = 0"
 
-    gdb_test "p 1.2df == 1.2df" " = 1"
-    gdb_test "p 1.2df == 1.2dd" " = 1"
-    gdb_test "p 1.2df == 1.2dl" " = 1"
-    gdb_test "p 1.2dd == 1.2df" " = 1"
-    gdb_test "p 1.2dd == 1.2dl" " = 1"
-    gdb_test "p 1.2dl == 1.2df" " = 1"
-    gdb_test "p 1.2dl == 1.2dd" " = 1"
-    gdb_test "p 1.2df == 1.3df" " = 0"
-    gdb_test "p 1.2df == 1.3dd" " = 0"
-    gdb_test "p 1.2df == 1.3dl" " = 0"
-    gdb_test "p 1.2dd == 1.3df" " = 0"
-    gdb_test "p 1.2dd == 1.3dl" " = 0"
-    gdb_test "p 1.2dl == 1.3df" " = 0"
-    gdb_test "p 1.2dl == 1.3dd" " = 0"
+    set dsuffix {"dd" "df" "dl"}
 
-    gdb_test "p +1.2df" " = 1.2"
-    gdb_test "p +1.2dd" " = 1.2"
-    gdb_test "p +1.2dl" " = 1.2"
+    foreach l $dsuffix {
+        foreach r $dsuffix {
+	    gdb_test "p 1.2${l} == 1.2${r}" " = 1"
+	    gdb_test "p 1.2${l} == 1.3${r}" " = 0"
 
-    gdb_test "p 1.2df < 1.3df" " = 1"
-    gdb_test "p 1.2df < 1.3dd" " = 1"
-    gdb_test "p 1.2dl < 1.3df" " = 1"
-    gdb_test "p 1.2dd < 1.3dd" " = 1"
-    gdb_test "p 1.2dd < 1.3dl" " = 1"
-    gdb_test "p 1.2dl < 1.3dl" " = 1"
-    gdb_test "p 1.2dl < 1.3df" " = 1"
-    gdb_test "p 1.2df > 1" " = 1"
-    gdb_test "p 1.2dl > 2" " = 0"
-    gdb_test "p 2 > 1.2dd" " = 1"
-    gdb_test "p 2 > 3.1dl" " = 0"
+	    gdb_test "p 1.2${l} < 1.2${r}" " = 0"
+	    gdb_test "p 1.2${l} < 1.3${r}" " = 1"
+	    gdb_test "p 1.3${l} < 1.2${r}" " = 0"
+
+	    gdb_test "p 1.2${l} > 1.2${r}" " = 0"
+	    gdb_test "p 1.2${l} > 1.3${r}" " = 0"
+	    gdb_test "p 1.3${l} > 1.2${r}" " = 1"
+
+	    gdb_test "p 1.2${l} <= 1.2${r}" " = 1"
+	    gdb_test "p 1.2${l} <= 1.3${r}" " = 1"
+	    gdb_test "p 1.3${l} <= 1.2${r}" " = 0"
+
+	    gdb_test "p 1.2${l} >= 1.2${r}" " = 1"
+	    gdb_test "p 1.2${l} >= 1.3${r}" " = 0"
+	    gdb_test "p 1.3${l} >= 1.2${r}" " = 1"
+	}
+
+	gdb_test "p !0.${l}" " = 1"
+	gdb_test "p !0.5${l}" " = 0"
+
+	gdb_test "p +1.2${l}" " = 1.2"
+
+	# This checks GDB doesn't convert to int and rounds up/down.
+	gdb_test "p 1.2${l} == 1" " = 0"
+	gdb_test "p 1.2${l} == 2" " = 0"
+
+	gdb_test "p 1.2${l} == 1.2" \
+	    "Mixing decimal floating types with other floating types is not allowed\\."
+
+	gdb_test "p 1.2${l} > 1" " = 1"
+	gdb_test "p 1.2${l} > 2" " = 0"
+	gdb_test "p 1.2${l} >= 1" " = 1"
+	gdb_test "p 1.2${l} >= 2" " = 0"
+
+	gdb_test "p 1.2${l} < 1" " = 0"
+	gdb_test "p 1.2${l} < 2" " = 1"
+	gdb_test "p 1.2${l} <= 1" " = 0"
+	gdb_test "p 1.2${l} <= 2" " = 1"
+
+	gdb_test "p 1 < 1.2${l}" " = 1"
+	gdb_test "p 2 < 1.2${l}" " = 0"
+	gdb_test "p 1 <= 1.2${l}" " = 1"
+	gdb_test "p 2 <= 1.2${l}" " = 0"
+
+	gdb_test "p 1 > 1.2${l}" " = 0"
+	gdb_test "p 2 > 1.2${l}" " = 1"
+	gdb_test "p 1 >= 1.2${l}" " = 0"
+	gdb_test "p 2 >= 1.2${l}" " = 1"
+    }
 }
 
 proc test_dfp_conversions {} {
@@ -168,11 +191,7 @@ proc test_dfp_conversions {} {
     gdb_test "p (_Decimal32) 4" " = 4"
 }
 
-# Start with a fresh gdb.
-
-gdb_exit
-gdb_start
-gdb_reinitialize_dir $srcdir/$subdir
+clean_restart
 
 test_dfp_literals_accepted
 test_dfp_arithmetic_expressions

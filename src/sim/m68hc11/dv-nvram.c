@@ -1,5 +1,5 @@
 /*  dv-nvram.c -- Generic driver for a non volatile ram (battery saved)
-    Copyright (C) 1999-2013 Free Software Foundation, Inc.
+    Copyright (C) 1999-2023 Free Software Foundation, Inc.
     Written by Stephane Carrez (stcarrez@worldnet.fr)
     (From a driver model Contributed by Cygnus Solutions.)
     
@@ -18,6 +18,8 @@
     
     */
 
+/* This must come before any other includes.  */
+#include "defs.h"
 
 #include "sim-main.h"
 #include "hw-main.h"
@@ -27,6 +29,7 @@
 #include <fcntl.h>
 #include <errno.h>
 
+#include "m68hc11-sim.h"
 
 /* DEVICE
 
@@ -104,7 +107,7 @@ struct nvram
 {
   address_word    base_address; /* Base address of ram.  */
   unsigned        size;         /* Size of ram.  */
-  unsigned8       *data;        /* Pointer to ram memory.  */
+  uint8_t       *data;        /* Pointer to ram memory.  */
   const char      *file_name;   /* Path of ram file.  */
   int             fd;           /* File description of opened ram file.  */
   enum nvram_mode mode;         /* How load/save ram file.  */
@@ -186,7 +189,7 @@ attach_nvram_regs (struct hw *me, struct nvram *controller)
 
     case NVRAM_SAVE_MODIFIED:
     case NVRAM_SAVE_ALL:
-      controller->data = (char*) hw_malloc (me, attach_size);
+      controller->data = hw_malloc (me, attach_size);
       if (controller->data == 0)
         hw_abort (me, "Not enough memory, try to use the mode 'map'");
 

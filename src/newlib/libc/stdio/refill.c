@@ -5,7 +5,7 @@
  * Redistribution and use in source and binary forms are permitted
  * provided that the above copyright notice and this paragraph are
  * duplicated in all such forms and that any documentation,
- * advertising materials, and other materials related to such
+ * and/or other materials related to such
  * distribution and use acknowledge that the software was developed
  * by the University of California, Berkeley.  The name of the
  * University may not be used to endorse or promote products derived
@@ -23,11 +23,10 @@
 #include "local.h"
 
 static int
-_DEFUN(lflush, (fp),
-       FILE *fp)
+lflush (struct _reent * ptr __unused, FILE *fp)
 {
   if ((fp->_flags & (__SLBF | __SWR)) == (__SLBF | __SWR))
-    return fflush (fp);
+    return _fflush_r (_REENT, fp);
   return 0;
 }
 
@@ -37,8 +36,7 @@ _DEFUN(lflush, (fp),
  */
 
 int
-_DEFUN(__srefill_r, (ptr, fp),
-       struct _reent * ptr _AND
+__srefill_r (struct _reent * ptr,
        register FILE * fp)
 {
   /* make sure stdio is set up */
@@ -49,18 +47,16 @@ _DEFUN(__srefill_r, (ptr, fp),
 
   fp->_r = 0;			/* largely a convenience for callers */
 
-#ifndef __CYGWIN__
   /* SysV does not make this test; take it out for compatibility */
   if (fp->_flags & __SEOF)
     return EOF;
-#endif
 
   /* if not already reading, have to be reading and writing */
   if ((fp->_flags & __SRD) == 0)
     {
       if ((fp->_flags & __SRW) == 0)
 	{
-	  ptr->_errno = EBADF;
+	  _REENT_ERRNO(ptr) = EBADF;
 	  fp->_flags |= __SERR;
 	  return EOF;
 	}
@@ -104,10 +100,10 @@ _DEFUN(__srefill_r, (ptr, fp),
    */
   if (fp->_flags & (__SLBF | __SNBF))
     {
-      /* Ignore this file in _fwalk to avoid potential deadlock. */
+      /* Ignore this file in _fwalk_sglue to avoid potential deadlock. */
       short orig_flags = fp->_flags;
       fp->_flags = 1;
-      _CAST_VOID _fwalk (_GLOBAL_REENT, lflush);
+      (void) _fwalk_sglue (_GLOBAL_REENT, lflush, &__sglue);
       fp->_flags = orig_flags;
 
       /* Now flush this file without locking it. */
@@ -117,13 +113,7 @@ _DEFUN(__srefill_r, (ptr, fp),
 
   fp->_p = fp->_bf._base;
   fp->_r = fp->_read (ptr, fp->_cookie, (char *) fp->_p, fp->_bf._size);
-#ifndef __CYGWIN__
   if (fp->_r <= 0)
-#else
-  if (fp->_r > 0)
-    fp->_flags &= ~__SEOF;
-  else
-#endif
     {
       if (fp->_r == 0)
 	fp->_flags |= __SEOF;

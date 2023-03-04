@@ -5,18 +5,16 @@
 #include "osabi.h"
 #include "target-descriptions.h"
 
-struct target_desc *tdesc_powerpc_altivec64;
+const struct target_desc *tdesc_powerpc_altivec64;
 static void
 initialize_tdesc_powerpc_altivec64 (void)
 {
-  struct target_desc *result = allocate_target_description ();
+  target_desc_up result = allocate_target_description ();
+  set_tdesc_architecture (result.get (), bfd_scan_arch ("powerpc:common64"));
+
   struct tdesc_feature *feature;
-  struct tdesc_type *field_type;
-  struct tdesc_type *type;
 
-  set_tdesc_architecture (result, bfd_scan_arch ("powerpc:common64"));
-
-  feature = tdesc_create_feature (result, "org.gnu.gdb.power.core");
+  feature = tdesc_create_feature (result.get (), "org.gnu.gdb.power.core");
   tdesc_create_reg (feature, "r0", 0, 1, NULL, 64, "uint64");
   tdesc_create_reg (feature, "r1", 1, 1, NULL, 64, "uint64");
   tdesc_create_reg (feature, "r2", 2, 1, NULL, 64, "uint64");
@@ -56,7 +54,7 @@ initialize_tdesc_powerpc_altivec64 (void)
   tdesc_create_reg (feature, "ctr", 68, 1, NULL, 64, "uint64");
   tdesc_create_reg (feature, "xer", 69, 1, NULL, 32, "uint32");
 
-  feature = tdesc_create_feature (result, "org.gnu.gdb.power.fpu");
+  feature = tdesc_create_feature (result.get (), "org.gnu.gdb.power.fpu");
   tdesc_create_reg (feature, "f0", 32, 1, NULL, 64, "ieee_double");
   tdesc_create_reg (feature, "f1", 33, 1, NULL, 64, "ieee_double");
   tdesc_create_reg (feature, "f2", 34, 1, NULL, 64, "ieee_double");
@@ -91,30 +89,33 @@ initialize_tdesc_powerpc_altivec64 (void)
   tdesc_create_reg (feature, "f31", 63, 1, NULL, 64, "ieee_double");
   tdesc_create_reg (feature, "fpscr", 70, 1, "float", 32, "int");
 
-  feature = tdesc_create_feature (result, "org.gnu.gdb.power.altivec");
-  field_type = tdesc_named_type (feature, "ieee_single");
-  tdesc_create_vector (feature, "v4f", field_type, 4);
+  feature = tdesc_create_feature (result.get (), "org.gnu.gdb.power.altivec");
+  tdesc_type *element_type;
+  element_type = tdesc_named_type (feature, "ieee_single");
+  tdesc_create_vector (feature, "v4f", element_type, 4);
 
-  field_type = tdesc_named_type (feature, "int32");
-  tdesc_create_vector (feature, "v4i32", field_type, 4);
+  element_type = tdesc_named_type (feature, "int32");
+  tdesc_create_vector (feature, "v4i32", element_type, 4);
 
-  field_type = tdesc_named_type (feature, "int16");
-  tdesc_create_vector (feature, "v8i16", field_type, 8);
+  element_type = tdesc_named_type (feature, "int16");
+  tdesc_create_vector (feature, "v8i16", element_type, 8);
 
-  field_type = tdesc_named_type (feature, "int8");
-  tdesc_create_vector (feature, "v16i8", field_type, 16);
+  element_type = tdesc_named_type (feature, "int8");
+  tdesc_create_vector (feature, "v16i8", element_type, 16);
 
-  type = tdesc_create_union (feature, "vec128");
+  tdesc_type_with_fields *type_with_fields;
+  type_with_fields = tdesc_create_union (feature, "vec128");
+  tdesc_type *field_type;
   field_type = tdesc_named_type (feature, "uint128");
-  tdesc_add_field (type, "uint128", field_type);
+  tdesc_add_field (type_with_fields, "uint128", field_type);
   field_type = tdesc_named_type (feature, "v4f");
-  tdesc_add_field (type, "v4_float", field_type);
+  tdesc_add_field (type_with_fields, "v4_float", field_type);
   field_type = tdesc_named_type (feature, "v4i32");
-  tdesc_add_field (type, "v4_int32", field_type);
+  tdesc_add_field (type_with_fields, "v4_int32", field_type);
   field_type = tdesc_named_type (feature, "v8i16");
-  tdesc_add_field (type, "v8_int16", field_type);
+  tdesc_add_field (type_with_fields, "v8_int16", field_type);
   field_type = tdesc_named_type (feature, "v16i8");
-  tdesc_add_field (type, "v16_int8", field_type);
+  tdesc_add_field (type_with_fields, "v16_int8", field_type);
 
   tdesc_create_reg (feature, "vr0", 71, 1, NULL, 128, "vec128");
   tdesc_create_reg (feature, "vr1", 72, 1, NULL, 128, "vec128");
@@ -151,5 +152,5 @@ initialize_tdesc_powerpc_altivec64 (void)
   tdesc_create_reg (feature, "vscr", 103, 1, "vector", 32, "int");
   tdesc_create_reg (feature, "vrsave", 104, 1, "vector", 32, "int");
 
-  tdesc_powerpc_altivec64 = result;
+  tdesc_powerpc_altivec64 = result.release ();
 }

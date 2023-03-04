@@ -5,7 +5,7 @@
  * Redistribution and use in source and binary forms are permitted
  * provided that the above copyright notice and this paragraph are
  * duplicated in all such forms and that any documentation,
- * advertising materials, and other materials related to such
+ * and/or other materials related to such
  * distribution and use acknowledge that the software was developed
  * by the University of California, Berkeley.  The name of the
  * University may not be used to endorse or promote products derived
@@ -26,25 +26,42 @@
 #include <sys/lock.h>
 #include "local.h"
 
-#ifdef _REENT_SMALL
-const struct __sFILE_fake __sf_fake_stdin =
-    {_NULL, 0, 0, 0, 0, {_NULL, 0}, 0, _NULL};
-const struct __sFILE_fake __sf_fake_stdout =
-    {_NULL, 0, 0, 0, 0, {_NULL, 0}, 0, _NULL};
-const struct __sFILE_fake __sf_fake_stderr =
-    {_NULL, 0, 0, 0, 0, {_NULL, 0}, 0, _NULL};
+void (*__stdio_exit_handler) (void);
+
+__FILE __sf[3];
+
+struct _glue __sglue = {NULL, 3, &__sf[0]};
+
+#ifdef _REENT_THREAD_LOCAL
+_Thread_local __FILE *_tls_stdin = &__sf[0];
+_Thread_local __FILE *_tls_stdout = &__sf[1];
+_Thread_local __FILE *_tls_stderr = &__sf[2];
+_Thread_local void (*_tls_cleanup)(struct _reent *);
+#endif
+
+#ifdef _STDIO_BSD_SEMANTICS
+  /* BSD and Glibc systems only flush streams which have been written to
+     at exit time.  Calling flush rather than close for speed, as on
+     the aforementioned systems. */
+#define CLEANUP_FILE __sflushw_r
+#else
+  /* Otherwise close files and flush read streams, too.
+     Note we call flush directly if "--enable-lite-exit" is in effect.  */
+#ifdef _LITE_EXIT
+#define CLEANUP_FILE _fflush_r
+#else
+#define CLEANUP_FILE _fclose_r
+#endif
 #endif
 
 #if (defined (__OPTIMIZE_SIZE__) || defined (PREFER_SIZE_OVER_SPEED))
-_NOINLINE_STATIC _VOID
+_NOINLINE_STATIC void
 #else
-static _VOID
+static void
 #endif
-_DEFUN(std, (ptr, flags, file, data),
-            FILE *ptr _AND
-            int flags _AND
-            int file  _AND
-            struct _reent *data)
+std (FILE *ptr,
+            int flags,
+            int file)
 {
   ptr->_p = 0;
   ptr->_r = 0;
@@ -71,18 +88,44 @@ _DEFUN(std, (ptr, flags, file, data),
 #else /* _STDIO_CLOSE_STD_STREAMS */
   ptr->_close = NULL;
 #endif /* _STDIO_CLOSE_STD_STREAMS */
-#if !defined(__SINGLE_THREAD__) && !defined(_REENT_SMALL)
-  __lock_init_recursive (ptr->_lock);
-  /*
-   * #else
-   * lock is already initialized in __sfp
-   */
+#ifndef __SINGLE_THREAD__
+  if (ptr == &__sf[0] || ptr == &__sf[1] || ptr == &__sf[2])
+    __lock_init_recursive (ptr->_lock);
 #endif
-
 #ifdef __SCLE
   if (__stextmode (ptr->_file))
     ptr->_flags |= __SCLE;
 #endif
+}
+
+static inline void
+stdin_init(FILE *ptr)
+{
+  std (ptr,  __SRD, 0);
+}
+
+static inline void
+stdout_init(FILE *ptr)
+{
+  /* On platforms that have true file system I/O, we can verify
+     whether stdout is an interactive terminal or not, as part of
+     __smakebuf on first use of the stream.  For all other platforms,
+     we will default to line buffered mode here.  Technically, POSIX
+     requires both stdin and stdout to be line-buffered, but tradition
+     leaves stdin alone on systems without fcntl.  */
+#ifdef HAVE_FCNTL
+  std (ptr, __SWR, 1);
+#else
+  std (ptr, __SWR | __SLBF, 1);
+#endif
+}
+
+static inline void
+stderr_init(FILE *ptr)
+{
+  /* POSIX requires stderr to be opened for reading and writing, even
+     when the underlying fd 2 is write-only.  */
+  std (ptr, __SRW | __SNBF, 2);
 }
 
 struct glue_with_file {
@@ -90,10 +133,8 @@ struct glue_with_file {
   FILE file;
 };
 
-struct _glue *
-_DEFUN(__sfmoreglue, (d, n),
-       struct _reent *d _AND
-       register int n)
+static struct _glue *
+sfmoreglue (struct _reent *d, int n)
 {
   struct glue_with_file *g;
 
@@ -108,33 +149,48 @@ _DEFUN(__sfmoreglue, (d, n),
   return &g->glue;
 }
 
+static void
+stdio_exit_handler (void)
+{
+  (void) _fwalk_sglue (_GLOBAL_REENT, CLEANUP_FILE, &__sglue);
+}
+
+static void
+global_stdio_init (void)
+{
+  if (__stdio_exit_handler == NULL) {
+    __stdio_exit_handler = stdio_exit_handler;
+    stdin_init (&__sf[0]);
+    stdout_init (&__sf[1]);
+    stderr_init (&__sf[2]);
+  }
+}
+
 /*
  * Find a free FILE for fopen et al.
  */
 
 FILE *
-_DEFUN(__sfp, (d),
-       struct _reent *d)
+__sfp (struct _reent *d)
 {
   FILE *fp;
   int n;
   struct _glue *g;
 
   _newlib_sfp_lock_start ();
+  global_stdio_init ();
 
-  if (!_GLOBAL_REENT->__sdidinit)
-    __sinit (_GLOBAL_REENT);
-  for (g = &_GLOBAL_REENT->__sglue;; g = g->_next)
+  for (g = &__sglue;; g = g->_next)
     {
       for (fp = g->_iobs, n = g->_niobs; --n >= 0; fp++)
 	if (fp->_flags == 0)
 	  goto found;
       if (g->_next == NULL &&
-	  (g->_next = __sfmoreglue (d, NDYNAMIC)) == NULL)
+	  (g->_next = sfmoreglue (d, NDYNAMIC)) == NULL)
 	break;
     }
   _newlib_sfp_lock_exit ();
-  d->_errno = ENOMEM;
+  _REENT_ERRNO(d) = ENOMEM;
   return NULL;
 
 found:
@@ -170,157 +226,86 @@ found:
  * The name `_cleanup' is, alas, fairly well known outside stdio.
  */
 
-_VOID
-_DEFUN(_cleanup_r, (ptr),
-       struct _reent *ptr)
+static void
+cleanup_stdio (struct _reent *ptr)
 {
-  int (*cleanup_func) (struct _reent *, FILE *);
-#ifdef _STDIO_BSD_SEMANTICS
-  /* BSD and Glibc systems only flush streams which have been written to
-     at exit time.  Calling flush rather than close for speed, as on
-     the aforementioned systems. */
-  cleanup_func = __sflushw_r;
-#else
-  /* Otherwise close files and flush read streams, too.
-     Note we call flush directly if "--enable-lite-exit" is in effect.  */
-#ifdef _LITE_EXIT
-  cleanup_func = _fflush_r;
-#else
-  cleanup_func = _fclose_r;
-#endif
-#endif
-  _CAST_VOID _fwalk_reent (ptr, cleanup_func);
+  if (_REENT_STDIN(ptr) != &__sf[0])
+    CLEANUP_FILE (ptr, _REENT_STDIN(ptr));
+  if (_REENT_STDOUT(ptr) != &__sf[1])
+    CLEANUP_FILE (ptr, _REENT_STDOUT(ptr));
+  if (_REENT_STDERR(ptr) != &__sf[2])
+    CLEANUP_FILE (ptr, _REENT_STDERR(ptr));
 }
-
-#ifndef _REENT_ONLY
-_VOID
-_DEFUN_VOID(_cleanup)
-{
-  _cleanup_r (_GLOBAL_REENT);
-}
-#endif
 
 /*
  * __sinit() is called whenever stdio's internal variables must be set up.
  */
 
-_VOID
-_DEFUN(__sinit, (s),
-       struct _reent *s)
+void
+__sinit (struct _reent *s)
 {
-  __sinit_lock_acquire ();
+  __sfp_lock_acquire ();
 
-  if (s->__sdidinit)
+  if (_REENT_CLEANUP(s))
     {
-      __sinit_lock_release ();
+      __sfp_lock_release ();
       return;
     }
 
   /* make sure we clean up on exit */
-  s->__cleanup = _cleanup_r;	/* conservative */
+  _REENT_CLEANUP(s) = cleanup_stdio;	/* conservative */
 
-  s->__sglue._next = NULL;
-#ifndef _REENT_SMALL
-  s->__sglue._niobs = 3;
-  s->__sglue._iobs = &s->__sf[0];
-#else
-  s->__sglue._niobs = 0;
-  s->__sglue._iobs = NULL;
-  /* Avoid infinite recursion when calling __sfp  for _GLOBAL_REENT.  The
-     problem is that __sfp checks for _GLOBAL_REENT->__sdidinit and calls
-     __sinit if it's 0. */
-  if (s == _GLOBAL_REENT)
-    s->__sdidinit = 1;
-  s->_stdin = __sfp(s);
-  s->_stdout = __sfp(s);
-  s->_stderr = __sfp(s);
-#endif
-
-  std (s->_stdin,  __SRD, 0, s);
-
-  /* On platforms that have true file system I/O, we can verify
-     whether stdout is an interactive terminal or not, as part of
-     __smakebuf on first use of the stream.  For all other platforms,
-     we will default to line buffered mode here.  Technically, POSIX
-     requires both stdin and stdout to be line-buffered, but tradition
-     leaves stdin alone on systems without fcntl.  */
-#ifdef HAVE_FCNTL
-  std (s->_stdout, __SWR, 1, s);
-#else
-  std (s->_stdout, __SWR | __SLBF, 1, s);
-#endif
-
-  /* POSIX requires stderr to be opened for reading and writing, even
-     when the underlying fd 2 is write-only.  */
-  std (s->_stderr, __SRW | __SNBF, 2, s);
-
-  s->__sdidinit = 1;
-
-  __sinit_lock_release ();
+  global_stdio_init ();
+  __sfp_lock_release ();
 }
 
 #ifndef __SINGLE_THREAD__
 
-__LOCK_INIT_RECURSIVE(static, __sfp_lock);
-__LOCK_INIT_RECURSIVE(static, __sinit_lock);
+__LOCK_INIT_RECURSIVE(static, __sfp_recursive_mutex);
 
-_VOID
-_DEFUN_VOID(__sfp_lock_acquire)
+void
+__sfp_lock_acquire (void)
 {
-  __lock_acquire_recursive (__sfp_lock);
+  __lock_acquire_recursive (__sfp_recursive_mutex);
 }
 
-_VOID
-_DEFUN_VOID(__sfp_lock_release)
+void
+__sfp_lock_release (void)
 {
-  __lock_release_recursive (__sfp_lock);
-}
-
-_VOID
-_DEFUN_VOID(__sinit_lock_acquire)
-{
-  __lock_acquire_recursive (__sinit_lock);
-}
-
-_VOID
-_DEFUN_VOID(__sinit_lock_release)
-{
-  __lock_release_recursive (__sinit_lock);
+  __lock_release_recursive (__sfp_recursive_mutex);
 }
 
 /* Walkable file locking routine.  */
 static int
-_DEFUN(__fp_lock, (ptr),
-       FILE * ptr)
+__fp_lock (struct _reent * ptr __unused, FILE * fp)
 {
-  _flockfile (ptr);
+  if (!(fp->_flags2 & __SNLK))
+    _flockfile (fp);
 
   return 0;
 }
 
 /* Walkable file unlocking routine.  */
 static int
-_DEFUN(__fp_unlock, (ptr),
-       FILE * ptr)
+__fp_unlock (struct _reent * ptr __unused, FILE * fp)
 {
-  _funlockfile (ptr);
+  if (!(fp->_flags2 & __SNLK))
+    _funlockfile (fp);
 
   return 0;
 }
 
-_VOID
-_DEFUN_VOID(__fp_lock_all)
+void
+__fp_lock_all (void)
 {
   __sfp_lock_acquire ();
-
-  _CAST_VOID _fwalk (_REENT, __fp_lock);
+  (void) _fwalk_sglue (NULL, __fp_lock, &__sglue);
 }
 
-_VOID
-_DEFUN_VOID(__fp_unlock_all)
+void
+__fp_unlock_all (void)
 {
-  _CAST_VOID _fwalk (_REENT, __fp_unlock);
-
+  (void) _fwalk_sglue (NULL, __fp_unlock, &__sglue);
   __sfp_lock_release ();
 }
 #endif

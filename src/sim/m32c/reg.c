@@ -1,6 +1,6 @@
 /* reg.c --- register set model for M32C simulator.
 
-Copyright (C) 2005-2013 Free Software Foundation, Inc.
+Copyright (C) 2005-2023 Free Software Foundation, Inc.
 Contributed by Red Hat, Inc.
 
 This file is part of the GNU simulators.
@@ -18,6 +18,8 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
+/* This must come before any other includes.  */
+#include "defs.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -219,7 +221,7 @@ get_reg_ll (reg_id id)
 static int highest_sp = 0, lowest_sp = 0xffffff;
 
 void
-stack_heap_stats ()
+stack_heap_stats (void)
 {
   printf ("heap:  %08x - %08x (%d bytes)\n", heapbottom, heaptop,
 	  heaptop - heapbottom);
@@ -230,10 +232,11 @@ stack_heap_stats ()
 void
 put_reg (reg_id id, unsigned int v)
 {
+  reg_bank_type *b = regs.r + (FLAG_B ? 1 : 0);
+
   if (trace > ((id != pc) ? 0 : 1))
     printf ("put_reg (%s) = %0*x\n", reg_names[id], reg_bytes[id] * 2, v);
 
-  reg_bank_type *b = regs.r + (FLAG_B ? 1 : 0);
   switch (id)
     {
     case r0:
@@ -605,7 +608,7 @@ print_flags (int f)
     }
 
 void
-trace_register_changes ()
+trace_register_changes (void)
 {
   if (!trace)
     return;
@@ -646,7 +649,7 @@ trace_register_changes ()
 	 reg_bytes[id]*2, (unsigned int)regs.f);       \
 
 void
-m32c_dump_all_registers ()
+m32c_dump_all_registers (void)
 {
   printf ("\033[36mREGS:");
   DRC (r[0].r_r0, "r0", r0);

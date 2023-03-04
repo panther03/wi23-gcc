@@ -14,11 +14,10 @@
 #include "local.h"
 
 char *
-_DEFUN(_asnprintf_r, (ptr, buf, lenp, fmt),
-       struct _reent *__restrict ptr _AND
-       char *buf _AND
-       size_t *lenp _AND
-       const char *__restrict fmt _DOTS)
+_asnprintf_r (struct _reent *__restrict ptr,
+       char *buf,
+       size_t *lenp,
+       const char *__restrict fmt, ...)
 {
   int ret;
   va_list ap;
@@ -43,7 +42,7 @@ _DEFUN(_asnprintf_r, (ptr, buf, lenp, fmt),
      for _size.  */
   if (len > INT_MAX)
     {
-      ptr->_errno = EOVERFLOW;
+      _REENT_ERRNO(ptr) = EOVERFLOW;
       return NULL;
     }
   f._bf._size = f._w = len;
@@ -60,17 +59,16 @@ _DEFUN(_asnprintf_r, (ptr, buf, lenp, fmt),
 
 #ifdef _NANO_FORMATTED_IO
 char *
-_EXFUN(_asniprintf_r, (struct _reent *, char *, size_t *, const char *, ...)
-       _ATTRIBUTE ((__alias__("_asnprintf_r"))));
+_asniprintf_r (struct _reent *, char *, size_t *, const char *, ...)
+       _ATTRIBUTE ((__alias__("_asnprintf_r")));
 #endif
 
 #ifndef _REENT_ONLY
 
 char *
-_DEFUN(asnprintf, (buf, lenp, fmt),
-       char *__restrict buf _AND
-       size_t *__restrict lenp _AND
-       const char *__restrict fmt _DOTS)
+asnprintf (char *__restrict buf,
+       size_t *__restrict lenp,
+       const char *__restrict fmt, ...)
 {
   int ret;
   va_list ap;
@@ -96,7 +94,7 @@ _DEFUN(asnprintf, (buf, lenp, fmt),
      for _size.  */
   if (len > INT_MAX)
     {
-      ptr->_errno = EOVERFLOW;
+      _REENT_ERRNO(ptr) = EOVERFLOW;
       return NULL;
     }
   f._bf._size = f._w = len;
@@ -113,7 +111,7 @@ _DEFUN(asnprintf, (buf, lenp, fmt),
 
 #ifdef _NANO_FORMATTED_IO
 char *
-_EXFUN(asniprintf, (char *, size_t *, const char *, ...)
-       _ATTRIBUTE ((__alias__("asnprintf"))));
+asniprintf (char *, size_t *, const char *, ...)
+       _ATTRIBUTE ((__alias__("asnprintf")));
 #endif
 #endif /* ! _REENT_ONLY */

@@ -1,5 +1,5 @@
 /* MI Command Set - file commands.
-   Copyright (C) 2000-2013 Free Software Foundation, Inc.
+   Copyright (C) 2000-2023 Free Software Foundation, Inc.
    Contributed by Cygnus Solutions (a Red Hat company).
 
    This file is part of GDB.
@@ -20,17 +20,21 @@
 #include "defs.h"
 #include "mi-cmds.h"
 #include "mi-getopt.h"
+#include "mi-interp.h"
 #include "ui-out.h"
 #include "symtab.h"
 #include "source.h"
 #include "objfiles.h"
 #include "psymtab.h"
+#include "solib.h"
+#include "solist.h"
+#include "gdbsupport/gdb_regex.h"
 
 /* Return to the client the absolute path and line number of the 
    current file being executed.  */
 
 void
-mi_cmd_file_list_exec_source_file (char *command, char **argv, int argc)
+mi_cmd_file_list_exec_source_file (const char *command, char **argv, int argc)
 {
   struct symtab_and_line st;
   struct ui_out *uiout = current_uiout;
@@ -49,59 +53,122 @@ mi_cmd_file_list_exec_source_file (char *command, char **argv, int argc)
     error (_("-file-list-exec-source-file: No symtab"));
 
   /* Print to the user the line, filename and fullname.  */
-  ui_out_field_int (uiout, "line", st.line);
-  ui_out_field_string (uiout, "file",
-		       symtab_to_filename_for_display (st.symtab));
+  uiout->field_signed ("line", st.line);
+  uiout->field_string ("file", symtab_to_filename_for_display (st.symtab));
 
-  ui_out_field_string (uiout, "fullname", symtab_to_fullname (st.symtab));
+  uiout->field_string ("fullname", symtab_to_fullname (st.symtab));
 
-  ui_out_field_int (uiout, "macro-info", st.symtab->macro_table ? 1 : 0);
+  uiout->field_signed ("macro-info",
+		       st.symtab->compunit ()->macro_table () != NULL);
 }
 
-/* A callback for map_partial_symbol_filenames.  */
-
-static void
-print_partial_file_name (const char *filename, const char *fullname,
-			 void *ignore)
-{
-  struct ui_out *uiout = current_uiout;
-
-  ui_out_begin (uiout, ui_out_type_tuple, NULL);
-
-  ui_out_field_string (uiout, "file", filename);
-
-  if (fullname)
-    ui_out_field_string (uiout, "fullname", fullname);
-
-  ui_out_end (uiout, ui_out_type_tuple);
-}
+/* Implement -file-list-exec-source-files command.  */
 
 void
-mi_cmd_file_list_exec_source_files (char *command, char **argv, int argc)
+mi_cmd_file_list_exec_source_files (const char *command, char **argv, int argc)
+{
+  enum opt
+    {
+      GROUP_BY_OBJFILE_OPT,
+      MATCH_BASENAME_OPT,
+      MATCH_DIRNAME_OPT
+    };
+  static const struct mi_opt opts[] =
+  {
+    {"-group-by-objfile", GROUP_BY_OBJFILE_OPT, 0},
+    {"-basename", MATCH_BASENAME_OPT, 0},
+    {"-dirname", MATCH_DIRNAME_OPT, 0},
+    { 0, 0, 0 }
+  };
+
+  /* Parse arguments.  */
+  int oind = 0;
+  char *oarg;
+
+  bool group_by_objfile = false;
+  bool match_on_basename = false;
+  bool match_on_dirname = false;
+
+  while (1)
+    {
+      int opt = mi_getopt ("-file-list-exec-source-files", argc, argv,
+			   opts, &oind, &oarg);
+      if (opt < 0)
+	break;
+      switch ((enum opt) opt)
+	{
+	case GROUP_BY_OBJFILE_OPT:
+	  group_by_objfile = true;
+	  break;
+	case MATCH_BASENAME_OPT:
+	  match_on_basename = true;
+	  break;
+	case MATCH_DIRNAME_OPT:
+	  match_on_dirname = true;
+	  break;
+	}
+    }
+
+  if ((argc - oind > 1) || (match_on_basename && match_on_dirname))
+    error (_("-file-list-exec-source-files: Usage: [--group-by-objfile] [--basename | --dirname] [--] REGEXP"));
+
+  const char *regexp = nullptr;
+  if (argc - oind == 1)
+    regexp = argv[oind];
+
+  info_sources_filter::match_on match_type;
+  if (match_on_dirname)
+    match_type = info_sources_filter::match_on::DIRNAME;
+  else if (match_on_basename)
+    match_type = info_sources_filter::match_on::BASENAME;
+  else
+    match_type = info_sources_filter::match_on::FULLNAME;
+
+  info_sources_filter filter (match_type, regexp);
+  info_sources_worker (current_uiout, group_by_objfile, filter);
+}
+
+/* See mi-cmds.h.  */
+
+void
+mi_cmd_file_list_shared_libraries (const char *command, char **argv, int argc)
 {
   struct ui_out *uiout = current_uiout;
-  struct symtab *s;
-  struct objfile *objfile;
+  const char *pattern;
 
-  if (!mi_valid_noargs ("-file-list-exec-source-files", argc, argv))
-    error (_("-file-list-exec-source-files: Usage: No args"));
+  switch (argc)
+    {
+    case 0:
+      pattern = NULL;
+      break;
+    case 1:
+      pattern = argv[0];
+      break;
+    default:
+      error (_("Usage: -file-list-shared-libraries [REGEXP]"));
+    }
+
+  if (pattern != NULL)
+    {
+      const char *re_err = re_comp (pattern);
+
+      if (re_err != NULL)
+	error (_("Invalid regexp: %s"), re_err);
+    }
+
+  update_solib_list (1);
 
   /* Print the table header.  */
-  ui_out_begin (uiout, ui_out_type_list, "files");
+  ui_out_emit_list list_emitter (uiout, "shared-libraries");
 
-  /* Look at all of the symtabs.  */
-  ALL_SYMTABS (objfile, s)
-  {
-    ui_out_begin (uiout, ui_out_type_tuple, NULL);
+  for (struct so_list *so : current_program_space->solibs ())
+    {
+      if (so->so_name[0] == '\0')
+	continue;
+      if (pattern != NULL && !re_exec (so->so_name))
+	continue;
 
-    ui_out_field_string (uiout, "file", symtab_to_filename_for_display (s));
-    ui_out_field_string (uiout, "fullname", symtab_to_fullname (s));
-
-    ui_out_end (uiout, ui_out_type_tuple);
-  }
-
-  map_partial_symbol_filenames (print_partial_file_name, NULL,
-				1 /*need_fullname*/);
-
-  ui_out_end (uiout, ui_out_type_list);
+      ui_out_emit_tuple tuple_emitter (uiout, NULL);
+      mi_output_solib_attribs (uiout, so);
+    }
 }

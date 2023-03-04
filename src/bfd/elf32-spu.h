@@ -1,6 +1,6 @@
 /* SPU specific support for 32-bit ELF.
 
-   Copyright 2006, 2007, 2008, 2009 Free Software Foundation, Inc.
+   Copyright (C) 2006-2023 Free Software Foundation, Inc.
 
    This file is part of BFD, the Binary File Descriptor library.
 
@@ -15,8 +15,9 @@
    GNU General Public License for more details.
 
    You should have received a copy of the GNU General Public License
-   along with this program; if not, write to the Free Software Foundation,
-   Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.  */
+   along with this program; if not, write to the Free Software
+   Foundation, Inc., 51 Franklin Street - Fifth Floor, Boston,
+   MA 02110-1301, USA.  */
 
 struct spu_elf_params
 {
@@ -114,10 +115,9 @@ struct _ovl_stream
 
 extern void spu_elf_setup (struct bfd_link_info *, struct spu_elf_params *);
 extern void spu_elf_plugin (int);
-extern bfd_boolean spu_elf_open_builtin_lib (bfd **,
-					     const struct _ovl_stream *);
-extern bfd_boolean spu_elf_create_sections (struct bfd_link_info *);
-extern bfd_boolean spu_elf_size_sections (bfd *, struct bfd_link_info *);
+extern bool spu_elf_open_builtin_lib (bfd **, const struct _ovl_stream *);
+extern bool spu_elf_create_sections (struct bfd_link_info *);
+extern bool spu_elf_size_sections (bfd *, struct bfd_link_info *);
 extern int spu_elf_find_overlays (struct bfd_link_info *);
 extern int spu_elf_size_stubs (struct bfd_link_info *);
 extern void spu_elf_place_overlay_data (struct bfd_link_info *);

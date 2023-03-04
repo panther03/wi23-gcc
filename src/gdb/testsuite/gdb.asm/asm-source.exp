@@ -1,4 +1,4 @@
-# Copyright 1998-2013 Free Software Foundation, Inc.
+# Copyright 1998-2023 Free Software Foundation, Inc.
 # 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -39,6 +39,9 @@ switch -glob -- [istarget] {
     }
     "arm*-*-*" {
         set asm-arch arm
+    }
+    "aarch64*-*-*" {
+	set asm-arch aarch64
     }
     "bfin-*-*" {
         set asm-arch bfin
@@ -97,6 +100,11 @@ switch -glob -- [istarget] {
     "mips*-*" {
         set asm-arch mips
     }
+    "powerpc64le-*" {
+        set asm-arch powerpc64le
+        set asm-flags "-a64 -I${srcdir}/${subdir} $obj_include"
+        append link-flags " -m elf64lppc"
+    }
     "powerpc*-*" {
         if { [is_lp64_target] } {
             set asm-arch powerpc64
@@ -119,11 +127,6 @@ switch -glob -- [istarget] {
         set asm-arch sparc64
         set asm-flags "-xarch=v9 -I${srcdir}/${subdir} $obj_include"
 	set debug-flags "-gdwarf-2"
-    }
-    "spu*-*-*" {
-       set asm-arch spu
-       set asm-flags "-I${srcdir}/${subdir} $obj_include --no-warn"
-       set debug-flags "-gdwarf-2"
     }
     "xstormy16-*-*" {
         set asm-arch xstormy16
@@ -151,10 +154,6 @@ switch -glob -- [istarget] {
         set asm-arch pa
 	set debug-flags "-gdwarf-2"
     }
-    "hppa64-*-hpux*" {
-        set asm-arch pa64
-	set debug-flags "-gdwarf-2"
-    }
     "h83*-*" {
 	set asm-arch h8300
         set debug-flags "-gdwarf-2"
@@ -162,23 +161,19 @@ switch -glob -- [istarget] {
 }
 
 if { "${asm-arch}" == "" } {
-    untested asm-source.exp
+    untested "skipping tests due to no asm architecture"
     return -1
 }
 
 # On NetBSD/ELF we need a special NetBSD-identifying note section.
-if { [istarget "*-*-netbsdelf*"]
-     || [istarget "alpha-*-netbsd*"]
-     || [istarget "mips*-*-netbsd*"]
-     || [istarget "powerpc-*-netbsd*"]
-     || [istarget "x86_64-*-netbsd*"] } then {
+if {[istarget "*-*-netbsd*"] && ![istarget "*-*-netbsdaout*"]} {
     set asm-note "netbsd"
 }
 
 # On OpenBSD/ELF we need a similar note section.  We make no attempt
 # of handing a.out here since most OpenBSD/a.out systems use a rather
 # outdated assembler that doesn't assemble this test's code anyway.
-if { [istarget "*-*-openbsd*"] } then {
+if {[istarget "*-*-openbsd*"]} {
     set asm-note "openbsd"
 }
 
@@ -192,7 +187,7 @@ set dest [target_info name]
 if [board_info $dest exists multilib_flags] {
 	set multilib_flags [board_info $dest multilib_flags]
 	if { "${multilib_flags}" != "" } {
-	   untested asm-source.exp
+	   untested "failed to compile"
 	   return -1
 	   return
 	 }
@@ -200,10 +195,13 @@ if [board_info $dest exists multilib_flags] {
 
 standard_testfile asmsrc1.s asmsrc2.s
 
-remote_exec build "rm -f ${subdir}/arch.inc"
-remote_download host ${srcdir}/${subdir}/${asm-arch}.inc ${subdir}/arch.inc
-remote_exec build "rm -f ${subdir}/note.inc"
-remote_download host ${srcdir}/${subdir}/${asm-note}.inc ${subdir}/note.inc
+set arch_inc [standard_output_file arch.inc]
+set note_inc [standard_output_file note.inc]
+
+remote_exec build "rm -f $arch_inc"
+remote_download host ${srcdir}/${subdir}/${asm-arch}.inc $arch_inc
+remote_exec build "rm -f $note_inc"
+remote_download host ${srcdir}/${subdir}/${asm-note}.inc $note_inc
 
 if { [string equal ${asm-flags} ""] } {
     set asm-flags "-I${srcdir}/${subdir} $obj_include"
@@ -214,7 +212,7 @@ if { [string equal ${debug-flags} ""] } {
 }
 
 # Allow the target board to override the debug flags.
-if { [board_info $dest exists debug_flags] } then {
+if {[board_info $dest exists debug_flags]} {
     set debug-flags "[board_info $dest debug_flags]"
 }
 
@@ -241,12 +239,12 @@ regsub "--" "-g\[0-9\]" "${debug-flags}" "" debug-flags
 set asm1obj [standard_output_file asmrc1.o]
 set asm2obj [standard_output_file asmrc2.o]
 
-if {[target_assemble ${srcdir}/${subdir}/${srcfile} $asm1obj "${asm-flags} ${debug-flags}"] != ""} then {
-     untested asm-source.exp
+if {[target_assemble ${srcdir}/${subdir}/${srcfile} $asm1obj "${asm-flags} ${debug-flags}"] != ""} {
+     untested "failed to assemble"
      return -1
 }
-if {[target_assemble ${srcdir}/${subdir}/${srcfile2} $asm2obj "${asm-flags} ${debug-flags}"] != ""} then {
-     untested asm-source.exp
+if {[target_assemble ${srcdir}/${subdir}/${srcfile2} $asm2obj "${asm-flags} ${debug-flags}"] != ""} {
+     untested "failed to assemble"
      return -1
 }
 
@@ -256,8 +254,8 @@ if {[target_assemble ${srcdir}/${subdir}/${srcfile2} $asm2obj "${asm-flags} ${de
 # code here that provides its own startup code.  Using target_link
 # also avoids a lot of problems on many systems, most notably on
 # *-*-*bsd* and *-*-solaris2*.
-if {[target_link [list $asm1obj $asm2obj] "${binfile}" ${link-flags}] != "" } then {
-     untested asm-source.exp
+if {[target_link [list $asm1obj $asm2obj] "${binfile}" ${link-flags}] != ""} {
+     untested "failed to link"
      return -1
 }
 
@@ -267,6 +265,7 @@ if { [istarget "m6811-*-*"] || [istarget "m6812-*-*"] } {
 }
 
 # Collect some line numbers.
+set line_enter      [expr [gdb_get_line_number "main enter" "asmsrc1.s"] + 1]
 set line_main       [expr [gdb_get_line_number "main start" "asmsrc1.s"] + 1]
 set line_call_foo2  [expr [gdb_get_line_number "call foo2"  "asmsrc1.s"] + 1]
 set line_search_comment [expr [gdb_get_line_number "search" "asmsrc1.s"] + 1]
@@ -285,12 +284,15 @@ gdb_load ${binfile}
 # Run to `main' where we begin our tests.
 #
 
-if ![runto_main] then {
-    gdb_suppress_tests
+if {![runto_main]} {
+    return 0
 }
 
 # Execute the `f' command and see if the result includes source info.
-gdb_test "f" "asmsrc1\[.\]s:$line_main.*several_nops" "f at main"
+gdb_test "f" "asmsrc1\[.\]s:$line_enter.*gdbasm_enter" "f at main"
+
+# Execute the `n' command.
+gdb_test "n" "$line_main\[ 	\]*.*several_nops" "n at main"
 
 # See if we properly `next' over a macro with several insns.
 gdb_test "n" "$line_call_foo2\[ 	\]*.*foo2" "next over macro"
@@ -414,8 +416,7 @@ gdb_test_multiple "info sources" "info sources" {
 
 # Try 'info line'
 gdb_test "info line" \
-	"Line $line_call_foo3_again of.*asmsrc2.s.*starts at.*<\\.?foo2+.*> and ends at.*<\\.?foo2+.*>." \
-	"info line"
+	"Line $line_call_foo3_again of.*asmsrc2.s.*starts at.*<\\.?foo2+.*> and ends at.*<\\.?foo2+.*>."
 
 # Try 'nexting' over next call to foo3
 gdb_test "next" "$line_foo2_leave\[ \t\]+gdbasm_leave" "next over foo3"
@@ -424,7 +425,7 @@ gdb_test "next" "$line_foo2_leave\[ \t\]+gdbasm_leave" "next over foo3"
 # Like "finish", "return" command also can return to the caller
 # line again or the statement after, depending on the architecture.
 gdb_test_multiple "return" "return from foo2" {
-    -re "Make (foo2|selected stack frame) return now\?.*" {
+    -re "Make (foo2|selected stack frame) return now\\? .y or n. " {
         send_gdb "y\n"
         exp_continue
     }
@@ -454,18 +455,18 @@ proc test_dis { command var } {
 }
 
 # See if we can look at a global variable, three ways
-gdb_test "print globalvar" ".* = 11" "look at global variable"
+gdb_test "print (int) globalvar" ".* = 11" "look at global variable"
 test_dis "x/i &globalvar" "globalvar"
-test_dis "disassem &globalvar, &globalvar+1" "globalvar"
+test_dis "disassem &globalvar, (int *) &globalvar+1" "globalvar"
 
 # See if we can look at a static variable, three ways
-gdb_test "print staticvar" ".* = 5" "look at static variable"
+gdb_test "print (int) staticvar" ".* = 5" "look at static variable"
 test_dis "x/i &staticvar" "staticvar"
-test_dis "disassem &staticvar, &staticvar+1" "staticvar"
+test_dis "disassem &staticvar, (int *) &staticvar+1" "staticvar"
 
 # See if we can look at a static function
 gdb_test "disassem foostatic" ".*<\\+0>:.*End of assembler dump." \
 	"look at static function"
 
-remote_exec build "rm -f ${subdir}/arch.inc"
-remote_exec build "rm -f ${subdir}/note.inc"
+remote_exec build "rm -f $arch_inc"
+remote_exec build "rm -f $note_inc"

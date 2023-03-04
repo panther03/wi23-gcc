@@ -1,6 +1,5 @@
 /* tc-tic54x.c -- Assembly code for the Texas Instruments TMS320C54X
-   Copyright 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008,
-   2009, 2010, 2012  Free Software Foundation, Inc.
+   Copyright (C) 1999-2023 Free Software Foundation, Inc.
    Contributed by Timothy Wall (twall@cygnus.com)
 
    This file is part of GAS, the GNU Assembler.
@@ -51,7 +50,6 @@
 #include "sb.h"
 #include "macro.h"
 #include "subsegs.h"
-#include "struc-symbol.h"
 #include "opcode/tic54x.h"
 #include "obj-coff.h"
 #include <math.h>
@@ -162,7 +160,7 @@ size_t md_longopts_size = sizeof (md_longopts);
 static int assembly_begun = 0;
 /* Addressing mode is not entirely implemented; the latest rev of the Other
    assembler doesn't seem to make any distinction whatsoever; all relocations
-   are stored as extended relocatiosn.  Older versions used REL16 vs RELEXT16,
+   are stored as extended relocations.  Older versions used REL16 vs RELEXT16,
    but now it seems all relocations are RELEXT16.  We use all RELEXT16.
 
    The cpu version is kind of a waste of time as well.  There is one
@@ -183,11 +181,35 @@ static symbolS *last_label_seen = NULL;
 /* This ensures that all new labels are unique.  */
 static int local_label_id;
 
-static struct hash_control *subsym_recurse_hash; /* Prevent infinite recurse.  */
-static struct hash_control *math_hash; /* Built-in math functions.  */
+static htab_t subsym_recurse_hash; /* Prevent infinite recurse.  */
 /* Allow maximum levels of macro nesting; level 0 is the main substitution
    symbol table.  The other assembler only does 32 levels, so there!  */
-static struct hash_control *subsym_hash[100];
+#define MAX_SUBSYM_HASH 100
+static htab_t subsym_hash[MAX_SUBSYM_HASH];
+
+typedef struct
+{
+  const char *name;
+  union {
+    int (*s) (char *, char *);
+    float (*f) (float, float);
+    int (*i) (float, float);
+  } proc;
+  int nargs;
+  int type;
+} subsym_proc_entry;
+
+typedef struct {
+  union {
+    char *s;
+    const subsym_proc_entry *p;
+  } u;
+  unsigned int freekey : 1;
+  unsigned int freeval : 1;
+  unsigned int isproc : 1;
+  unsigned int ismath : 1;
+} subsym_ent_t;
+
 
 /* Keep track of local labels so we can substitute them before GAS sees them
    since macros use their own 'namespace' for local labels, use a separate hash
@@ -198,18 +220,18 @@ static struct hash_control *subsym_hash[100];
    We use our own macro nesting counter, since GAS overloads it when expanding
    other things (like conditionals and repeat loops).  */
 static int macro_level = 0;
-static struct hash_control *local_label_hash[100];
+static htab_t local_label_hash[MAX_SUBSYM_HASH];
 /* Keep track of struct/union tags.  */
-static struct hash_control *stag_hash;
-static struct hash_control *op_hash;
-static struct hash_control *parop_hash;
-static struct hash_control *reg_hash;
-static struct hash_control *mmreg_hash;
-static struct hash_control *cc_hash;
-static struct hash_control *cc2_hash;
-static struct hash_control *cc3_hash;
-static struct hash_control *sbit_hash;
-static struct hash_control *misc_symbol_hash;
+static htab_t stag_hash;
+static htab_t op_hash;
+static htab_t parop_hash;
+static htab_t reg_hash;
+static htab_t mmreg_hash;
+static htab_t cc_hash;
+static htab_t cc2_hash;
+static htab_t cc3_hash;
+static htab_t sbit_hash;
+static htab_t misc_symbol_hash;
 
 /* Only word (et al.), align, or conditionals are allowed within
    .struct/.union.  */
@@ -224,21 +246,21 @@ static struct hash_control *misc_symbol_hash;
 
 
 static void subsym_create_or_replace (char *, char *);
-static char *subsym_lookup (char *, int);
+static subsym_ent_t *subsym_lookup (char *, int);
 static char *subsym_substitute (char *, int);
 
 
 void
 md_show_usage (FILE *stream)
 {
-  fprintf (stream, _("C54x-specific command line  options:\n"));
+  fprintf (stream, _("C54x-specific command line options:\n"));
   fprintf (stream, _("-mfar-mode | -mf          Use extended addressing\n"));
   fprintf (stream, _("-mcpu=<CPU version>       Specify the CPU version\n"));
   fprintf (stream, _("-merrors-to-file <filename>\n"));
   fprintf (stream, _("-me <filename>            Redirect errors to a file\n"));
 }
 
-/* Output a single character (upper octect is zero).  */
+/* Output a single character (upper octet is zero).  */
 
 static void
 tic54x_emit_char (char c)
@@ -323,7 +345,6 @@ tic54x_asg (int x ATTRIBUTE_UNUSED)
   int c;
   char *name;
   char *str;
-  char *tmp;
   int quoted = *input_line_pointer == '"';
 
   ILLEGAL_WITHIN_STRUCT ();
@@ -336,39 +357,38 @@ tic54x_asg (int x ATTRIBUTE_UNUSED)
     }
   else
     {
+      size_t len;
       str = input_line_pointer;
       while ((c = *input_line_pointer) != ',')
 	{
-	  if (is_end_of_line[(int) *input_line_pointer])
+	  if (is_end_of_line[(unsigned char) c])
 	    break;
 	  ++input_line_pointer;
 	}
-      *input_line_pointer = 0;
+      len = input_line_pointer - str;
+      str = notes_memdup (str, len, len + 1);
     }
   if (c != ',')
     {
       as_bad (_("Comma and symbol expected for '.asg STRING, SYMBOL'"));
+      notes_free (str);
       ignore_rest_of_line ();
       return;
     }
 
-  name = ++input_line_pointer;
-  c = get_symbol_end ();	/* Get terminator.  */
+  ++input_line_pointer;
+  c = get_symbol_name (&name);	/* Get terminator.  */
+  name = notes_strdup (name);
+  (void) restore_line_pointer (c);
   if (!ISALPHA (*name))
     {
       as_bad (_("symbols assigned with .asg must begin with a letter"));
+      notes_free (str);
       ignore_rest_of_line ();
       return;
     }
 
-  tmp = xmalloc (strlen (str) + 1);
-  strcpy (tmp, str);
-  str = tmp;
-  tmp = xmalloc (strlen (name) + 1);
-  strcpy (tmp, name);
-  name = tmp;
   subsym_create_or_replace (name, str);
-  *input_line_pointer = c;
   demand_empty_rest_of_line ();
 }
 
@@ -412,20 +432,19 @@ tic54x_eval (int x ATTRIBUTE_UNUSED)
       ignore_rest_of_line ();
       return;
     }
-  name = input_line_pointer;
-  c = get_symbol_end ();	/* Get terminator.  */
-  tmp = xmalloc (strlen (name) + 1);
-  name = strcpy (tmp, name);
-  *input_line_pointer = c;
+  c = get_symbol_name (&name);	/* Get terminator.  */
 
   if (!ISALPHA (*name))
     {
       as_bad (_("symbols assigned with .eval must begin with a letter"));
+      (void) restore_line_pointer (c);
       ignore_rest_of_line ();
       return;
     }
-  symbolP = symbol_new (name, absolute_section,
-			(valueT) value, &zero_address_frag);
+  name = notes_strdup (name);
+  (void) restore_line_pointer (c);
+
+  symbolP = symbol_new (name, absolute_section, &zero_address_frag, value);
   SF_SET_LOCAL (symbolP);
   symbol_table_insert (symbolP);
 
@@ -433,8 +452,7 @@ tic54x_eval (int x ATTRIBUTE_UNUSED)
      But since there's not written rule as to when, don't even bother trying
      to match their behavior.  */
   sprintf (valuestr, "%d", value);
-  tmp = xmalloc (strlen (valuestr) + 1);
-  strcpy (tmp, valuestr);
+  tmp = notes_strdup (valuestr);
   subsym_create_or_replace (name, tmp);
 
   demand_empty_rest_of_line ();
@@ -472,8 +490,9 @@ tic54x_bss (int x ATTRIBUTE_UNUSED)
   current_seg = now_seg;	/* Save current seg.  */
   current_subseg = now_subseg;	/* Save current subseg.  */
 
-  name = input_line_pointer;
-  c = get_symbol_end ();	/* Get terminator.  */
+  c = get_symbol_name (&name);	/* Get terminator.  */
+  if (c == '"')
+    c = * ++ input_line_pointer;
   if (c != ',')
     {
       as_bad (_(".bss size argument missing\n"));
@@ -514,7 +533,7 @@ tic54x_bss (int x ATTRIBUTE_UNUSED)
   symbolP = symbol_find_or_make (name);
 
   if (S_GET_SEGMENT (symbolP) == bss_section)
-    symbolP->sy_frag->fr_symbol = (symbolS *) NULL;
+    symbol_get_frag (symbolP)->fr_symbol = (symbolS *) NULL;
 
   symbol_set_frag (symbolP, frag_now);
   p = frag_var (rs_org, 1, 1, (relax_substateT) 0, symbolP,
@@ -550,41 +569,38 @@ stag_add_field_symbols (struct stag *stag,
 			symbolS *rootsym,
 			const char *root_stag_name)
 {
-  char prefix[strlen (path) + 2];
+  char * prefix;
   struct stag_field *field = stag->field;
 
   /* Construct a symbol for every field contained within this structure
      including fields within structure fields.  */
-  strcpy (prefix, path);
-  if (*path)
-    strcat (prefix, ".");
+  prefix = concat (path, *path ? "." : "", NULL);
 
   while (field != NULL)
     {
-      int len = strlen (prefix) + strlen (field->name) + 2;
-      char *name = xmalloc (len);
-      strcpy (name, prefix);
-      strcat (name, field->name);
+      char *name = concat (prefix, field->name, NULL);
+      char *freename = name;
 
       if (rootsym == NULL)
 	{
 	  symbolS *sym;
-	  sym = symbol_new (name, absolute_section,
-			    (field->stag ? field->offset :
-			     (valueT) (base_offset + field->offset)),
-			    &zero_address_frag);
+	  sym = symbol_new (name, absolute_section, &zero_address_frag,
+			    (field->stag ? field->offset
+			     : base_offset + field->offset));
 	  SF_SET_LOCAL (sym);
 	  symbol_table_insert (sym);
 	}
       else
 	{
-	  char *replacement = xmalloc (strlen (name)
-				       + strlen (stag->name) + 2);
-	  strcpy (replacement, S_GET_NAME (rootsym));
-	  strcat (replacement, "+");
-	  strcat (replacement, root_stag_name);
-	  strcat (replacement, name + strlen (S_GET_NAME (rootsym)));
-	  hash_insert (subsym_hash[0], name, replacement);
+	  subsym_ent_t *ent = xmalloc (sizeof (*ent));
+	  ent->u.s = concat (S_GET_NAME (rootsym), "+", root_stag_name,
+			     name + strlen (S_GET_NAME (rootsym)), NULL);
+	  ent->freekey = 1;
+	  ent->freeval = 1;
+	  ent->isproc = 0;
+	  ent->ismath = 0;
+	  str_hash_insert (subsym_hash[0], name, ent, 0);
+	  freename = NULL;
 	}
 
       /* Recurse if the field is a structure.
@@ -594,7 +610,9 @@ stag_add_field_symbols (struct stag *stag,
 				field->offset,
 				rootsym, root_stag_name);
       field = field->next;
+      free (freename);
     }
+  free (prefix);
 }
 
 /* Keep track of stag fields so that when structures are nested we can add the
@@ -606,10 +624,9 @@ stag_add_field (struct stag *parent,
 		bfd_vma offset,
 		struct stag *stag)
 {
-  struct stag_field *sfield = xmalloc (sizeof (struct stag_field));
+  struct stag_field *sfield = XCNEW (struct stag_field);
 
-  memset (sfield, 0, sizeof (*sfield));
-  sfield->name = strcpy (xmalloc (strlen (name) + 1), name);
+  sfield->name = xstrdup (name);
   sfield->offset = offset;
   sfield->bitfield_offset = parent->current_bitfield_offset;
   sfield->stag = stag;
@@ -623,10 +640,10 @@ stag_add_field (struct stag *parent,
       sf->next = sfield;
     }
   /* Only create a symbol for this field if the parent has no name.  */
-  if (!strncmp (".fake", parent->name, 5))
+  if (startswith (parent->name, ".fake"))
     {
-      symbolS *sym = symbol_new (name, absolute_section,
-				 (valueT) offset, &zero_address_frag);
+      symbolS *sym = symbol_new (name, absolute_section, &zero_address_frag,
+				 offset);
       SF_SET_LOCAL (sym);
       symbol_table_insert (sym);
     }
@@ -660,7 +677,7 @@ tic54x_struct (int arg)
     {
       /* Offset is ignored in inner structs.  */
       SKIP_WHITESPACE ();
-      if (!is_end_of_line[(int) *input_line_pointer])
+      if (!is_end_of_line[(unsigned char) *input_line_pointer])
 	start_offset = get_absolute_expression ();
       else
 	start_offset = 0;
@@ -669,8 +686,7 @@ tic54x_struct (int arg)
   if (current_stag)
     {
       /* Nesting, link to outer one.  */
-      current_stag->inner = (struct stag *) xmalloc (sizeof (struct stag));
-      memset (current_stag->inner, 0, sizeof (struct stag));
+      current_stag->inner = XCNEW (struct stag);
       current_stag->inner->outer = current_stag;
       current_stag = current_stag->inner;
       if (start_offset)
@@ -679,8 +695,7 @@ tic54x_struct (int arg)
     }
   else
     {
-      current_stag = (struct stag *) xmalloc (sizeof (struct stag));
-      memset (current_stag, 0, sizeof (struct stag));
+      current_stag = XCNEW (struct stag);
       abs_section_offset = start_offset;
     }
   current_stag->is_union = is_union;
@@ -691,16 +706,17 @@ tic54x_struct (int arg)
       char fake[] = ".fake_stagNNNNNNN";
       sprintf (fake, ".fake_stag%d", struct_count++);
       current_stag->sym = symbol_new (fake, absolute_section,
-				      (valueT) abs_section_offset,
-				      &zero_address_frag);
+				      &zero_address_frag,
+				      abs_section_offset);
     }
   else
     {
-      char label[strlen (S_GET_NAME (line_label)) + 1];
-      strcpy (label, S_GET_NAME (line_label));
-      current_stag->sym = symbol_new (label, absolute_section,
-				      (valueT) abs_section_offset,
-				      &zero_address_frag);
+      char * label = xstrdup (S_GET_NAME (line_label));
+      current_stag->sym = symbol_new (label,
+				      absolute_section,
+				      &zero_address_frag,
+				      abs_section_offset);
+      free (label);
     }
   current_stag->name = S_GET_NAME (current_stag->sym);
   SF_SET_LOCAL (current_stag->sym);
@@ -720,7 +736,7 @@ tic54x_endstruct (int is_union)
 {
   int size;
   const char *path =
-    !strncmp (current_stag->name, ".fake", 5) ? "" : current_stag->name;
+    startswith (current_stag->name, ".fake") ? "" : current_stag->name;
 
   if (!current_stag || current_stag->is_union != is_union)
     {
@@ -755,7 +771,7 @@ tic54x_endstruct (int is_union)
   /* Nested .structs don't get put in the stag table.  */
   if (current_stag->outer == NULL)
     {
-      hash_insert (stag_hash, current_stag->name, current_stag);
+      str_hash_insert (stag_hash, current_stag->name, current_stag, 0);
       stag_add_field_symbols (current_stag, path,
 			      S_GET_VALUE (current_stag->sym),
 			      NULL, NULL);
@@ -783,9 +799,9 @@ tic54x_endstruct (int is_union)
 static void
 tic54x_tag (int ignore ATTRIBUTE_UNUSED)
 {
-  char *name = input_line_pointer;
-  int c = get_symbol_end ();
-  struct stag *stag = (struct stag *) hash_find (stag_hash, name);
+  char *name;
+  int c = get_symbol_name (&name);
+  struct stag *stag = (struct stag *) str_hash_find (stag_hash, name);
 
   if (!stag)
     {
@@ -804,9 +820,9 @@ tic54x_tag (int ignore ATTRIBUTE_UNUSED)
     }
   else
     {
-      char label[strlen (S_GET_NAME (line_label)) + 1];
+      char * label;
 
-      strcpy (label, S_GET_NAME (line_label));
+      label = xstrdup (S_GET_NAME (line_label));
       if (current_stag != NULL)
 	stag_add_field (current_stag, label,
 			abs_section_offset - S_GET_VALUE (current_stag->sym),
@@ -819,18 +835,20 @@ tic54x_tag (int ignore ATTRIBUTE_UNUSED)
 	    {
 	      as_bad (_(".tag target '%s' undefined"), label);
 	      ignore_rest_of_line ();
+	      free (label);
 	      return;
 	    }
 	  stag_add_field_symbols (stag, S_GET_NAME (sym),
 				  S_GET_VALUE (stag->sym), sym, stag->name);
 	}
+      free (label);
     }
 
   /* Bump by the struct size, but only if we're within a .struct section.  */
   if (current_stag != NULL && !current_stag->is_union)
     abs_section_offset += stag->size;
 
-  *input_line_pointer = c;
+  (void) restore_line_pointer (c);
   demand_empty_rest_of_line ();
   line_label = NULL;
 }
@@ -849,7 +867,7 @@ tic54x_struct_field (int type)
   int longword_align = 0;
 
   SKIP_WHITESPACE ();
-  if (!is_end_of_line[(int) *input_line_pointer])
+  if (!is_end_of_line[(unsigned char) *input_line_pointer])
     count = get_absolute_expression ();
 
   switch (type)
@@ -934,12 +952,13 @@ tic54x_struct_field (int type)
     }
   else
     {
-      char label[strlen (S_GET_NAME (line_label) + 1)];
+      char * label;
 
-      strcpy (label, S_GET_NAME (line_label));
+      label = xstrdup (S_GET_NAME (line_label));
       stag_add_field (current_stag, label,
 		      abs_section_offset - S_GET_VALUE (current_stag->sym),
 		      NULL);
+      free (label);
     }
 
   if (current_stag->is_union)
@@ -1110,16 +1129,15 @@ tic54x_global (int type)
 
   do
     {
-      name = input_line_pointer;
-      c = get_symbol_end ();
+      c = get_symbol_name (&name);
       symbolP = symbol_find_or_make (name);
+      c = restore_line_pointer (c);
 
-      *input_line_pointer = c;
       S_SET_STORAGE_CLASS (symbolP, C_EXT);
       if (c == ',')
 	{
 	  input_line_pointer++;
-	  if (is_end_of_line[(int) *input_line_pointer])
+	  if (is_end_of_line[(unsigned char) *input_line_pointer])
 	    c = *input_line_pointer;
 	}
     }
@@ -1128,13 +1146,40 @@ tic54x_global (int type)
   demand_empty_rest_of_line ();
 }
 
-/* Remove the symbol from the local label hash lookup.  */
+static void
+free_subsym_ent (void *ent)
+{
+  string_tuple_t *tuple = (string_tuple_t *) ent;
+  subsym_ent_t *val = (void *) tuple->value;
+  if (val->freekey)
+    free ((void *) tuple->key);
+  if (val->freeval)
+    free (val->u.s);
+  free (val);
+  free (ent);
+}
+
+static htab_t
+subsym_htab_create (void)
+{
+  return htab_create_alloc (16, hash_string_tuple, eq_string_tuple,
+			    free_subsym_ent, xcalloc, free);
+}
 
 static void
-tic54x_remove_local_label (const char *key, void *value ATTRIBUTE_UNUSED)
+free_local_label_ent (void *ent)
 {
-  void *elem = hash_delete (local_label_hash[macro_level], key, FALSE);
-  free (elem);
+  string_tuple_t *tuple = (string_tuple_t *) ent;
+  free ((void *) tuple->key);
+  free ((void *) tuple->value);
+  free (ent);
+}
+
+static htab_t
+local_label_htab_create (void)
+{
+  return htab_create_alloc (16, hash_string_tuple, eq_string_tuple,
+			    free_local_label_ent, xcalloc, free);
 }
 
 /* Reset all local labels.  */
@@ -1142,7 +1187,7 @@ tic54x_remove_local_label (const char *key, void *value ATTRIBUTE_UNUSED)
 static void
 tic54x_clear_local_labels (int ignored ATTRIBUTE_UNUSED)
 {
-  hash_traverse (local_label_hash[macro_level], tic54x_remove_local_label);
+  htab_empty (local_label_hash[macro_level]);
 }
 
 /* .text
@@ -1174,27 +1219,27 @@ tic54x_sect (int arg)
     {
       char *name = NULL;
       int len;
+      /* Make sure all named initialized sections flagged properly.  If we
+         encounter instructions, we'll flag it with SEC_CODE as well.  */
+      const char *flags = ",\"w\"\n";
 
       /* If there are quotes, remove them.  */
       if (*input_line_pointer == '"')
 	{
 	  name = demand_copy_C_string (&len);
 	  demand_empty_rest_of_line ();
-	  name = strcpy (xmalloc (len + 10), name);
+	  name = concat (name, flags, (char *) NULL);
 	}
       else
 	{
 	  int c;
-	  name = input_line_pointer;
-	  c = get_symbol_end ();
-          len = strlen(name);
-	  name = strcpy (xmalloc (len + 10), name);
-	  *input_line_pointer = c;
+
+	  c = get_symbol_name (&name);
+	  name = concat (name, flags, (char *) NULL);
+	  (void) restore_line_pointer (c);
 	  demand_empty_rest_of_line ();
 	}
-      /* Make sure all named initialized sections flagged properly.  If we
-         encounter instructions, we'll flag it with SEC_CODE as well.  */
-      strcat (name, ",\"w\"\n");
+
       input_scrub_insert_line (name);
       obj_coff_section (0);
 
@@ -1245,7 +1290,7 @@ tic54x_space (int arg)
      partial allocation has not been completed yet.  */
   if (expn.X_op != O_constant || frag_bit_offset (frag_now, now_seg) == -1)
     {
-      struct bit_info *bi = xmalloc (sizeof (struct bit_info));
+      struct bit_info *bi = XNEW (struct bit_info);
 
       bi->seg = now_seg;
       bi->type = bes;
@@ -1367,17 +1412,13 @@ tic54x_usect (int x ATTRIBUTE_UNUSED)
   current_seg = now_seg;	/* Save current seg.  */
   current_subseg = now_subseg;	/* Save current subseg.  */
 
-  if (*input_line_pointer == '"')
-    input_line_pointer++;
-  section_name = input_line_pointer;
-  c = get_symbol_end ();	/* Get terminator.  */
-  input_line_pointer++;		/* Skip null symbol terminator.  */
-  name = xmalloc (input_line_pointer - section_name + 1);
-  strcpy (name, section_name);
-
-  if (*input_line_pointer == ',')
+  c = get_symbol_name (&section_name);	/* Get terminator.  */
+  name = xstrdup (section_name);
+  c = restore_line_pointer (c);
+  
+  if (c == ',')
     ++input_line_pointer;
-  else if (c != ',')
+  else
     {
       as_bad (_("Missing size argument"));
       ignore_rest_of_line ();
@@ -1408,7 +1449,7 @@ tic54x_usect (int x ATTRIBUTE_UNUSED)
     blocking_flag = alignment_flag = 0;
 
   seg = subseg_new (name, 0);
-  flags = bfd_get_section_flags (stdoutput, seg) | SEC_ALLOC;
+  flags = bfd_section_flags (seg) | SEC_ALLOC;
 
   if (alignment_flag)
     {
@@ -1437,7 +1478,7 @@ tic54x_usect (int x ATTRIBUTE_UNUSED)
   if (blocking_flag)
     flags |= SEC_TIC54X_BLOCK;
 
-  if (!bfd_set_section_flags (stdoutput, seg, flags))
+  if (!bfd_set_section_flags (seg, flags))
     as_warn (_("Error setting flags for \"%s\": %s"), name,
 	     bfd_errmsg (bfd_get_error ()));
 
@@ -1473,7 +1514,7 @@ set_cpu (enum cpu_version version)
   if (version == V545LP || version == V546LP)
     {
       symbolS *symbolP = symbol_new ("__allow_lp", absolute_section,
-				     (valueT) 1, &zero_address_frag);
+				     &zero_address_frag, 1);
       SF_SET_LOCAL (symbolP);
       symbol_table_insert (symbolP);
     }
@@ -1505,7 +1546,7 @@ tic54x_version (int x ATTRIBUTE_UNUSED)
 
   SKIP_WHITESPACE ();
   ver = input_line_pointer;
-  while (!is_end_of_line[(int) *input_line_pointer])
+  while (!is_end_of_line[(unsigned char) *input_line_pointer])
     ++input_line_pointer;
   c = *input_line_pointer;
   *input_line_pointer = 0;
@@ -1663,7 +1704,7 @@ tic54x_align_words (int arg)
   /* Only ".align" with no argument is allowed within .struct/.union.  */
   int count = arg;
 
-  if (!is_end_of_line[(int) *input_line_pointer])
+  if (!is_end_of_line[(unsigned char) *input_line_pointer])
     {
       if (arg == 2)
 	as_warn (_("Argument to .even ignored"));
@@ -1687,7 +1728,7 @@ tic54x_align_words (int arg)
   s_align_bytes (count << 1);
 }
 
-/* Initialize multiple-bit fields withing a single word of memory.  */
+/* Initialize multiple-bit fields within a single word of memory.  */
 
 static void
 tic54x_field (int ignore ATTRIBUTE_UNUSED)
@@ -1757,7 +1798,7 @@ tic54x_field (int ignore ATTRIBUTE_UNUSED)
 	  fragS *alloc_frag = bit_offset_frag (frag_now, now_seg);
 	  if (bit_offset == -1)
 	    {
-	      struct bit_info *bi = xmalloc (sizeof (struct bit_info));
+	      struct bit_info *bi = XNEW (struct bit_info);
 	      /* We don't know the previous offset at this time, so store the
 		 info we need and figure it out later.  */
 	      expressionS size_exp;
@@ -1841,8 +1882,7 @@ tic54x_clink (int ignored ATTRIBUTE_UNUSED)
 	;
       know (input_line_pointer[-1] == '\"');
       input_line_pointer[-1] = 0;
-      name = xmalloc (input_line_pointer - section_name + 1);
-      strcpy (name, section_name);
+      name = xstrdup (section_name);
 
       seg = bfd_get_section_by_name (stdoutput, name);
       if (seg == NULL)
@@ -1856,7 +1896,7 @@ tic54x_clink (int ignored ATTRIBUTE_UNUSED)
     {
       if (!tic54x_initialized_section (seg))
 	{
-	  as_bad (_("Current section is unitialized, "
+	  as_bad (_("Current section is uninitialized, "
 		    "section name required for .clink"));
 	  ignore_rest_of_line ();
 	  return;
@@ -1873,20 +1913,15 @@ tic54x_clink (int ignored ATTRIBUTE_UNUSED)
    set to "." instead.  */
 
 static void
-tic54x_set_default_include (int dot)
+tic54x_set_default_include (void)
 {
-  char *dir = ".";
-  char *tmp = NULL;
+  char *dir, *tmp = NULL;
+  const char *curfile;
+  unsigned lineno;
 
-  if (!dot)
-    {
-      char *curfile;
-      unsigned lineno;
-
-      as_where (&curfile, &lineno);
-      dir = strcpy (xmalloc (strlen (curfile) + 1), curfile);
-      tmp = strrchr (dir, '/');
-    }
+  curfile = as_where (&lineno);
+  dir = xstrdup (curfile);
+  tmp = strrchr (dir, '/');
   if (tmp != NULL)
     {
       int len;
@@ -1895,7 +1930,7 @@ tic54x_set_default_include (int dot)
       len = strlen (dir);
       if (include_dir_count == 0)
 	{
-	  include_dirs = (char **) xmalloc (sizeof (*include_dirs));
+	  include_dirs = XNEWVEC (const char *, 1);
 	  include_dir_count = 1;
 	}
       include_dirs[0] = dir;
@@ -1937,11 +1972,11 @@ tic54x_include (int ignored ATTRIBUTE_UNUSED)
   else
     {
       filename = input_line_pointer;
-      while (!is_end_of_line[(int) *input_line_pointer])
+      while (!is_end_of_line[(unsigned char) *input_line_pointer])
 	++input_line_pointer;
       c = *input_line_pointer;
       *input_line_pointer = '\0';
-      filename = strcpy (xmalloc (strlen (filename) + 1), filename);
+      filename = xstrdup (filename);
       *input_line_pointer = c;
       demand_empty_rest_of_line ();
     }
@@ -1949,13 +1984,12 @@ tic54x_include (int ignored ATTRIBUTE_UNUSED)
      and a .newblock.
      The included file will be inserted before the newblock, so that the
      newblock is executed after the included file is processed.  */
-  input = xmalloc (sizeof (newblock) + strlen (filename) + 4);
-  sprintf (input, "\"%s\"\n%s", filename, newblock);
+  input = concat ("\"", filename, "\"\n", newblock, (char *) NULL);
   input_scrub_insert_line (input);
 
   tic54x_clear_local_labels (0);
 
-  tic54x_set_default_include (0);
+  tic54x_set_default_include ();
 
   s_include (0);
 }
@@ -1974,11 +2008,11 @@ tic54x_message (int type)
   else
     {
       msg = input_line_pointer;
-      while (!is_end_of_line[(int) *input_line_pointer])
+      while (!is_end_of_line[(unsigned char) *input_line_pointer])
 	++input_line_pointer;
       c = *input_line_pointer;
       *input_line_pointer = 0;
-      msg = strcpy (xmalloc (strlen (msg) + 1), msg);
+      msg = xstrdup (msg);
       *input_line_pointer = c;
     }
 
@@ -2009,17 +2043,17 @@ tic54x_message (int type)
 static void
 tic54x_label (int ignored ATTRIBUTE_UNUSED)
 {
-  char *name = input_line_pointer;
+  char *name;
   symbolS *symbolP;
   int c;
 
   ILLEGAL_WITHIN_STRUCT ();
 
-  c = get_symbol_end ();
+  c = get_symbol_name (&name);
   symbolP = colon (name);
   S_SET_STORAGE_CLASS (symbolP, C_STATLAB);
 
-  *input_line_pointer = c;
+  (void) restore_line_pointer (c);
   demand_empty_rest_of_line ();
 }
 
@@ -2028,16 +2062,16 @@ tic54x_label (int ignored ATTRIBUTE_UNUSED)
    absolute local symbols.  */
 
 static void
-tic54x_mmregs (int ignored ATTRIBUTE_UNUSED)
+tic54x_register_mmregs (int ignored ATTRIBUTE_UNUSED)
 {
-  symbol *sym;
+  const tic54x_symbol *sym;
 
   ILLEGAL_WITHIN_STRUCT ();
 
-  for (sym = (symbol *) mmregs; sym->name; sym++)
+  for (sym = tic54x_mmregs; sym->name; sym++)
     {
       symbolS *symbolP = symbol_new (sym->name, absolute_section,
-				     (valueT) sym->value, &zero_address_frag);
+				     &zero_address_frag, sym->value);
       SF_SET_LOCAL (symbolP);
       symbol_table_insert (symbolP);
     }
@@ -2052,10 +2086,10 @@ tic54x_loop (int count)
   ILLEGAL_WITHIN_STRUCT ();
 
   SKIP_WHITESPACE ();
-  if (!is_end_of_line[(int) *input_line_pointer])
+  if (!is_end_of_line[(unsigned char) *input_line_pointer])
     count = get_absolute_expression ();
 
-  do_repeat (count, "LOOP", "ENDLOOP");
+  do_repeat ((size_t) count, "LOOP", "ENDLOOP", NULL);
 }
 
 /* Normally, endloop gets eaten by the preceding loop.  */
@@ -2077,7 +2111,7 @@ tic54x_break (int ignore ATTRIBUTE_UNUSED)
   ILLEGAL_WITHIN_STRUCT ();
 
   SKIP_WHITESPACE ();
-  if (!is_end_of_line[(int) *input_line_pointer])
+  if (!is_end_of_line[(unsigned char) *input_line_pointer])
     cond = get_absolute_expression ();
 
   if (cond)
@@ -2091,7 +2125,7 @@ set_address_mode (int mode)
   if (mode == far_mode)
     {
       symbolS *symbolP = symbol_new ("__allow_far", absolute_section,
-				     (valueT) 1, &zero_address_frag);
+				     &zero_address_frag, 1);
       SF_SET_LOCAL (symbolP);
       symbol_table_insert (symbolP);
     }
@@ -2142,12 +2176,11 @@ tic54x_sblock (int ignore ATTRIBUTE_UNUSED)
 	}
       else
 	{
-	  char *section_name = input_line_pointer;
+	  char *section_name;
 
-	  c = get_symbol_end ();
-	  name = xmalloc (strlen (section_name) + 1);
-	  strcpy (name, section_name);
-	  *input_line_pointer = c;
+	  c = get_symbol_name (&section_name);
+	  name = xstrdup (section_name);
+	  (void) restore_line_pointer (c);
 	}
 
       seg = bfd_get_section_by_name (stdoutput, name);
@@ -2166,7 +2199,7 @@ tic54x_sblock (int ignore ATTRIBUTE_UNUSED)
       seg->flags |= SEC_TIC54X_BLOCK;
 
       c = *input_line_pointer;
-      if (!is_end_of_line[(int) c])
+      if (!is_end_of_line[(unsigned char) c])
 	++input_line_pointer;
     }
 
@@ -2198,7 +2231,7 @@ tic54x_set (int ignore ATTRIBUTE_UNUSED)
   if ((symbolP = symbol_find (name)) == NULL
       && (symbolP = md_undefined_symbol (name)) == NULL)
     {
-      symbolP = symbol_new (name, absolute_section, 0, &zero_address_frag);
+      symbolP = symbol_new (name, absolute_section, &zero_address_frag, 0);
       S_SET_STORAGE_CLASS (symbolP, C_STAT);
     }
   free (name);
@@ -2237,7 +2270,6 @@ tic54x_sslist (int show)
 static void
 tic54x_var (int ignore ATTRIBUTE_UNUSED)
 {
-  static char empty[] = "";
   char *name;
   int c;
 
@@ -2257,16 +2289,22 @@ tic54x_var (int ignore ATTRIBUTE_UNUSED)
 	  ignore_rest_of_line ();
 	  return;
 	}
-      name = input_line_pointer;
-      c = get_symbol_end ();
+      c = get_symbol_name (&name);
+      name = xstrdup (name);
+      c = restore_line_pointer (c);
+
       /* .var symbols start out with a null string.  */
-      name = strcpy (xmalloc (strlen (name) + 1), name);
-      hash_insert (subsym_hash[macro_level], name, empty);
-      *input_line_pointer = c;
+      subsym_ent_t *ent = xmalloc (sizeof (*ent));
+      ent->u.s = (char *) "";
+      ent->freekey = 1;
+      ent->freeval = 0;
+      ent->isproc = 0;
+      ent->ismath = 0;
+      str_hash_insert (subsym_hash[macro_level], name, ent, 0);
       if (c == ',')
 	{
 	  ++input_line_pointer;
-	  if (is_end_of_line[(int) *input_line_pointer])
+	  if (is_end_of_line[(unsigned char) *input_line_pointer])
 	    c = *input_line_pointer;
 	}
     }
@@ -2302,7 +2340,7 @@ tic54x_mlib (int ignore ATTRIBUTE_UNUSED)
     {
       SKIP_WHITESPACE ();
       len = 0;
-      while (!is_end_of_line[(int) *input_line_pointer]
+      while (!is_end_of_line[(unsigned char) *input_line_pointer]
 	     && !ISSPACE (*input_line_pointer))
 	{
 	  obstack_1grow (&notes, *input_line_pointer);
@@ -2314,8 +2352,8 @@ tic54x_mlib (int ignore ATTRIBUTE_UNUSED)
     }
   demand_empty_rest_of_line ();
 
-  tic54x_set_default_include (0);
-  path = xmalloc ((unsigned long) len + include_dir_maxlen + 5);
+  tic54x_set_default_include ();
+  path = XNEWVEC (char, (unsigned long) len + include_dir_maxlen + 5);
 
   for (i = 0; i < include_dir_count; i++)
     {
@@ -2364,23 +2402,23 @@ tic54x_mlib (int ignore ATTRIBUTE_UNUSED)
     {
       /* Get a size at least as big as the archive member.  */
       bfd_size_type size = bfd_get_size (mbfd);
-      char *buf = xmalloc (size);
+      char *buf = XNEWVEC (char, size);
       char *fname = tmpnam (NULL);
       FILE *ftmp;
 
       /* We're not sure how big it is, but it will be smaller than "size".  */
-      bfd_bread (buf, size, mbfd);
+      size = bfd_bread (buf, size, mbfd);
 
       /* Write to a temporary file, then use s_include to include it
 	 a bit of a hack.  */
       ftmp = fopen (fname, "w+b");
       fwrite ((void *) buf, size, 1, ftmp);
-      if (buf[size - 1] != '\n')
+      if (size == 0 || buf[size - 1] != '\n')
 	fwrite ("\n", 1, 1, ftmp);
       fclose (ftmp);
       free (buf);
       input_scrub_insert_file (fname);
-      unlink (fname);
+      remove (fname);
     }
 }
 
@@ -2444,7 +2482,7 @@ const pseudo_typeS md_pseudo_table[] =
   { "mlib"     , tic54x_mlib              ,          0 },
   { "mlist"    , s_ignore                 ,          0 },
   { "mnolist"  , s_ignore                 ,          0 },
-  { "mmregs"   , tic54x_mmregs            ,          0 },
+  { "mmregs"   , tic54x_register_mmregs   ,          0 },
   { "newblock" , tic54x_clear_local_labels,          0 },
   { "option"   , s_ignore                 ,          0 },
   { "p2align"  , tic54x_p2align           ,          0 },
@@ -2472,7 +2510,7 @@ const pseudo_typeS md_pseudo_table[] =
 };
 
 int
-md_parse_option (int c, char *arg)
+md_parse_option (int c, const char *arg)
 {
   switch (c)
     {
@@ -2501,7 +2539,7 @@ md_parse_option (int c, char *arg)
       break;
     case OPTION_STDERR_TO_FILE:
       {
-	char *filename = arg;
+	const char *filename = arg;
 	FILE *fp = fopen (filename, "w+");
 
 	if (fp == NULL)
@@ -2524,9 +2562,14 @@ md_parse_option (int c, char *arg)
 void
 tic54x_macro_start (void)
 {
-  ++macro_level;
-  subsym_hash[macro_level] = hash_new ();
-  local_label_hash[macro_level] = hash_new ();
+  if (++macro_level >= MAX_SUBSYM_HASH)
+    {
+      --macro_level;
+      as_fatal (_("Macro nesting is too deep"));
+      return;
+    }
+  subsym_hash[macro_level] = subsym_htab_create ();
+  local_label_hash[macro_level] = local_label_htab_create ();
 }
 
 void
@@ -2537,14 +2580,15 @@ tic54x_macro_info (const macro_entry *macro)
   /* Put the formal args into the substitution symbol table.  */
   for (entry = macro->formals; entry; entry = entry->next)
     {
-      char *name = strncpy (xmalloc (entry->name.len + 1),
-			    entry->name.ptr, entry->name.len);
-      char *value = strncpy (xmalloc (entry->actual.len + 1),
-			     entry->actual.ptr, entry->actual.len);
+      char *name = xstrndup (entry->name.ptr, entry->name.len);
+      subsym_ent_t *ent = xmalloc (sizeof (*ent));
 
-      name[entry->name.len] = '\0';
-      value[entry->actual.len] = '\0';
-      hash_insert (subsym_hash[macro_level], name, value);
+      ent->u.s = xstrndup (entry->actual.ptr, entry->actual.len);
+      ent->freekey = 1;
+      ent->freeval = 1;
+      ent->isproc = 0;
+      ent->ismath = 0;
+      str_hash_insert (subsym_hash[macro_level], name, ent, 0);
     }
 }
 
@@ -2553,9 +2597,9 @@ tic54x_macro_info (const macro_entry *macro)
 void
 tic54x_macro_end (void)
 {
-  hash_die (subsym_hash[macro_level]);
+  htab_delete (subsym_hash[macro_level]);
   subsym_hash[macro_level] = NULL;
-  hash_die (local_label_hash[macro_level]);
+  htab_delete (local_label_hash[macro_level]);
   local_label_hash[macro_level] = NULL;
   --macro_level;
 }
@@ -2615,21 +2659,21 @@ subsym_isdefed (char *a, char *ignore ATTRIBUTE_UNUSED)
 static int
 subsym_ismember (char *sym, char *list)
 {
-  char *elem, *ptr, *listv;
+  char *elem, *ptr;
+  subsym_ent_t *listv;
 
   if (!list)
     return 0;
 
   listv = subsym_lookup (list, macro_level);
-  if (!listv)
+  if (!listv || listv->isproc)
     {
       as_bad (_("Undefined substitution symbol '%s'"), list);
       ignore_rest_of_line ();
       return 0;
     }
 
-  ptr = elem = xmalloc (strlen (listv) + 1);
-  strcpy (elem, listv);
+  ptr = elem = notes_strdup (listv->u.s);
   while (*ptr && *ptr != ',')
     ++ptr;
   *ptr++ = 0;
@@ -2710,9 +2754,9 @@ subsym_isname (char *a, char *ignore ATTRIBUTE_UNUSED)
 static int
 subsym_isreg (char *a, char *ignore ATTRIBUTE_UNUSED)
 {
-  if (hash_find (reg_hash, a))
+  if (str_hash_find (reg_hash, a))
     return 1;
-  if (hash_find (mmreg_hash, a))
+  if (str_hash_find (mmreg_hash, a))
     return 1;
   return 0;
 }
@@ -2722,7 +2766,7 @@ subsym_isreg (char *a, char *ignore ATTRIBUTE_UNUSED)
 static int
 subsym_structsz (char *name, char *ignore ATTRIBUTE_UNUSED)
 {
-  struct stag *stag = (struct stag *) hash_find (stag_hash, name);
+  struct stag *stag = (struct stag *) str_hash_find (stag_hash, name);
 
   if (stag)
     return stag->size;
@@ -2750,7 +2794,7 @@ math_ceil (float arg1, float ignore ATTRIBUTE_UNUSED)
   return (float) ceil (arg1);
 }
 
-static float
+static int
 math_cvi (float arg1, float ignore ATTRIBUTE_UNUSED)
 {
   return (int) arg1;
@@ -2768,10 +2812,10 @@ math_fmod (float arg1, float arg2)
   return (int) arg1 % (int) arg2;
 }
 
-static float
+static int
 math_int (float arg1, float ignore ATTRIBUTE_UNUSED)
 {
-  return ((float) ((int) arg1)) == arg1;
+  return arg1 == (float) (int) arg1;
 }
 
 static float
@@ -2780,10 +2824,10 @@ math_round (float arg1, float ignore ATTRIBUTE_UNUSED)
   return arg1 > 0 ? (int) (arg1 + 0.5) : (int) (arg1 - 0.5);
 }
 
-static float
+static int
 math_sgn (float arg1, float ignore ATTRIBUTE_UNUSED)
 {
-  return (arg1 < 0) ? -1 : (arg1 ? 1 : 0);
+  return arg1 < 0.0f ? -1 : arg1 != 0.0f ? 1 : 0;
 }
 
 static float
@@ -2915,83 +2959,62 @@ math_tanh (float arg1, float ignore ATTRIBUTE_UNUSED)
 }
 
 /* Built-in substitution symbol functions and math functions.  */
-typedef struct
-{
-  char *name;
-  int (*proc) (char *, char *);
-  int nargs;
-} subsym_proc_entry;
-
 static const subsym_proc_entry subsym_procs[] =
 {
   /* Assembler built-in string substitution functions.  */
-  { "$symlen", subsym_symlen, 1,  },
-  { "$symcmp", subsym_symcmp, 2,  },
-  { "$firstch", subsym_firstch, 2,  },
-  { "$lastch", subsym_lastch, 2,  },
-  { "$isdefed", subsym_isdefed, 1,  },
-  { "$ismember", subsym_ismember, 2,  },
-  { "$iscons", subsym_iscons, 1,  },
-  { "$isname", subsym_isname, 1,  },
-  { "$isreg", subsym_isreg, 1,  },
-  { "$structsz", subsym_structsz, 1,  },
-  { "$structacc", subsym_structacc, 1,  },
-  { NULL, NULL, 0 },
-};
+  { "$symlen",    { .s = subsym_symlen },    1, 0 },
+  { "$symcmp",    { .s = subsym_symcmp },    2, 0 },
+  { "$firstch",   { .s = subsym_firstch },   2, 0 },
+  { "$lastch",    { .s = subsym_lastch },    2, 0 },
+  { "$isdefed",   { .s = subsym_isdefed },   1, 0 },
+  { "$ismember",  { .s = subsym_ismember },  2, 0 },
+  { "$iscons",    { .s = subsym_iscons },    1, 0 },
+  { "$isname",    { .s = subsym_isname },    1, 0 },
+  { "$isreg",     { .s = subsym_isreg },     1, 0 },
+  { "$structsz",  { .s = subsym_structsz },  1, 0 },
+  { "$structacc", { .s = subsym_structacc }, 1, 0 },
 
-typedef struct
-{
-  char *name;
-  float (*proc) (float, float);
-  int nargs;
-  int int_return;
-} math_proc_entry;
-
-static const math_proc_entry math_procs[] =
-{
   /* Integer-returning built-in math functions.  */
-  { "$cvi", math_cvi, 1, 1 },
-  { "$int", math_int, 1, 1 },
-  { "$sgn", math_sgn, 1, 1 },
+  { "$cvi",       { .i = math_cvi },         1, 2 },
+  { "$int",       { .i = math_int },         1, 2 },
+  { "$sgn",       { .i = math_sgn },         1, 2 },
 
   /* Float-returning built-in math functions.  */
-  { "$acos", math_acos, 1, 0 },
-  { "$asin", math_asin, 1, 0 },
-  { "$atan", math_atan, 1, 0 },
-  { "$atan2", math_atan2, 2, 0 },
-  { "$ceil", math_ceil, 1, 0 },
-  { "$cosh", math_cosh, 1, 0 },
-  { "$cos", math_cos, 1, 0 },
-  { "$cvf", math_cvf, 1, 0 },
-  { "$exp", math_exp, 1, 0 },
-  { "$fabs", math_fabs, 1, 0 },
-  { "$floor", math_floor, 1, 0 },
-  { "$fmod", math_fmod, 2, 0 },
-  { "$ldexp", math_ldexp, 2, 0 },
-  { "$log10", math_log10, 1, 0 },
-  { "$log", math_log, 1, 0 },
-  { "$max", math_max, 2, 0 },
-  { "$min", math_min, 2, 0 },
-  { "$pow", math_pow, 2, 0 },
-  { "$round", math_round, 1, 0 },
-  { "$sin", math_sin, 1, 0 },
-  { "$sinh", math_sinh, 1, 0 },
-  { "$sqrt", math_sqrt, 1, 0 },
-  { "$tan", math_tan, 1, 0 },
-  { "$tanh", math_tanh, 1, 0 },
-  { "$trunc", math_trunc, 1, 0 },
-  { NULL, NULL, 0, 0 },
+  { "$acos",      { .f = math_acos },        1, 1 },
+  { "$asin",      { .f = math_asin },        1, 1 },
+  { "$atan",      { .f = math_atan },        1, 1 },
+  { "$atan2",     { .f = math_atan2 },       2, 1 },
+  { "$ceil",      { .f = math_ceil },        1, 1 },
+  { "$cosh",      { .f = math_cosh },        1, 1 },
+  { "$cos",       { .f = math_cos },         1, 1 },
+  { "$cvf",       { .f = math_cvf },         1, 1 },
+  { "$exp",       { .f = math_exp },         1, 1 },
+  { "$fabs",      { .f = math_fabs },        1, 1 },
+  { "$floor",     { .f = math_floor },       1, 1 },
+  { "$fmod",      { .f = math_fmod },        2, 1 },
+  { "$ldexp",     { .f = math_ldexp },       2, 1 },
+  { "$log10",     { .f = math_log10 },       1, 1 },
+  { "$log",       { .f = math_log },         1, 1 },
+  { "$max",       { .f = math_max },         2, 1 },
+  { "$min",       { .f = math_min },         2, 1 },
+  { "$pow",       { .f = math_pow },         2, 1 },
+  { "$round",     { .f = math_round },       1, 1 },
+  { "$sin",       { .f = math_sin },         1, 1 },
+  { "$sinh",      { .f = math_sinh },        1, 1 },
+  { "$sqrt",      { .f = math_sqrt },        1, 1 },
+  { "$tan",       { .f = math_tan },         1, 1 },
+  { "$tanh",      { .f = math_tanh },        1, 1 },
+  { "$trunc",     { .f = math_trunc },       1, 1 },
+  { NULL, { NULL }, 0, 0 },
 };
 
 void
 md_begin (void)
 {
   insn_template *tm;
-  symbol *sym;
+  const tic54x_symbol *sym;
   const subsym_proc_entry *subsym_proc;
-  const math_proc_entry *math_proc;
-  const char *hash_err;
-  char **symname;
+  const char **symname;
   char *TIC54X_DIR = getenv ("TIC54X_DIR");
   char *A_DIR = TIC54X_DIR ? TIC54X_DIR : getenv ("A_DIR");
 
@@ -3014,82 +3037,85 @@ md_begin (void)
       while (tmp != NULL);
     }
 
-  op_hash = hash_new ();
+  op_hash = str_htab_create ();
   for (tm = (insn_template *) tic54x_optab; tm->name; tm++)
-    {
-      if (hash_find (op_hash, tm->name))
-	continue;
-      hash_err = hash_insert (op_hash, tm->name, (char *) tm);
-      if (hash_err)
-	as_fatal ("Internal Error: Can't hash %s: %s",
-		  tm->name, hash_err);
-    }
-  parop_hash = hash_new ();
+    str_hash_insert (op_hash, tm->name, tm, 0);
+
+  parop_hash = str_htab_create ();
   for (tm = (insn_template *) tic54x_paroptab; tm->name; tm++)
-    {
-      if (hash_find (parop_hash, tm->name))
-	continue;
-      hash_err = hash_insert (parop_hash, tm->name, (char *) tm);
-      if (hash_err)
-	as_fatal ("Internal Error: Can't hash %s: %s",
-		  tm->name, hash_err);
-    }
-  reg_hash = hash_new ();
-  for (sym = (symbol *) regs; sym->name; sym++)
+    str_hash_insert (parop_hash, tm->name, tm, 0);
+
+  reg_hash = str_htab_create ();
+  for (sym = tic54x_regs; sym->name; sym++)
     {
       /* Add basic registers to the symbol table.  */
       symbolS *symbolP = symbol_new (sym->name, absolute_section,
-				     (valueT) sym->value, &zero_address_frag);
+				     &zero_address_frag, sym->value);
       SF_SET_LOCAL (symbolP);
       symbol_table_insert (symbolP);
-      hash_err = hash_insert (reg_hash, sym->name, (char *) sym);
+      str_hash_insert (reg_hash, sym->name, sym, 0);
     }
-  for (sym = (symbol *) mmregs; sym->name; sym++)
-    hash_err = hash_insert (reg_hash, sym->name, (char *) sym);
-  mmreg_hash = hash_new ();
-  for (sym = (symbol *) mmregs; sym->name; sym++)
-    hash_err = hash_insert (mmreg_hash, sym->name, (char *) sym);
+  for (sym = tic54x_mmregs; sym->name; sym++)
+    str_hash_insert (reg_hash, sym->name, sym, 0);
+  mmreg_hash = str_htab_create ();
+  for (sym = tic54x_mmregs; sym->name; sym++)
+    str_hash_insert (mmreg_hash, sym->name, sym, 0);
 
-  cc_hash = hash_new ();
-  for (sym = (symbol *) condition_codes; sym->name; sym++)
-    hash_err = hash_insert (cc_hash, sym->name, (char *) sym);
+  cc_hash = str_htab_create ();
+  for (sym = tic54x_condition_codes; sym->name; sym++)
+    str_hash_insert (cc_hash, sym->name, sym, 0);
 
-  cc2_hash = hash_new ();
-  for (sym = (symbol *) cc2_codes; sym->name; sym++)
-    hash_err = hash_insert (cc2_hash, sym->name, (char *) sym);
+  cc2_hash = str_htab_create ();
+  for (sym = tic54x_cc2_codes; sym->name; sym++)
+    str_hash_insert (cc2_hash, sym->name, sym, 0);
 
-  cc3_hash = hash_new ();
-  for (sym = (symbol *) cc3_codes; sym->name; sym++)
-    hash_err = hash_insert (cc3_hash, sym->name, (char *) sym);
+  cc3_hash = str_htab_create ();
+  for (sym = tic54x_cc3_codes; sym->name; sym++)
+    str_hash_insert (cc3_hash, sym->name, sym, 0);
 
-  sbit_hash = hash_new ();
-  for (sym = (symbol *) status_bits; sym->name; sym++)
-    hash_err = hash_insert (sbit_hash, sym->name, (char *) sym);
+  sbit_hash = str_htab_create ();
+  for (sym = tic54x_status_bits; sym->name; sym++)
+    str_hash_insert (sbit_hash, sym->name, sym, 0);
 
-  misc_symbol_hash = hash_new ();
-  for (symname = (char **) misc_symbols; *symname; symname++)
-    hash_err = hash_insert (misc_symbol_hash, *symname, *symname);
+  misc_symbol_hash = str_htab_create ();
+  for (symname = tic54x_misc_symbols; *symname; symname++)
+    str_hash_insert (misc_symbol_hash, *symname, *symname, 0);
 
   /* Only the base substitution table and local label table are initialized;
      the others (for local macro substitution) get instantiated as needed.  */
-  local_label_hash[0] = hash_new ();
-  subsym_hash[0] = hash_new ();
+  local_label_hash[0] = local_label_htab_create ();
+  subsym_hash[0] = subsym_htab_create ();
   for (subsym_proc = subsym_procs; subsym_proc->name; subsym_proc++)
-    hash_err = hash_insert (subsym_hash[0], subsym_proc->name,
-			    (char *) subsym_proc);
-
-  math_hash = hash_new ();
-  for (math_proc = math_procs; math_proc->name; math_proc++)
     {
-      /* Insert into the main subsym hash for recognition; insert into
-	 the math hash to actually store information.  */
-      hash_err = hash_insert (subsym_hash[0], math_proc->name,
-			      (char *) math_proc);
-      hash_err = hash_insert (math_hash, math_proc->name,
-			      (char *) math_proc);
+      subsym_ent_t *ent = xmalloc (sizeof (*ent));
+      ent->u.p = subsym_proc;
+      ent->freekey = 0;
+      ent->freeval = 0;
+      ent->isproc = 1;
+      ent->ismath = subsym_proc->type != 0;
+      str_hash_insert (subsym_hash[0], subsym_proc->name, ent, 0);
     }
-  subsym_recurse_hash = hash_new ();
-  stag_hash = hash_new ();
+  subsym_recurse_hash = str_htab_create ();
+  stag_hash = str_htab_create ();
+}
+
+void
+tic54x_md_end (void)
+{
+  htab_delete (stag_hash);
+  htab_delete (subsym_recurse_hash);
+  while (macro_level != -1)
+    tic54x_macro_end ();
+  macro_level = 0;
+  htab_delete (misc_symbol_hash);
+  htab_delete (sbit_hash);
+  htab_delete (cc3_hash);
+  htab_delete (cc2_hash);
+  htab_delete (cc_hash);
+  htab_delete (mmreg_hash);
+  htab_delete (reg_hash);
+  htab_delete (parop_hash);
+  htab_delete (op_hash);
 }
 
 static int
@@ -3111,7 +3137,7 @@ get_operands (struct opstruct operands[], char *line)
   int expecting_operand = 0;
   int i;
 
-  while (numexp < MAX_OPERANDS && !is_end_of_line[(int) *lptr])
+  while (numexp < MAX_OPERANDS && !is_end_of_line[(unsigned char) *lptr])
     {
       int paren_not_balanced = 0;
       char *op_start, *op_end;
@@ -3173,7 +3199,7 @@ get_operands (struct opstruct operands[], char *line)
 
   while (*lptr && ISSPACE (*lptr++))
     ;
-  if (!is_end_of_line[(int) *lptr])
+  if (!is_end_of_line[(unsigned char) *lptr])
     {
       as_bad (_("Extra junk on line"));
       return -1;
@@ -3282,7 +3308,7 @@ is_mmreg (struct opstruct *operand)
 {
   return (is_absolute (operand)
 	  || is_immediate (operand)
-	  || hash_find (mmreg_hash, operand->buf) != 0);
+	  || str_hash_find (mmreg_hash, operand->buf) != 0);
 }
 
 static int
@@ -3326,13 +3352,13 @@ is_type (struct opstruct *operand, enum optype type)
       return strncasecmp ("ar", operand->buf, 2) == 0
 	&& ISDIGIT (operand->buf[2]);
     case OP_SBIT:
-      return hash_find (sbit_hash, operand->buf) != 0 || is_absolute (operand);
+      return str_hash_find (sbit_hash, operand->buf) != 0 || is_absolute (operand);
     case OP_CC:
-      return hash_find (cc_hash, operand->buf) != 0;
+      return str_hash_find (cc_hash, operand->buf) != 0;
     case OP_CC2:
-      return hash_find (cc2_hash, operand->buf) != 0;
+      return str_hash_find (cc2_hash, operand->buf) != 0;
     case OP_CC3:
-      return hash_find (cc3_hash, operand->buf) != 0
+      return str_hash_find (cc3_hash, operand->buf) != 0
 	|| is_immediate (operand) || is_absolute (operand);
     case OP_16:
       return (is_immediate (operand) || is_absolute (operand))
@@ -3674,7 +3700,7 @@ encode_integer (tic54x_insn *insn,
 static int
 encode_condition (tic54x_insn *insn, struct opstruct *operand)
 {
-  symbol *cc = (symbol *) hash_find (cc_hash, operand->buf);
+  tic54x_symbol *cc = (tic54x_symbol *) str_hash_find (cc_hash, operand->buf);
   if (!cc)
     {
       as_bad (_("Unrecognized condition code \"%s\""), operand->buf);
@@ -3734,7 +3760,7 @@ encode_condition (tic54x_insn *insn, struct opstruct *operand)
 static int
 encode_cc3 (tic54x_insn *insn, struct opstruct *operand)
 {
-  symbol *cc3 = (symbol *) hash_find (cc3_hash, operand->buf);
+  tic54x_symbol *cc3 = (tic54x_symbol *) str_hash_find (cc3_hash, operand->buf);
   int value = cc3 ? cc3->value : operand->exp.X_add_number << 8;
 
   if ((value & 0x0300) != value)
@@ -3763,7 +3789,7 @@ encode_arx (tic54x_insn *insn, struct opstruct *operand)
 static int
 encode_cc2 (tic54x_insn *insn, struct opstruct *operand)
 {
-  symbol *cc2 = (symbol *) hash_find (cc2_hash, operand->buf);
+  tic54x_symbol *cc2 = (tic54x_symbol *) str_hash_find (cc2_hash, operand->buf);
 
   if (!cc2)
     {
@@ -3922,7 +3948,8 @@ encode_operand (tic54x_insn *insn, enum optype type, struct opstruct *operand)
 			     0, 65535, 0xFFFF);
     case OP_SBIT:
       {
-	symbol *sbit = (symbol *) hash_find (sbit_hash, operand->buf);
+	tic54x_symbol *sbit = (tic54x_symbol *)
+	  str_hash_find (sbit_hash, operand->buf);
 	int value = is_absolute (operand) ?
 	  operand->exp.X_add_number : (sbit ? sbit->value : -1);
 	int reg = 0;
@@ -3936,7 +3963,7 @@ encode_operand (tic54x_insn *insn, enum optype type, struct opstruct *operand)
 	      }
 	    /* Guess the register based on the status bit; "ovb" is the last
 	       status bit defined for st0.  */
-	    if (sbit > (symbol *) hash_find (sbit_hash, "ovb"))
+	    if (sbit > (tic54x_symbol *) str_hash_find (sbit_hash, "ovb"))
 	      reg = 1;
 	  }
 	if (value == -1)
@@ -4001,12 +4028,12 @@ static void
 emit_insn (tic54x_insn *insn)
 {
   int i;
-  flagword oldflags = bfd_get_section_flags (stdoutput, now_seg);
+  flagword oldflags = bfd_section_flags (now_seg);
   flagword flags = oldflags | SEC_CODE;
 
-  if (! bfd_set_section_flags (stdoutput, now_seg, flags))
+  if (!bfd_set_section_flags (now_seg, flags))
         as_warn (_("error setting flags for \"%s\": %s"),
-                 bfd_section_name (stdoutput, now_seg),
+                 bfd_section_name (now_seg),
                  bfd_errmsg (bfd_get_error ()));
 
   for (i = 0; i < insn->words; i++)
@@ -4023,7 +4050,7 @@ emit_insn (tic54x_insn *insn)
       if (insn->opcode[i].unresolved)
 	fix_new_exp (frag_now, p - frag_now->fr_literal,
 		     insn->opcode[i].r_nchars, &insn->opcode[i].addr_expr,
-		     FALSE, insn->opcode[i].r_type);
+		     false, insn->opcode[i].r_type);
     }
 }
 
@@ -4176,7 +4203,7 @@ optimize_insn (tic54x_insn *insn)
 static int
 tic54x_parse_insn (tic54x_insn *insn, char *line)
 {
-  insn->tm = (insn_template *) hash_find (op_hash, insn->mnemonic);
+  insn->tm = (insn_template *) str_hash_find (op_hash, insn->mnemonic);
   if (!insn->tm)
     {
       as_bad (_("Unrecognized instruction \"%s\""), insn->mnemonic);
@@ -4199,8 +4226,8 @@ tic54x_parse_insn (tic54x_insn *insn, char *line)
 	  /* SUCCESS! now try some optimizations.  */
 	  if (optimize_insn (insn))
 	    {
-	      insn->tm = (insn_template *) hash_find (op_hash,
-                                                      insn->mnemonic);
+	      insn->tm = (insn_template *) str_hash_find (op_hash,
+							  insn->mnemonic);
 	      continue;
 	    }
 
@@ -4224,7 +4251,7 @@ static int
 next_line_shows_parallel (char *next_line)
 {
   /* Look for the second half.  */
-  while (ISSPACE (*next_line))
+  while (*next_line != 0 && ISSPACE (*next_line))
     ++next_line;
 
   return (next_line[0] == PARALLEL_SEPARATOR
@@ -4234,7 +4261,7 @@ next_line_shows_parallel (char *next_line)
 static int
 tic54x_parse_parallel_insn_firstline (tic54x_insn *insn, char *line)
 {
-  insn->tm = (insn_template *) hash_find (parop_hash, insn->mnemonic);
+  insn->tm = (insn_template *) str_hash_find (parop_hash, insn->mnemonic);
   if (!insn->tm)
     {
       as_bad (_("Unrecognized parallel instruction \"%s\""),
@@ -4301,7 +4328,7 @@ tic54x_parse_parallel_insn_lastline (tic54x_insn *insn, char *line)
    replacement on the value.  */
 
 static char *
-subsym_get_arg (char *line, char *terminators, char **str, int nosub)
+subsym_get_arg (char *line, const char *terminators, char **str, int nosub)
 {
   char *ptr = line;
   char *endp;
@@ -4313,9 +4340,7 @@ subsym_get_arg (char *line, char *terminators, char **str, int nosub)
       while (ISDIGIT (*ptr))
 	++ptr;
       endp = ptr;
-      *str = xmalloc (ptr - line + 1);
-      strncpy (*str, line, ptr - line);
-      (*str)[ptr - line] = 0;
+      *str = xmemdup0 (line, ptr - line);
     }
   else if (is_string)
     {
@@ -4333,8 +4358,7 @@ subsym_get_arg (char *line, char *terminators, char **str, int nosub)
     }
   else
     {
-      char *term = terminators;
-      char *value = NULL;
+      const char *term = terminators;
 
       while (*ptr && *ptr != *term)
 	{
@@ -4347,12 +4371,14 @@ subsym_get_arg (char *line, char *terminators, char **str, int nosub)
 	    ++term;
 	}
       endp = ptr;
-      *str = xmalloc (ptr - line + 1);
-      strncpy (*str, line, ptr - line);
-      (*str)[ptr - line] = 0;
+      *str = xmemdup0 (line, ptr - line);
       /* Do simple substitution, if available.  */
-      if (!nosub && (value = subsym_lookup (*str, macro_level)) != NULL)
-	*str = value;
+      if (!nosub)
+	{
+	  subsym_ent_t *ent = subsym_lookup (*str, macro_level);
+	  if (ent && !ent->isproc)
+	    *str = ent->u.s;
+	}
     }
 
   return endp;
@@ -4367,29 +4393,30 @@ static void
 subsym_create_or_replace (char *name, char *value)
 {
   int i;
+  subsym_ent_t *ent = xmalloc (sizeof (*ent));
+  ent->u.s = value;
+  ent->freekey = 0;
+  ent->freeval = 0;
+  ent->isproc = 0;
+  ent->ismath = 0;
 
   for (i = macro_level; i > 0; i--)
-    {
-      if (hash_find (subsym_hash[i], name))
-	{
-	  hash_replace (subsym_hash[i], name, value);
-	  return;
-	}
-    }
-  if (hash_find (subsym_hash[0], name))
-    hash_replace (subsym_hash[0], name, value);
-  else
-    hash_insert (subsym_hash[0], name, value);
+    if (str_hash_find (subsym_hash[i], name))
+      {
+	str_hash_insert (subsym_hash[i], name, ent, 1);
+	return;
+      }
+  str_hash_insert (subsym_hash[0], name, ent, 1);
 }
 
 /* Look up the substitution string replacement for the given symbol.
    Start with the innermost macro substitution table given and work
    outwards.  */
 
-static char *
+static subsym_ent_t *
 subsym_lookup (char *name, int nest_level)
 {
-  char *value = hash_find (subsym_hash[nest_level], name);
+  void *value = str_hash_find (subsym_hash[nest_level], name);
 
   if (value || nest_level == 0)
     return value;
@@ -4420,12 +4447,7 @@ subsym_substitute (char *line, int forced)
   int recurse = 1;
   int line_conditional = 0;
   char *tmp;
-
-  /* Work with a copy of the input line.  */
-  replacement = xmalloc (strlen (line) + 1);
-  strcpy (replacement, line);
-
-  ptr = head = replacement;
+  unsigned char current_char;
 
   /* Flag lines where we might need to replace a single '=' with two;
      GAS uses single '=' to assign macro args values, and possibly other
@@ -4445,10 +4467,12 @@ subsym_substitute (char *line, int forced)
   if (strstr (line, ".macro"))
     return line;
 
-  while (!is_end_of_line[(int) *ptr])
-    {
-      int current_char = *ptr;
+  /* Work with a copy of the input line.  */
+  replacement = xstrdup (line);
+  ptr = head = replacement;
 
+  while (!is_end_of_line[(current_char = * (unsigned char *) ptr)])
+    {
       /* Need to update this since LINE may have been modified.  */
       if (eval_line)
 	eval_end = strrchr (ptr, ',');
@@ -4473,8 +4497,7 @@ subsym_substitute (char *line, int forced)
 	      continue;
 	    }
 	  *ptr++ = '\0';
-	  tmp = xmalloc (strlen (head) + 2 + strlen (ptr) + 1);
-	  sprintf (tmp, "%s==%s", head, ptr);
+	  tmp = concat (head, "==", ptr, (char *) NULL);
 	  /* Continue examining after the '=='.  */
 	  ptr = tmp + strlen (head) + 2;
 	  free (replacement);
@@ -4494,6 +4517,7 @@ subsym_substitute (char *line, int forced)
 	  char *name; /* Symbol to be replaced.  */
 	  char *savedp = input_line_pointer;
 	  int c;
+	  subsym_ent_t *ent = NULL;
 	  char *value = NULL;
 	  char *tail; /* Rest of line after symbol.  */
 
@@ -4501,8 +4525,8 @@ subsym_substitute (char *line, int forced)
 	  if (forced)
 	    ++ptr;
 
-	  name = input_line_pointer = ptr;
-	  c = get_symbol_end ();
+	  input_line_pointer = ptr;
+	  c = get_symbol_name (&name);
 	  /* '?' is not normally part of a symbol, but it IS part of a local
 	     label.  */
 	  if (c == '?')
@@ -4513,8 +4537,12 @@ subsym_substitute (char *line, int forced)
 	    }
 	  /* Avoid infinite recursion; if a symbol shows up a second time for
 	     substitution, leave it as is.  */
-	  if (hash_find (subsym_recurse_hash, name) == NULL)
-	    value = subsym_lookup (name, macro_level);
+	  if (str_hash_find (subsym_recurse_hash, name) == NULL)
+	    {
+	      ent = subsym_lookup (name, macro_level);
+	      if (ent && !ent->isproc)
+		value = ent->u.s;
+	    }
 	  else
 	    as_warn (_("%s symbol recursion stopped at "
 		       "second appearance of '%s'"),
@@ -4529,11 +4557,11 @@ subsym_substitute (char *line, int forced)
 	    {
 	      /* Use an existing identifier for that label if, available, or
 		 create a new, unique identifier.  */
-	      value = hash_find (local_label_hash[macro_level], name);
+	      value = str_hash_find (local_label_hash[macro_level], name);
 	      if (value == NULL)
 		{
 		  char digit[11];
-		  char *namecopy = strcpy (xmalloc (strlen (name) + 1), name);
+		  char *namecopy = xstrdup (name);
 
 		  value = strcpy (xmalloc (strlen (name) + sizeof (digit) + 1),
 				  name);
@@ -4541,20 +4569,20 @@ subsym_substitute (char *line, int forced)
 		    value[strlen (value) - 1] = '\0';
 		  sprintf (digit, ".%d", local_label_id++);
 		  strcat (value, digit);
-		  hash_insert (local_label_hash[macro_level], namecopy, value);
+		  str_hash_insert (local_label_hash[macro_level],
+				   namecopy, value, 0);
 		}
 	      /* Indicate where to continue looking for substitutions.  */
 	      ptr = tail;
 	    }
 	  /* Check for built-in subsym and math functions.  */
-	  else if (value != NULL && *name == '$')
+	  else if (ent != NULL && *name == '$')
 	    {
-	      subsym_proc_entry *entry = (subsym_proc_entry *) value;
-	      math_proc_entry *math_entry = hash_find (math_hash, name);
+	      const subsym_proc_entry *entry = ent->u.p;
 	      char *arg1, *arg2 = NULL;
 
 	      *ptr = c;
-	      if (entry == NULL)
+	      if (!ent->isproc)
 		{
 		  as_bad (_("Unrecognized substitution symbol function"));
 		  break;
@@ -4565,13 +4593,12 @@ subsym_substitute (char *line, int forced)
 		  break;
 		}
 	      ++ptr;
-	      if (math_entry != NULL)
+	      if (ent->ismath)
 		{
 		  float farg1, farg2 = 0;
-		  volatile float fresult;
 
 		  farg1 = (float) strtod (ptr, &ptr);
-		  if (math_entry->nargs == 2)
+		  if (entry->nargs == 2)
 		    {
 		      if (*ptr++ != ',')
 			{
@@ -4580,12 +4607,17 @@ subsym_substitute (char *line, int forced)
 			}
 		      farg2 = (float) strtod (ptr, &ptr);
 		    }
-		  fresult = (*math_entry->proc) (farg1, farg2);
-		  value = xmalloc (128);
-		  if (math_entry->int_return)
-		    sprintf (value, "%d", (int) fresult);
+		  value = XNEWVEC (char, 128);
+		  if (entry->type == 2)
+		    {
+		      int result = (*entry->proc.i) (farg1, farg2);
+		      sprintf (value, "%d", result);
+		    }
 		  else
-		    sprintf (value, "%f", fresult);
+		    {
+		      float result = (*entry->proc.f) (farg1, farg2);
+		      sprintf (value, "%f", result);
+		    }
 		  if (*ptr++ != ')')
 		    {
 		      as_bad (_("Extra junk in function call, expecting ')'"));
@@ -4641,8 +4673,8 @@ subsym_substitute (char *line, int forced)
 		      as_bad (_("Extra junk in function call, expecting ')'"));
 		      break;
 		    }
-		  val = (*entry->proc) (arg1, arg2);
-		  value = xmalloc (64);
+		  val = (*entry->proc.s) (arg1, arg2);
+		  value = XNEWVEC (char, 64);
 		  sprintf (value, "%d", val);
 		}
 	      /* Fix things up to replace the entire expression, not just the
@@ -4658,13 +4690,13 @@ subsym_substitute (char *line, int forced)
 		 substitutions are performed, or a substitution that has been
 		 previously made is encountered again.
 
-		 put the symbol into the recursion hash table so we only
+		 Put the symbol into the recursion hash table so we only
 		 try to replace a symbol once.  */
 	      if (recurse)
 		{
-		  hash_insert (subsym_recurse_hash, name, name);
+		  str_hash_insert (subsym_recurse_hash, name, name, 0);
 		  value = subsym_substitute (value, macro_level > 0);
-		  hash_delete (subsym_recurse_hash, name, FALSE);
+		  str_hash_delete (subsym_recurse_hash, name);
 		}
 
 	      /* Temporarily zero-terminate where the symbol started.  */
@@ -4678,8 +4710,7 @@ subsym_substitute (char *line, int forced)
 			 kinda indicates that forced substitution is not
 			 supposed to be recursive, but I'm not sure.  */
 		      unsigned beg, len = 1; /* default to a single char */
-		      char *newval = strcpy (xmalloc (strlen (value) + 1),
-					     value);
+		      char *newval = xstrdup (value);
 
 		      savedp = input_line_pointer;
 		      input_line_pointer = tail + 1;
@@ -4696,7 +4727,7 @@ subsym_substitute (char *line, int forced)
 			  len = get_absolute_expression ();
 			  if (beg + len > strlen (value))
 			    {
-			      as_bad (_("Invalid length (use 0 to %d"),
+			      as_bad (_("Invalid length (use 0 to %d)"),
 				      (int) strlen (value) - beg);
 			      break;
 			    }
@@ -4752,8 +4783,9 @@ subsym_substitute (char *line, int forced)
 
   if (changed)
     return replacement;
-  else
-    return line;
+
+  free (replacement);
+  return line;
 }
 
 /* We use this to handle substitution symbols
@@ -4770,15 +4802,14 @@ tic54x_start_line_hook (void)
   char *replacement = NULL;
 
   /* Work with a copy of the input line, including EOL char.  */
-  endp = input_line_pointer;
-  while (!is_end_of_line[(int) *endp++])
-    ;
-  line = xmalloc (endp - input_line_pointer + 1);
-  strncpy (line, input_line_pointer, endp - input_line_pointer + 1);
-  line[endp - input_line_pointer] = 0;
+  for (endp = input_line_pointer; *endp != 0; )
+    if (is_end_of_line[(unsigned char) *endp++])
+      break;
+
+  line = xmemdup0 (input_line_pointer, endp - input_line_pointer);
 
   /* Scan ahead for parallel insns.  */
-  parallel_on_next_line_hint = next_line_shows_parallel (endp + 1);
+  parallel_on_next_line_hint = next_line_shows_parallel (endp);
 
   /* If within a macro, first process forced replacements.  */
   if (macro_level > 0)
@@ -4847,7 +4878,7 @@ md_assemble (char *line)
   int c;
 
   input_line_pointer = line;
-  c = get_symbol_end ();
+  c = get_symbol_name (&line);
 
   if (cpu == VNONE)
     cpu = V542;
@@ -4880,8 +4911,11 @@ md_assemble (char *line)
 	    {
 	      if (words > delay_slots)
 		{
-		  as_bad (_("Instruction does not fit in available delay "
-			    "slots (%d-word insn, %d slots left)"),
+		  as_bad (ngettext ("Instruction does not fit in available "
+				    "delay slots (%d-word insn, %d slot left)",
+				    "Instruction does not fit in available "
+				    "delay slots (%d-word insn, %d slots left)",
+				    delay_slots),
 			  words, delay_slots);
 		  delay_slots = 0;
 		  return;
@@ -4952,9 +4986,13 @@ md_assemble (char *line)
 	{
 	  if (words > delay_slots)
 	    {
-	      as_warn (_("Instruction does not fit in available delay "
-			 "slots (%d-word insn, %d slots left). "
-			 "Resulting behavior is undefined."),
+	      as_warn (ngettext ("Instruction does not fit in available "
+				 "delay slots (%d-word insn, %d slot left). "
+				 "Resulting behavior is undefined.",
+				 "Instruction does not fit in available "
+				 "delay slots (%d-word insn, %d slots left). "
+				 "Resulting behavior is undefined.",
+				 delay_slots),
 		       words, delay_slots);
 	      delay_slots = 0;
 	      return;
@@ -5007,10 +5045,9 @@ tic54x_adjust_symtab (void)
   if (symbol_rootP == NULL
       || S_GET_STORAGE_CLASS (symbol_rootP) != C_FILE)
     {
-      char *filename;
       unsigned lineno;
-      as_where (&filename, &lineno);
-      c_dot_file_symbol (filename, 0);
+      const char * filename = as_where (&lineno);
+      c_dot_file_symbol (filename);
     }
 }
 
@@ -5046,27 +5083,21 @@ tic54x_define_label (symbolS *sym)
 symbolS *
 tic54x_undefined_symbol (char *name)
 {
-  symbol *sym;
+  tic54x_symbol *sym;
 
   /* Not sure how to handle predefined symbols.  */
-  if ((sym = (symbol *) hash_find (cc_hash, name)) != NULL ||
-      (sym = (symbol *) hash_find (cc2_hash, name)) != NULL ||
-      (sym = (symbol *) hash_find (cc3_hash, name)) != NULL ||
-      (sym = (symbol *) hash_find (misc_symbol_hash, name)) != NULL ||
-      (sym = (symbol *) hash_find (sbit_hash, name)) != NULL)
+  if ((sym = (tic54x_symbol *) str_hash_find (cc_hash, name)) != NULL
+      || (sym = (tic54x_symbol *) str_hash_find (cc2_hash, name)) != NULL
+      || (sym = (tic54x_symbol *) str_hash_find (cc3_hash, name)) != NULL
+      || str_hash_find (misc_symbol_hash, name) != NULL
+      || (sym = (tic54x_symbol *) str_hash_find (sbit_hash, name)) != NULL
+      || (sym = (tic54x_symbol *) str_hash_find (reg_hash, name)) != NULL
+      || (sym = (tic54x_symbol *) str_hash_find (mmreg_hash, name)) != NULL
+      || !strcasecmp (name, "a")
+      || !strcasecmp (name, "b"))
     {
-      return symbol_new (name, reg_section,
-			 (valueT) sym->value,
-			 &zero_address_frag);
-    }
-
-  if ((sym = (symbol *) hash_find (reg_hash, name)) != NULL ||
-      (sym = (symbol *) hash_find (mmreg_hash, name)) != NULL ||
-      !strcasecmp (name, "a") || !strcasecmp (name, "b"))
-    {
-      return symbol_new (name, reg_section,
-			 (valueT) sym ? sym->value : 0,
-			 &zero_address_frag);
+      return symbol_new (name, reg_section, &zero_address_frag,
+			 sym ? sym->value : 0);
     }
 
   return NULL;
@@ -5082,12 +5113,12 @@ tic54x_parse_name (char *name ATTRIBUTE_UNUSED,
   return 0;
 }
 
-char *
+const char *
 md_atof (int type, char *literalP, int *sizeP)
 {
   /* Target data is little-endian, but floats are stored
      big-"word"ian.  ugh.  */
-  return ieee_md_atof (type, literalP, sizeP, TRUE);
+  return ieee_md_atof (type, literalP, sizeP, true);
 }
 
 arelent *
@@ -5097,8 +5128,8 @@ tc_gen_reloc (asection *section, fixS *fixP)
   bfd_reloc_code_real_type code = fixP->fx_r_type;
   asymbol *sym = symbol_get_bfdsym (fixP->fx_addsy);
 
-  rel = (arelent *) xmalloc (sizeof (arelent));
-  rel->sym_ptr_ptr = (asymbol **) xmalloc (sizeof (asymbol *));
+  rel = XNEW (arelent);
+  rel->sym_ptr_ptr = XNEW (asymbol *);
   *rel->sym_ptr_ptr = sym;
   /* We assume that all rel->address are host byte offsets.  */
   rel->address = fixP->fx_frag->fr_address + fixP->fx_where;
@@ -5122,10 +5153,9 @@ tc_gen_reloc (asection *section, fixS *fixP)
 /* Handle cons expressions.  */
 
 void
-tic54x_cons_fix_new (fragS *frag, int where, int octets, expressionS *expn)
+tic54x_cons_fix_new (fragS *frag, int where, int octets, expressionS *expn,
+		     bfd_reloc_code_real_type r)
 {
-  bfd_reloc_code_real_type r;
-
   switch (octets)
     {
     default:
@@ -5363,48 +5393,43 @@ tic54x_convert_frag (bfd *abfd ATTRIBUTE_UNUSED,
    syntax puts the symbol *before* the pseudo (which is kinda like MRI syntax,
    I guess, except I've never seen a definition of MRI syntax).
 
-   C is the character that used to be at *REST, which points to the end of the
-   label.
-
    Don't allow labels to start with '.'  */
 
 int
-tic54x_start_label (int c, char *rest)
+tic54x_start_label (char * label_start, int nul_char, int next_char)
 {
+  char *rest;
+
   /* If within .struct/.union, no auto line labels, please.  */
   if (current_stag != NULL)
     return 0;
 
   /* Disallow labels starting with "."  */
-  if (c != ':')
+  if (next_char != ':')
     {
-      char *label = rest;
-
-      while (!is_end_of_line[(int) label[-1]])
-	--label;
-      if (*label == '.')
+      if (*label_start == '.')
 	{
-	  as_bad (_("Invalid label '%s'"), label);
+	  as_bad (_("Invalid label '%s'"), label_start);
 	  return 0;
 	}
     }
 
-  if (is_end_of_line[(int) c])
+  if (is_end_of_line[(unsigned char) next_char])
     return 1;
 
-  if (ISSPACE (c))
-    while (ISSPACE (c = *++rest))
-      ;
-  if (c == '.')
-    {
-      /* Don't let colon () define a label for any of these...  */
-      return (strncasecmp (rest, ".tag", 4) != 0 || !ISSPACE (rest[4]))
-	&& (strncasecmp (rest, ".struct", 7) != 0 || !ISSPACE (rest[7]))
-	&& (strncasecmp (rest, ".union", 6) != 0 || !ISSPACE (rest[6]))
-	&& (strncasecmp (rest, ".macro", 6) != 0 || !ISSPACE (rest[6]))
-	&& (strncasecmp (rest, ".set", 4) != 0 || !ISSPACE (rest[4]))
-	&& (strncasecmp (rest, ".equ", 4) != 0 || !ISSPACE (rest[4]));
-    }
+  rest = input_line_pointer;
+  if (nul_char == '"')
+    ++rest;
+  while (ISSPACE (next_char))
+    next_char = *++rest;
+  if (next_char != '.')
+    return 1;
 
-  return 1;
+  /* Don't let colon () define a label for any of these...  */
+  return ((strncasecmp (rest, ".tag", 4) != 0 || !ISSPACE (rest[4]))
+	  && (strncasecmp (rest, ".struct", 7) != 0 || !ISSPACE (rest[7]))
+	  && (strncasecmp (rest, ".union", 6) != 0 || !ISSPACE (rest[6]))
+	  && (strncasecmp (rest, ".macro", 6) != 0 || !ISSPACE (rest[6]))
+	  && (strncasecmp (rest, ".set", 4) != 0 || !ISSPACE (rest[4]))
+	  && (strncasecmp (rest, ".equ", 4) != 0 || !ISSPACE (rest[4])));
 }

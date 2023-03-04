@@ -1,7 +1,5 @@
 /* Print Motorola 68k instructions.
-   Copyright 1986, 1987, 1989, 1991, 1992, 1993, 1994, 1995, 1996, 1997,
-   1998, 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009,
-   2012  Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    This file is part of the GNU opcodes library.
 
@@ -21,11 +19,11 @@
    MA 02110-1301, USA.  */
 
 #include "sysdep.h"
-#include "dis-asm.h"
+#include "disassemble.h"
 #include "floatformat.h"
 #include "libiberty.h"
 #include "opintl.h"
-
+#include "cpu-m68k.h"
 #include "opcode/m68k.h"
 
 /* Local function prototypes.  */
@@ -59,13 +57,27 @@ static char *const reg_half_names[] =
 #define COERCE_SIGNED_CHAR(ch) ((int) (((ch) ^ 0x80) & 0xFF) - 128)
 #endif
 
+/* Error code of print_insn_arg's return value.  */
+
+enum print_insn_arg_error
+  {
+    /* An invalid operand is found.  */
+    PRINT_INSN_ARG_INVALID_OPERAND = -1,
+
+    /* An opcode table error.  */
+    PRINT_INSN_ARG_INVALID_OP_TABLE = -2,
+
+    /* A memory error.  */
+    PRINT_INSN_ARG_MEMORY_ERROR = -3,
+  };
+
 /* Get a 1 byte signed integer.  */
 #define NEXTBYTE(p, val)			\
   do						\
     {						\
       p += 2;					\
       if (!FETCH_DATA (info, p))		\
-	return -3;				\
+	return PRINT_INSN_ARG_MEMORY_ERROR;	\
       val = COERCE_SIGNED_CHAR (p[-1]);		\
     }						\
   while (0)
@@ -81,10 +93,10 @@ static char *const reg_half_names[] =
 	return ret_val;				\
       val = COERCE16 ((p[-2] << 8) + p[-1]);	\
     }						\
-  while (0)						
+  while (0)
 
 /* Get a 4 byte signed integer.  */
-#define COERCE32(x) ((bfd_signed_vma) ((x) ^ 0x80000000) - 0x80000000)
+#define COERCE32(x) (((bfd_vma) (x) ^ 0x80000000) - 0x80000000)
 
 #define NEXTLONG(p, val, ret_val)					\
   do									\
@@ -92,7 +104,8 @@ static char *const reg_half_names[] =
       p += 4;								\
       if (!FETCH_DATA (info, p))					\
 	return ret_val;							\
-      val = COERCE32 ((((((p[-4] << 8) + p[-3]) << 8) + p[-2]) << 8) + p[-1]); \
+      val = COERCE32 (((((((unsigned) p[-4] << 8) + p[-3]) << 8)	\
+			+ p[-2]) << 8) + p[-1]);			\
     }									\
   while (0)
 
@@ -102,8 +115,9 @@ static char *const reg_half_names[] =
     {									\
       p += 4;								\
       if (!FETCH_DATA (info, p))					\
-	return -3;							\
-      val = (unsigned int) ((((((p[-4] << 8) + p[-3]) << 8) + p[-2]) << 8) + p[-1]); \
+	return PRINT_INSN_ARG_MEMORY_ERROR;				\
+      val = (((((((unsigned) p[-4] << 8) + p[-3]) << 8)			\
+	       + p[-2]) << 8) + p[-1]);					\
     }									\
   while (0)
 
@@ -113,7 +127,7 @@ static char *const reg_half_names[] =
     {								\
       p += 4;							\
       if (!FETCH_DATA (info, p))				\
-	return -3;						\
+	return PRINT_INSN_ARG_MEMORY_ERROR;			\
       floatformat_to_double (& floatformat_ieee_single_big,	\
 			     (char *) p - 4, & val);		\
     }								\
@@ -125,7 +139,7 @@ static char *const reg_half_names[] =
     {								\
       p += 8;							\
       if (!FETCH_DATA (info, p))				\
-	return -3;						\
+	return PRINT_INSN_ARG_MEMORY_ERROR;			\
       floatformat_to_double (& floatformat_ieee_double_big,	\
 			     (char *) p - 8, & val);		\
     }								\
@@ -137,7 +151,7 @@ static char *const reg_half_names[] =
     {							\
       p += 12;						\
       if (!FETCH_DATA (info, p))			\
-	return -3;					\
+	return PRINT_INSN_ARG_MEMORY_ERROR;		\
       floatformat_to_double (& floatformat_m68881_ext,	\
 			     (char *) p - 12, & val);	\
     }							\
@@ -152,7 +166,7 @@ static char *const reg_half_names[] =
     {						\
       p += 12;					\
       if (!FETCH_DATA (info, p))		\
-	return -3;				\
+	return PRINT_INSN_ARG_MEMORY_ERROR;	\
       val = 0.0;				\
     }						\
   while (0)
@@ -160,8 +174,6 @@ static char *const reg_half_names[] =
 
 /* Maximum length of an instruction.  */
 #define MAXLEN 22
-
-#include <setjmp.h>
 
 struct private
 {
@@ -172,7 +184,8 @@ struct private
 };
 
 /* Make sure that bytes from INFO->PRIVATE_DATA->BUFFER (inclusive)
-   to ADDR (exclusive) are valid.  Returns 1 for success, 0 on error.  */
+   to ADDR (exclusive) are valid.  Returns 1 for success, 0 on memory
+   error.  */
 #define FETCH_DATA(info, addr) \
   ((addr) <= ((struct private *) (info->private_data))->max_fetched \
    ? 1 : fetch_data ((info), (addr)))
@@ -200,7 +213,8 @@ fetch_data (struct disassemble_info *info, bfd_byte *addr)
 
 /* This function is used to print to the bit-bucket.  */
 static int
-dummy_printer (FILE *file ATTRIBUTE_UNUSED,
+dummy_printer (void *file ATTRIBUTE_UNUSED,
+	       enum disassembler_style style ATTRIBUTE_UNUSED,
 	       const char *format ATTRIBUTE_UNUSED,
 	       ...)
 {
@@ -396,7 +410,7 @@ fetch_arg (unsigned char *buffer,
    A similar case exists for the movem instructions where the register
    mask is interpreted differently for different EAs.  */
 
-static bfd_boolean
+static bool
 m68k_valid_ea (char code, int val)
 {
   int mode, mask;
@@ -497,22 +511,39 @@ print_base (int regno, bfd_vma disp, disassemble_info *info)
 {
   if (regno == -1)
     {
-      (*info->fprintf_func) (info->stream, "%%pc@(");
+      (*info->fprintf_styled_func) (info->stream, dis_style_register, "%%pc");
+      (*info->fprintf_styled_func) (info->stream, dis_style_text, "@(");
       (*info->print_address_func) (disp, info);
     }
   else
     {
-      char buf[50];
+      if (regno == -3)
+	(*info->fprintf_styled_func) (info->stream, dis_style_register,
+				      "%%zpc");
+      else if (regno != -2)
+	(*info->fprintf_styled_func) (info->stream, dis_style_register,
+				      "%s", reg_names[regno]);
+      (*info->fprintf_styled_func) (info->stream, dis_style_text, "@(");
+      (*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+				    "%" PRIx64, (uint64_t) disp);
+    }
+}
 
-      if (regno == -2)
-	(*info->fprintf_func) (info->stream, "@(");
-      else if (regno == -3)
-	(*info->fprintf_func) (info->stream, "%%zpc@(");
-      else
-	(*info->fprintf_func) (info->stream, "%s@(", reg_names[regno]);
+/* Print the index register of an indexed argument, as encoded in the
+   extension word.  */
 
-      sprintf_vma (buf, disp);
-      (*info->fprintf_func) (info->stream, "%s", buf);
+static void
+print_index_register (int ext, disassemble_info *info)
+{
+  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+				"%s", reg_names[(ext >> 12) & 0xf]);
+  (*info->fprintf_styled_func) (info->stream, dis_style_text,
+				":%c", ext & 0x800 ? 'l' : 'w');
+  if ((ext >> 9) & 3)
+    {
+      (*info->fprintf_styled_func) (info->stream, dis_style_text, ":");
+      (*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+				    "%d", 1 << ((ext >> 9) & 3));
     }
 }
 
@@ -528,20 +559,11 @@ print_indexed (int basereg,
 	       disassemble_info *info)
 {
   int word;
-  static char *const scales[] = { "", ":2", ":4", ":8" };
   bfd_vma base_disp;
   bfd_vma outer_disp;
-  char buf[40];
-  char vmabuf[50];
+  bool print_index = true;
 
   NEXTWORD (p, word, NULL);
-
-  /* Generate the text for the index register.
-     Where this will be output is not yet determined.  */
-  sprintf (buf, "%s:%c%s",
-	   reg_names[(word >> 12) & 0xf],
-	   (word & 0x800) ? 'l' : 'w',
-	   scales[(word >> 9) & 3]);
 
   /* Handle the 68000 style of indexing.  */
 
@@ -553,7 +575,9 @@ print_indexed (int basereg,
       if (basereg == -1)
 	base_disp += addr;
       print_base (basereg, base_disp, info);
-      (*info->fprintf_func) (info->stream, ",%s)", buf);
+      (*info->fprintf_styled_func) (info->stream, dis_style_text, ",");
+      print_index_register (word, info);
+      (*info->fprintf_styled_func) (info->stream, dis_style_text, ")");
       return p;
     }
 
@@ -567,7 +591,7 @@ print_indexed (int basereg,
 	basereg = -2;
     }
   if (word & 0100)
-    buf[0] = '\0';
+    print_index = false;
   base_disp = 0;
   switch ((word >> 4) & 3)
     {
@@ -584,9 +608,12 @@ print_indexed (int basereg,
   if ((word & 7) == 0)
     {
       print_base (basereg, base_disp, info);
-      if (buf[0] != '\0')
-	(*info->fprintf_func) (info->stream, ",%s", buf);
-      (*info->fprintf_func) (info->stream, ")");
+      if (print_index)
+	{
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, ",");
+	  print_index_register (word, info);
+	}
+      (*info->fprintf_styled_func) (info->stream, dis_style_text, ")");
       return p;
     }
 
@@ -602,16 +629,22 @@ print_indexed (int basereg,
     }
 
   print_base (basereg, base_disp, info);
-  if ((word & 4) == 0 && buf[0] != '\0')
+  if ((word & 4) == 0 && print_index)
     {
-      (*info->fprintf_func) (info->stream, ",%s", buf);
-      buf[0] = '\0';
+      (*info->fprintf_styled_func) (info->stream, dis_style_text, ",");
+      print_index_register (word, info);
+      print_index = false;
     }
-  sprintf_vma (vmabuf, outer_disp);
-  (*info->fprintf_func) (info->stream, ")@(%s", vmabuf);
-  if (buf[0] != '\0')
-    (*info->fprintf_func) (info->stream, ",%s", buf);
-  (*info->fprintf_func) (info->stream, ")");
+  (*info->fprintf_styled_func) (info->stream, dis_style_text,
+				")@(");
+  (*info->fprintf_styled_func) (info->stream, dis_style_address_offset,
+				"%" PRIx64, (uint64_t) outer_disp);
+  if (print_index)
+    {
+      (*info->fprintf_styled_func) (info->stream, dis_style_text, ",");
+      print_index_register (word, info);
+    }
+  (*info->fprintf_styled_func) (info->stream, dis_style_text, ")");
 
   return p;
 }
@@ -621,14 +654,13 @@ print_indexed (int basereg,
     {							\
       val = fetch_arg (buffer, place, size, info);	\
       if (val < 0)					\
-	return -3;					\
+	return PRINT_INSN_ARG_MEMORY_ERROR;		\
     }							\
   while (0)
 
 /* Returns number of bytes "eaten" by the operand, or
-   return -1 if an invalid operand was found, or -2 if
-   an opcode tabe error was found or -3 to simply abort.
-   ADDR is the pc for this arg to be relative to.  */
+   return enum print_insn_arg_error.  ADDR is the pc for this arg to be
+   relative to.  */
 
 static int
 print_insn_arg (const char *d,
@@ -654,14 +686,17 @@ print_insn_arg (const char *d,
       {
         static char *const cacheFieldName[] = { "nc", "dc", "ic", "bc" };
         FETCH_ARG (2, val);
-	(*info->fprintf_func) (info->stream, "%s", cacheFieldName[val]);
+	(*info->fprintf_styled_func) (info->stream, dis_style_sub_mnemonic,
+				      "%s", cacheFieldName[val]);
         break;
       }
 
     case 'a':		/* Address register indirect only. Cf. case '+'.  */
       {
 	FETCH_ARG (3, val);
-	(*info->fprintf_func) (info->stream, "%s@", reg_names[val + 8]);
+	(*info->fprintf_styled_func) (info->stream, dis_style_register, "%s",
+				      reg_names[val + 8]);
+	(*info->fprintf_styled_func) (info->stream, dis_style_text, "@");
         break;
       }
 
@@ -673,27 +708,27 @@ print_insn_arg (const char *d,
       }
 
     case 'C':
-      (*info->fprintf_func) (info->stream, "%%ccr");
+      (*info->fprintf_styled_func) (info->stream, dis_style_register, "%%ccr");
       break;
 
     case 'S':
-      (*info->fprintf_func) (info->stream, "%%sr");
+      (*info->fprintf_styled_func) (info->stream, dis_style_register, "%%sr");
       break;
 
     case 'U':
-      (*info->fprintf_func) (info->stream, "%%usp");
+      (*info->fprintf_styled_func) (info->stream, dis_style_register, "%%usp");
       break;
 
     case 'E':
-      (*info->fprintf_func) (info->stream, "%%acc");
+      (*info->fprintf_styled_func) (info->stream, dis_style_register, "%%acc");
       break;
 
     case 'G':
-      (*info->fprintf_func) (info->stream, "%%macsr");
+      (*info->fprintf_styled_func) (info->stream, dis_style_register, "%%macsr");
       break;
 
     case 'H':
-      (*info->fprintf_func) (info->stream, "%%mask");
+      (*info->fprintf_styled_func) (info->stream, dis_style_register, "%%mask");
       break;
 
     case 'J':
@@ -743,7 +778,8 @@ print_insn_arg (const char *d,
 	    for (regno = ARRAY_SIZE (names_v4e); --regno >= 0;)
 	      if (names_v4e[regno].value == val)
 		{
-		  (*info->fprintf_func) (info->stream, "%s", names_v4e[regno].name);
+		  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+						     "%s", names_v4e[regno].name);
 		  break;
 		}
 	    if (regno >= 0)
@@ -752,11 +788,12 @@ print_insn_arg (const char *d,
 	for (regno = ARRAY_SIZE (names) - 1; regno >= 0; regno--)
 	  if (names[regno].value == val)
 	    {
-	      (*info->fprintf_func) (info->stream, "%s", names[regno].name);
+	      (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					    "%s", names[regno].name);
 	      break;
 	    }
 	if (regno < 0)
-	  (*info->fprintf_func) (info->stream, "0x%x", val);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, "0x%x", val);
       }
       break;
 
@@ -765,7 +802,8 @@ print_insn_arg (const char *d,
       /* 0 means 8, except for the bkpt instruction... */
       if (val == 0 && d[1] != 's')
 	val = 8;
-      (*info->fprintf_func) (info->stream, "#%d", val);
+      (*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+				    "#%d", val);
       break;
 
     case 'x':
@@ -773,17 +811,20 @@ print_insn_arg (const char *d,
       /* 0 means -1.  */
       if (val == 0)
 	val = -1;
-      (*info->fprintf_func) (info->stream, "#%d", val);
+      (*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+				    "#%d", val);
       break;
 
     case 'j':
       FETCH_ARG (3, val);
-      (*info->fprintf_func) (info->stream, "#%d", val+1);
+      (*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+				    "#%d", val+1);
       break;
 
     case 'K':
       FETCH_ARG (9, val);
-      (*info->fprintf_func) (info->stream, "#%d", val);
+      (*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+				    "#%d", val);
       break;
 
     case 'M':
@@ -792,83 +833,111 @@ print_insn_arg (const char *d,
 	  static char *const scalefactor_name[] = { "<<", ">>" };
 
 	  FETCH_ARG (1, val);
-	  (*info->fprintf_func) (info->stream, "%s", scalefactor_name[val]);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_sub_mnemonic,
+					"%s", scalefactor_name[val]);
 	}
       else
 	{
 	  FETCH_ARG (8, val);
 	  if (val & 0x80)
 	    val = val - 0x100;
-	  (*info->fprintf_func) (info->stream, "#%d", val);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+					"#%d", val);
 	}
       break;
 
     case 'T':
       FETCH_ARG (4, val);
-      (*info->fprintf_func) (info->stream, "#%d", val);
+      (*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+				    "#%d", val);
       break;
 
     case 'D':
       FETCH_ARG (3, val);
-      (*info->fprintf_func) (info->stream, "%s", reg_names[val]);
+      (*info->fprintf_styled_func) (info->stream, dis_style_register,
+				    "%s", reg_names[val]);
       break;
 
     case 'A':
       FETCH_ARG (3, val);
-      (*info->fprintf_func) (info->stream, "%s", reg_names[val + 010]);
+      (*info->fprintf_styled_func) (info->stream, dis_style_register,
+				    "%s", reg_names[val + 010]);
       break;
 
     case 'R':
       FETCH_ARG (4, val);
-      (*info->fprintf_func) (info->stream, "%s", reg_names[val]);
+      (*info->fprintf_styled_func) (info->stream, dis_style_register,
+				    "%s", reg_names[val]);
       break;
 
     case 'r':
       FETCH_ARG (4, regno);
       if (regno > 7)
-	(*info->fprintf_func) (info->stream, "%s@", reg_names[regno]);
+	{
+	  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					"%s", reg_names[regno]);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, "@");
+	}
       else
-	(*info->fprintf_func) (info->stream, "@(%s)", reg_names[regno]);
+	{
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, "@(");
+	  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					"%s", reg_names[regno]);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, ")");
+	}
       break;
 
     case 'F':
       FETCH_ARG (3, val);
-      (*info->fprintf_func) (info->stream, "%%fp%d", val);
+      (*info->fprintf_styled_func) (info->stream, dis_style_register,
+				    "%%fp%d", val);
       break;
 
     case 'O':
       FETCH_ARG (6, val);
       if (val & 0x20)
-	(*info->fprintf_func) (info->stream, "%s", reg_names[val & 7]);
+	(*info->fprintf_styled_func) (info->stream, dis_style_register,
+				      "%s", reg_names[val & 7]);
       else
-	(*info->fprintf_func) (info->stream, "%d", val);
+	(*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+				      "%d", val);
       break;
 
     case '+':
       FETCH_ARG (3, val);
-      (*info->fprintf_func) (info->stream, "%s@+", reg_names[val + 8]);
+      (*info->fprintf_styled_func) (info->stream, dis_style_register,
+				    "%s", reg_names[val + 8]);
+      (*info->fprintf_styled_func) (info->stream, dis_style_text, "@+");
       break;
 
     case '-':
       FETCH_ARG (3, val);
-      (*info->fprintf_func) (info->stream, "%s@-", reg_names[val + 8]);
+      (*info->fprintf_styled_func) (info->stream, dis_style_register,
+				    "%s", reg_names[val + 8]);
+      (*info->fprintf_styled_func) (info->stream, dis_style_text, "@-");
       break;
 
     case 'k':
       if (place == 'k')
 	{
 	  FETCH_ARG (3, val);
-	  (*info->fprintf_func) (info->stream, "{%s}", reg_names[val]);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, "{");
+	  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					"%s", reg_names[val]);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, "}");
 	}
       else if (place == 'C')
 	{
 	  FETCH_ARG (7, val);
 	  if (val > 63)		/* This is a signed constant.  */
 	    val -= 128;
-	  (*info->fprintf_func) (info->stream, "{#%d}", val);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, "{");
+	  (*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+					"#%d", val);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, "}");
 	}
       else
-	return -1;
+	return PRINT_INSN_ARG_INVALID_OPERAND;
       break;
 
     case '#':
@@ -885,13 +954,14 @@ print_insn_arg (const char *d,
       else if (place == 'b')
 	NEXTBYTE (p1, val);
       else if (place == 'w' || place == 'W')
-	NEXTWORD (p1, val, -3);
+	NEXTWORD (p1, val, PRINT_INSN_ARG_MEMORY_ERROR);
       else if (place == 'l')
-	NEXTLONG (p1, val, -3);
+	NEXTLONG (p1, val, PRINT_INSN_ARG_MEMORY_ERROR);
       else
-	return -2;
+	return PRINT_INSN_ARG_INVALID_OP_TABLE;
 
-      (*info->fprintf_func) (info->stream, "#%d", val);
+      (*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+				    "#%d", val);
       break;
 
     case 'B':
@@ -900,26 +970,26 @@ print_insn_arg (const char *d,
       else if (place == 'B')
 	disp = COERCE_SIGNED_CHAR (buffer[1]);
       else if (place == 'w' || place == 'W')
-	NEXTWORD (p, disp, -3);
+	NEXTWORD (p, disp, PRINT_INSN_ARG_MEMORY_ERROR);
       else if (place == 'l' || place == 'L' || place == 'C')
-	NEXTLONG (p, disp, -3);
+	NEXTLONG (p, disp, PRINT_INSN_ARG_MEMORY_ERROR);
       else if (place == 'g')
 	{
 	  NEXTBYTE (buffer, disp);
 	  if (disp == 0)
-	    NEXTWORD (p, disp, -3);
+	    NEXTWORD (p, disp, PRINT_INSN_ARG_MEMORY_ERROR);
 	  else if (disp == -1)
-	    NEXTLONG (p, disp, -3);
+	    NEXTLONG (p, disp, PRINT_INSN_ARG_MEMORY_ERROR);
 	}
       else if (place == 'c')
 	{
 	  if (buffer[1] & 0x40)		/* If bit six is one, long offset.  */
-	    NEXTLONG (p, disp, -3);
+	    NEXTLONG (p, disp, PRINT_INSN_ARG_MEMORY_ERROR);
 	  else
-	    NEXTWORD (p, disp, -3);
+	    NEXTWORD (p, disp, PRINT_INSN_ARG_MEMORY_ERROR);
 	}
       else
-	return -2;
+	return PRINT_INSN_ARG_INVALID_OP_TABLE;
 
       (*info->print_address_func) (addr + disp, info);
       break;
@@ -928,44 +998,55 @@ print_insn_arg (const char *d,
       {
 	int val1;
 
-	NEXTWORD (p, val, -3);
+	NEXTWORD (p, val, PRINT_INSN_ARG_MEMORY_ERROR);
 	FETCH_ARG (3, val1);
-	(*info->fprintf_func) (info->stream, "%s@(%d)", reg_names[val1 + 8], val);
+	(*info->fprintf_styled_func) (info->stream, dis_style_register,
+				      "%s", reg_names[val1 + 8]);
+	(*info->fprintf_styled_func) (info->stream, dis_style_text, "@(");
+	(*info->fprintf_styled_func) (info->stream, dis_style_address_offset,
+				      "%d", val);
+	(*info->fprintf_styled_func) (info->stream, dis_style_text, ")");
 	break;
       }
 
     case 's':
       FETCH_ARG (3, val);
-      (*info->fprintf_func) (info->stream, "%s", fpcr_names[val]);
+      (*info->fprintf_styled_func) (info->stream, dis_style_register,
+				    "%s", fpcr_names[val]);
       break;
 
     case 'e':
       FETCH_ARG (2, val);
-      (*info->fprintf_func) (info->stream, "%%acc%d", val);
+      (*info->fprintf_styled_func) (info->stream, dis_style_register,
+				    "%%acc%d", val);
       break;
 
     case 'g':
       FETCH_ARG (1, val);
-      (*info->fprintf_func) (info->stream, "%%accext%s", val == 0 ? "01" : "23");
+      (*info->fprintf_styled_func) (info->stream, dis_style_register,
+				    "%%accext%s", val == 0 ? "01" : "23");
       break;
 
     case 'i':
       FETCH_ARG (2, val);
       if (val == 1)
-	(*info->fprintf_func) (info->stream, "<<");
+	(*info->fprintf_styled_func) (info->stream, dis_style_sub_mnemonic,
+				      "<<");
       else if (val == 3)
-	(*info->fprintf_func) (info->stream, ">>");
+	(*info->fprintf_styled_func) (info->stream, dis_style_sub_mnemonic,
+				      ">>");
       else
-	return -1;
+	return PRINT_INSN_ARG_INVALID_OPERAND;
       break;
 
     case 'I':
       /* Get coprocessor ID... */
       val = fetch_arg (buffer, 'd', 3, info);
       if (val < 0)
-	return -3;
+	return PRINT_INSN_ARG_MEMORY_ERROR;
       if (val != 1)				/* Unusual coprocessor ID?  */
-	(*info->fprintf_func) (info->stream, "(cpid=%d) ", val);
+	(*info->fprintf_styled_func) (info->stream, dis_style_text,
+				      "(cpid=%d) ", val);
       break;
 
     case '4':
@@ -996,19 +1077,19 @@ print_insn_arg (const char *d,
 	{
 	  val = fetch_arg (buffer, 'x', 6, info);
 	  if (val < 0)
-	    return -3;
+	    return PRINT_INSN_ARG_MEMORY_ERROR;
 	  val = ((val & 7) << 3) + ((val >> 3) & 7);
 	}
       else
 	{
 	  val = fetch_arg (buffer, 's', 6, info);
 	  if (val < 0)
-	    return -3;
+	    return PRINT_INSN_ARG_MEMORY_ERROR;
 	}
 
       /* If the <ea> is invalid for *d, then reject this match.  */
       if (!m68k_valid_ea (*d, val))
-	return -1;
+	return PRINT_INSN_ARG_INVALID_OPERAND;
 
       /* Get register number assuming address register.  */
       regno = (val & 7) + 8;
@@ -1016,41 +1097,54 @@ print_insn_arg (const char *d,
       switch (val >> 3)
 	{
 	case 0:
-	  (*info->fprintf_func) (info->stream, "%s", reg_names[val]);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					"%s", reg_names[val]);
 	  break;
 
 	case 1:
-	  (*info->fprintf_func) (info->stream, "%s", regname);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					"%s", regname);
 	  break;
 
 	case 2:
-	  (*info->fprintf_func) (info->stream, "%s@", regname);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					"%s", regname);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, "@");
 	  break;
 
 	case 3:
-	  (*info->fprintf_func) (info->stream, "%s@+", regname);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					"%s", regname);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, "@+");
 	  break;
 
 	case 4:
-	  (*info->fprintf_func) (info->stream, "%s@-", regname);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					"%s", regname);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, "@-");
 	  break;
 
 	case 5:
-	  NEXTWORD (p, val, -3);
-	  (*info->fprintf_func) (info->stream, "%s@(%d)", regname, val);
+	  NEXTWORD (p, val, PRINT_INSN_ARG_MEMORY_ERROR);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					"%s", regname);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, "@(");
+	  (*info->fprintf_styled_func) (info->stream, dis_style_address_offset,
+					"%d", val);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, ")");
 	  break;
 
 	case 6:
 	  p = print_indexed (regno, p, addr, info);
 	  if (p == NULL)
-	    return -3;
+	    return PRINT_INSN_ARG_MEMORY_ERROR;
 	  break;
 
 	case 7:
 	  switch (val & 7)
 	    {
 	    case 0:
-	      NEXTWORD (p, val, -3);
+	      NEXTWORD (p, val, PRINT_INSN_ARG_MEMORY_ERROR);
 	      (*info->print_address_func) (val, info);
 	      break;
 
@@ -1060,16 +1154,18 @@ print_insn_arg (const char *d,
 	      break;
 
 	    case 2:
-	      NEXTWORD (p, val, -3);
-	      (*info->fprintf_func) (info->stream, "%%pc@(");
+	      NEXTWORD (p, val, PRINT_INSN_ARG_MEMORY_ERROR);
+	      (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					    "%%pc");
+	      (*info->fprintf_styled_func) (info->stream, dis_style_text, "@(");
 	      (*info->print_address_func) (addr + val, info);
-	      (*info->fprintf_func) (info->stream, ")");
+	      (*info->fprintf_styled_func) (info->stream, dis_style_text, ")");
 	      break;
 
 	    case 3:
 	      p = print_indexed (-1, p, addr, info);
 	      if (p == NULL)
-		return -3;
+		return PRINT_INSN_ARG_MEMORY_ERROR;
 	      break;
 
 	    case 4:
@@ -1082,12 +1178,12 @@ print_insn_arg (const char *d,
 		  break;
 
 		case 'w':
-		  NEXTWORD (p, val, -3);
+		  NEXTWORD (p, val, PRINT_INSN_ARG_MEMORY_ERROR);
 		  flt_p = 0;
 		  break;
 
 		case 'l':
-		  NEXTLONG (p, val, -3);
+		  NEXTLONG (p, val, PRINT_INSN_ARG_MEMORY_ERROR);
 		  flt_p = 0;
 		  break;
 
@@ -1108,16 +1204,18 @@ print_insn_arg (const char *d,
 		  break;
 
 		default:
-		  return -1;
+		  return PRINT_INSN_ARG_INVALID_OPERAND;
 	      }
 	      if (flt_p)	/* Print a float? */
-		(*info->fprintf_func) (info->stream, "#0e%g", flval);
+		(*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+					      "#0e%g", flval);
 	      else
-		(*info->fprintf_func) (info->stream, "#%d", val);
+		(*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+					      "#%d", val);
 	      break;
 
 	    default:
-	      return -1;
+	      return PRINT_INSN_ARG_INVALID_OPERAND;
 	    }
 	}
 
@@ -1128,7 +1226,7 @@ print_insn_arg (const char *d,
 	{
 	  FETCH_ARG (1, val);
 	  if (val)
-	    info->fprintf_func (info->stream, "&");
+	    info->fprintf_styled_func (info->stream, dis_style_text, "&");
 	}
       break;
 
@@ -1138,13 +1236,14 @@ print_insn_arg (const char *d,
 	  {
 	    char doneany;
 	    p1 = buffer + 2;
-	    NEXTWORD (p1, val, -3);
+	    NEXTWORD (p1, val, PRINT_INSN_ARG_MEMORY_ERROR);
 	    /* Move the pointer ahead if this point is farther ahead
 	       than the last.  */
 	    p = p1 > p ? p1 : p;
 	    if (val == 0)
 	      {
-		(*info->fprintf_func) (info->stream, "#0");
+		(*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+					      "#0");
 		break;
 	      }
 	    if (*d == 'l')
@@ -1164,15 +1263,22 @@ print_insn_arg (const char *d,
 		  int first_regno;
 
 		  if (doneany)
-		    (*info->fprintf_func) (info->stream, "/");
+		    (*info->fprintf_styled_func) (info->stream, dis_style_text,
+						  "/");
 		  doneany = 1;
-		  (*info->fprintf_func) (info->stream, "%s", reg_names[regno]);
+		  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+						"%s", reg_names[regno]);
 		  first_regno = regno;
 		  while (val & (1 << (regno + 1)))
 		    ++regno;
 		  if (regno > first_regno)
-		    (*info->fprintf_func) (info->stream, "-%s",
-					   reg_names[regno]);
+		    {
+		      (*info->fprintf_styled_func) (info->stream,
+						    dis_style_text, "-");
+		      (*info->fprintf_styled_func) (info->stream,
+						    dis_style_register, "%s",
+						    reg_names[regno]);
+		    }
 		}
 	  }
 	else if (place == '3')
@@ -1183,7 +1289,8 @@ print_insn_arg (const char *d,
 	    FETCH_ARG (8, val);
 	    if (val == 0)
 	      {
-		(*info->fprintf_func) (info->stream, "#0");
+		(*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+					      "#0");
 		break;
 	      }
 	    if (*d == 'l')
@@ -1202,28 +1309,38 @@ print_insn_arg (const char *d,
 		{
 		  int first_regno;
 		  if (doneany)
-		    (*info->fprintf_func) (info->stream, "/");
+		    (*info->fprintf_styled_func) (info->stream, dis_style_text,
+						  "/");
 		  doneany = 1;
-		  (*info->fprintf_func) (info->stream, "%%fp%d", regno);
+		  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+						"%%fp%d", regno);
 		  first_regno = regno;
 		  while (val & (1 << (regno + 1)))
 		    ++regno;
 		  if (regno > first_regno)
-		    (*info->fprintf_func) (info->stream, "-%%fp%d", regno);
+		    {
+		      (*info->fprintf_styled_func) (info->stream,
+						    dis_style_text, "-");
+		      (*info->fprintf_styled_func) (info->stream,
+						    dis_style_register,
+						    "%%fp%d", regno);
+		    }
 		}
 	  }
 	else if (place == '8')
 	  {
 	    FETCH_ARG (3, val);
 	    /* fmoveml for FP status registers.  */
-	    (*info->fprintf_func) (info->stream, "%s", fpcr_names[val]);
+	    (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					  "%s", fpcr_names[val]);
 	  }
 	else
-	  return -2;
+	  return PRINT_INSN_ARG_INVALID_OP_TABLE;
       break;
 
     case 'X':
       place = '8';
+      /* Fall through.  */
     case 'Y':
     case 'Z':
     case 'W':
@@ -1254,16 +1371,18 @@ print_insn_arg (const char *d,
 	    {
 	      int break_reg = ((buffer[3] >> 2) & 7);
 
-	      (*info->fprintf_func)
-		(info->stream, val == 0x1c ? "%%bad%d" : "%%bac%d",
-		 break_reg);
+	      (*info->fprintf_styled_func)
+		(info->stream, dis_style_register,
+		 val == 0x1c ? "%%bad%d" : "%%bac%d", break_reg);
 	    }
 	    break;
 	  default:
-	    (*info->fprintf_func) (info->stream, "<mmu register %d>", val);
+	    (*info->fprintf_styled_func) (info->stream, dis_style_text,
+					  "<mmu register %d>", val);
 	  }
 	if (name)
-	  (*info->fprintf_func) (info->stream, "%s", name);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					"%s", name);
       }
       break;
 
@@ -1273,17 +1392,20 @@ print_insn_arg (const char *d,
 
 	FETCH_ARG (5, fc);
 	if (fc == 1)
-	  (*info->fprintf_func) (info->stream, "%%dfc");
+	  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					"%%dfc");
 	else if (fc == 0)
-	  (*info->fprintf_func) (info->stream, "%%sfc");
+	  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					"%%sfc");
 	else
 	  /* xgettext:c-format */
-	  (*info->fprintf_func) (info->stream, _("<function code %d>"), fc);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text,
+					_("<function code %d>"), fc);
       }
       break;
 
     case 'V':
-      (*info->fprintf_func) (info->stream, "%%val");
+      (*info->fprintf_styled_func) (info->stream, dis_style_register, "%%val");
       break;
 
     case 't':
@@ -1291,7 +1413,8 @@ print_insn_arg (const char *d,
 	int level;
 
 	FETCH_ARG (3, level);
-	(*info->fprintf_func) (info->stream, "%d", level);
+	(*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+				      "%d", level);
       }
       break;
 
@@ -1306,21 +1429,22 @@ print_insn_arg (const char *d,
 	    is_upper = 1;
 	    reg &= 0xf;
 	  }
-	(*info->fprintf_func) (info->stream, "%s%s",
-			       reg_half_names[reg],
-			       is_upper ? "u" : "l");
+	(*info->fprintf_styled_func) (info->stream, dis_style_register, "%s%s",
+				      reg_half_names[reg],
+				      is_upper ? "u" : "l");
       }
       break;
 
     default:
-      return -2;
+      return PRINT_INSN_ARG_INVALID_OP_TABLE;
     }
 
   return p - p0;
 }
 
 /* Try to match the current instruction to best and if so, return the
-   number of bytes consumed from the instruction stream, else zero.  */
+   number of bytes consumed from the instruction stream, else zero.
+   Return -1 on memory error.  */
 
 static int
 match_insn_m68k (bfd_vma memaddr,
@@ -1334,13 +1458,13 @@ match_insn_m68k (bfd_vma memaddr,
 
   struct private *priv = (struct private *) info->private_data;
   bfd_byte *buffer = priv->the_buffer;
-  fprintf_ftype save_printer = info->fprintf_func;
+  fprintf_styled_ftype save_printer = info->fprintf_styled_func;
   void (* save_print_address) (bfd_vma, struct disassemble_info *)
     = info->print_address_func;
 
   if (*args == '.')
     args++;
-  
+
   /* Point at first word of argument data,
      and at descriptor for first argument.  */
   p = buffer + 2;
@@ -1404,16 +1528,18 @@ match_insn_m68k (bfd_vma memaddr,
 	 this because we know exactly what the second word is, and we
 	 aren't going to print anything based on it.  */
       p = buffer + 6;
-      FETCH_DATA (info, p);
+      if (!FETCH_DATA (info, p))
+	return -1;
       buffer[2] = buffer[4];
       buffer[3] = buffer[5];
     }
 
-  FETCH_DATA (info, p);
+  if (!FETCH_DATA (info, p))
+    return -1;
 
   save_p = p;
   info->print_address_func = dummy_print_address;
-  info->fprintf_func = (fprintf_ftype) dummy_printer;
+  info->fprintf_styled_func = dummy_printer;
 
   /* We scan the operands twice.  The first time we don't print anything,
      but look for errors.  */
@@ -1423,36 +1549,37 @@ match_insn_m68k (bfd_vma memaddr,
 
       if (eaten >= 0)
 	p += eaten;
-      else if (eaten == -1 || eaten == -3)
+      else if (eaten == PRINT_INSN_ARG_INVALID_OPERAND
+	       || eaten == PRINT_INSN_ARG_MEMORY_ERROR)
 	{
-	  info->fprintf_func = save_printer;
+	  info->fprintf_styled_func = save_printer;
 	  info->print_address_func = save_print_address;
-	  return 0;
+	  return eaten == PRINT_INSN_ARG_MEMORY_ERROR ? -1 : 0;
 	}
       else
 	{
 	  /* We must restore the print functions before trying to print the
 	     error message.  */
-	  info->fprintf_func = save_printer;
+	  info->fprintf_styled_func = save_printer;
 	  info->print_address_func = save_print_address;
-	  info->fprintf_func (info->stream,
-			      /* xgettext:c-format */
-			      _("<internal error in opcode table: %s %s>\n"),
-			      best->name, best->args);
+	  info->fprintf_styled_func (info->stream, dis_style_text,
+				     /* xgettext:c-format */
+				     _("<internal error in opcode table: %s %s>\n"),
+				     best->name, best->args);
 	  return 2;
 	}
     }
 
   p = save_p;
-  info->fprintf_func = save_printer;
+  info->fprintf_styled_func = save_printer;
   info->print_address_func = save_print_address;
 
   d = args;
 
-  info->fprintf_func (info->stream, "%s", best->name);
+  info->fprintf_styled_func (info->stream, dis_style_mnemonic, "%s", best->name);
 
   if (*d)
-    info->fprintf_func (info->stream, " ");
+    info->fprintf_styled_func (info->stream, dis_style_text, " ");
 
   while (*d)
     {
@@ -1460,7 +1587,7 @@ match_insn_m68k (bfd_vma memaddr,
       d += 2;
 
       if (*d && *(d - 2) != 'I' && *d != 'k')
-	info->fprintf_func (info->stream, ",");
+	info->fprintf_styled_func (info->stream, dis_style_text, ",");
     }
 
   return p - buffer;
@@ -1469,7 +1596,8 @@ match_insn_m68k (bfd_vma memaddr,
 /* Try to interpret the instruction at address MEMADDR as one that
    can execute on a processor with the features given by ARCH_MASK.
    If successful, print the instruction to INFO->STREAM and return
-   its length in bytes.  Return 0 otherwise.  */
+   its length in bytes.  Return 0 otherwise.  Return -1 on memory
+   error.  */
 
 static int
 m68k_scan_mask (bfd_vma memaddr, disassemble_info *info,
@@ -1511,7 +1639,8 @@ m68k_scan_mask (bfd_vma memaddr, disassemble_info *info,
 	*opc_pointer[(m68k_opcodes[i].opcode >> 28) & 15]++ = &m68k_opcodes[i];
     }
 
-  FETCH_DATA (info, buffer + 2);
+  if (!FETCH_DATA (info, buffer + 2))
+    return -1;
   major_opcode = (buffer[0] >> 4) & 15;
 
   for (i = 0; i < numopcodes[major_opcode]; i++)
@@ -1587,7 +1716,7 @@ m68k_scan_mask (bfd_vma memaddr, disassemble_info *info,
 	}
     }
   return 0;
-}		
+}
 
 /* Print the m68k instruction at address MEMADDR in debugged memory,
    on INFO->STREAM.  Returns length of the instruction, in bytes.  */
@@ -1616,7 +1745,7 @@ print_insn_m68k (bfd_vma memaddr, disassemble_info *info)
       /* First try printing an m680x0 instruction.  Try printing a Coldfire
 	 one if that fails.  */
       val = m68k_scan_mask (memaddr, info, m68k_mask);
-      if (val == 0)
+      if (val <= 0)
 	val = m68k_scan_mask (memaddr, info, mcf_mask);
     }
   else
@@ -1625,8 +1754,14 @@ print_insn_m68k (bfd_vma memaddr, disassemble_info *info)
     }
 
   if (val == 0)
-    /* Handle undefined instructions.  */
-    info->fprintf_func (info->stream, ".short 0x%04x", (buffer[0] << 8) + buffer[1]);
+    {
+      /* Handle undefined instructions.  */
+      info->fprintf_styled_func (info->stream, dis_style_assembler_directive,
+				 ".short");
+      info->fprintf_styled_func (info->stream, dis_style_text, " ");
+      info->fprintf_styled_func (info->stream, dis_style_immediate,
+				 "0x%04x", (buffer[0] << 8) + buffer[1]);
+    }
 
   return val ? val : 2;
 }

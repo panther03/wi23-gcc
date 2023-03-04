@@ -1,4 +1,4 @@
-# Copyright 1992-2013 Free Software Foundation, Inc.
+# Copyright 1992-2023 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -20,10 +20,7 @@
 # Are we on a target board?  As of 2004-02-12, GDB didn't have a
 # mechanism that would let it efficiently access a remote corefile.
 
-if ![isnative] then {
-    untested "Remote system"
-    return
-}
+require isnative
 
 # Can the system run this test (in particular support sparse
 # corefiles)?  On systems that lack sparse corefile support this test
@@ -31,26 +28,18 @@ if ![isnative] then {
 # I/O bandwith.
 
 if { [istarget "*-*-*bsd*"]
-     || [istarget "*-*-hpux*"]
      || [istarget "*-*-solaris*"] 
      || [istarget "*-*-darwin*"] 
      || [istarget "*-*-cygwin*"] } {
-    untested "Kernel lacks sparse corefile support (PR gdb/1551)"
-    return
-}
-
-# This testcase causes too much stress (in terms of memory usage)
-# on certain systems...
-if { [istarget "*-*-*irix*"] } {
-    untested "Testcase too stressful for this system"
+    untested "kernel lacks sparse corefile support (PR gdb/1551)"
     return
 }
 
 standard_testfile .c
-set corefile ${binfile}.corefile
+set corefile [standard_output_file ${binfile}.corefile]
 
 if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable {debug}] != "" } {
-     untested bigcore.exp
+     untested "failed to compile"
      return -1
 }
 
@@ -60,8 +49,11 @@ clean_restart ${binfile}
 gdb_test_no_output "set print sevenbit-strings"
 gdb_test_no_output "set width 0"
 
-if { ![runto_main] } then {
-    gdb_suppress_tests
+# Get the core into the output directory.
+set_inferior_cwd_to_output_dir
+
+if {![runto_main]} {
+    return 0
 }
 set print_core_line [gdb_get_line_number "Dump core"]
 gdb_test "tbreak $print_core_line"
@@ -118,17 +110,7 @@ gdb_test_no_output "set \$bytes_allocated = bytes_allocated" "save heap size"
 # May 2003) create cores named "core.PID".
 
 # Save the process ID.  Some systems dump the core into core.PID.
-set test "grab pid"
-gdb_test_multiple "info program" $test {
-    -re "child process (\[0-9\]+).*$gdb_prompt $" {
-	set inferior_pid $expect_out(1,string)
-	pass $test
-    }
-    -re "$gdb_prompt $" {
-	set inferior_pid unknown
-	pass $test
-    }
-}
+set inferior_pid [get_inferior_pid]
 
 # Dump core using SIGABRT
 set oldtimeout $timeout
@@ -136,19 +118,12 @@ set timeout 600
 gdb_test "signal SIGABRT" "Program terminated with signal SIGABRT, .*"
 set timeout $oldtimeout
 
-# Find the corefile
-set file ""
-foreach pat [list core.${inferior_pid} ${testfile}.core core] {
-    set names [glob -nocomplain $pat]
-    if {[llength $names] == 1} {
-	set file [lindex $names 0]
-	remote_exec build "mv $file $corefile"
-	break
-    }
-}
-
-if { $file == "" } {
-    untested "Can't generate a core file"
+# Find the corefile.
+set file [find_core_file $inferior_pid]
+if { $file != "" } {
+    remote_exec build "mv $file $corefile"
+} else {
+    untested "can't generate a core file"
     return 0
 }
 

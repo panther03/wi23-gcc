@@ -1,5 +1,5 @@
 # Tests of overloaded operators resolution.
-# Copyright 1998-2013 Free Software Foundation, Inc.
+# Copyright 1998-2023 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -19,22 +19,16 @@
 # source file "userdef.cc"
 #
 
-if { [skip_stl_tests] } { continue }
-
-# On SPU this test fails because the executable exceeds local storage size.
-if { [istarget "spu*-*-*"] } {
-        return 0
-}
+require allow_stl_tests
 
 standard_testfile .cc
 
-if {[prepare_for_testing $testfile.exp $testfile $srcfile {debug c++}]} {
+if {[prepare_for_testing "failed to prepare" $testfile $srcfile {debug c++}]} {
     return -1
 }
 
-if ![runto_main] then {
-    perror "couldn't run to breakpoint"
-    continue
+if {![runto_main]} {
+    return
 }
 
 gdb_test "break marker1" \
@@ -139,4 +133,3 @@ gdb_test "print operator== (mem1, mem2)" " = false"
 gdb_test "print operator== (mem1, mem1)" " = true"
 
 gdb_exit
-return 0

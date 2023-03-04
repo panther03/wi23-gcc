@@ -1,6 +1,6 @@
 /* Target-dependent code for GNU/Linux running on PA-RISC, for GDB.
 
-   Copyright (C) 2004-2013 Free Software Foundation, Inc.
+   Copyright (C) 2004-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -26,7 +26,7 @@
 #include "glibc-tdep.h"
 #include "frame-unwind.h"
 #include "trad-frame.h"
-#include "dwarf2-frame.h"
+#include "dwarf2/frame.h"
 #include "value.h"
 #include "regset.h"
 #include "regcache.h"
@@ -39,14 +39,13 @@ static int
 hppa_dwarf_reg_to_regnum (struct gdbarch *gdbarch, int reg)
 {
   /* The general registers and the sar are the same in both sets.  */
-  if (reg <= 32)
+  if (reg >= 0 && reg <= 32)
     return reg;
 
   /* fr4-fr31 (left and right halves) are mapped from 72.  */
   if (reg >= 72 && reg <= 72 + 28 * 2)
     return HPPA_FP4_REGNUM + (reg - 72);
 
-  warning (_("Unmapped DWARF DBX Register #%d encountered."), reg);
   return -1;
 }
 
@@ -89,8 +88,8 @@ static struct insn_pattern hppa_sigtramp[] = {
    matched.  */
 static int
 insns_match_pattern (struct gdbarch *gdbarch, CORE_ADDR pc,
-                     struct insn_pattern *pattern,
-                     unsigned int *insn)
+		     struct insn_pattern *pattern,
+		     unsigned int *insn)
 {
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   int i;
@@ -103,9 +102,9 @@ insns_match_pattern (struct gdbarch *gdbarch, CORE_ADDR pc,
       target_read_memory (npc, buf, 4);
       insn[i] = extract_unsigned_integer (buf, 4, byte_order);
       if ((insn[i] & pattern[i].mask) == pattern[i].data)
-        npc += 4;
+	npc += 4;
       else
-        return 0;
+	return 0;
     }
   return 1;
 }
@@ -136,7 +135,7 @@ hppa_linux_sigtramp_find_sigcontext (struct gdbarch *gdbarch, CORE_ADDR pc)
 {
   unsigned int dummy[HPPA_MAX_INSN_PATTERN_LEN];
   int offs = 0;
-  int try;
+  int attempt;
   /* offsets to try to find the trampoline */
   static int pcoffs[] = { 0, 4*4, 5*4 };
   /* offsets to the rt_sigframe structure */
@@ -154,12 +153,12 @@ hppa_linux_sigtramp_find_sigcontext (struct gdbarch *gdbarch, CORE_ADDR pc)
      e4008200 be,l 0x100(%sr2, %r0), %sr0, %r31
      08000240 nop  */
 
-  for (try = 0; try < ARRAY_SIZE (pcoffs); try++)
+  for (attempt = 0; attempt < ARRAY_SIZE (pcoffs); attempt++)
     {
-      if (insns_match_pattern (gdbarch, sp + pcoffs[try],
+      if (insns_match_pattern (gdbarch, sp + pcoffs[attempt],
 			       hppa_sigtramp, dummy))
 	{
-          offs = sfoffs[try];
+	  offs = sfoffs[attempt];
 	  break;
 	}
     }
@@ -171,13 +170,11 @@ hppa_linux_sigtramp_find_sigcontext (struct gdbarch *gdbarch, CORE_ADDR pc)
 	  /* sigaltstack case: we have no way of knowing which offset to 
 	     use in this case; default to new kernel handling.  If this is
 	     wrong the unwinding will fail.  */
-	  try = 2;
-	  sp = pc - pcoffs[try];
+	  attempt = 2;
+	  sp = pc - pcoffs[attempt];
 	}
       else
-      {
-        return 0;
-      }
+	return 0;
     }
 
   /* sp + sfoffs[try] points to a struct rt_sigframe, which contains
@@ -186,17 +183,17 @@ hppa_linux_sigtramp_find_sigcontext (struct gdbarch *gdbarch, CORE_ADDR pc)
      bad we cannot include system specific headers :-(.
      sizeof(struct siginfo) == 128
      offsetof(struct ucontext, uc_mcontext) == 24.  */
-  return sp + sfoffs[try] + 128 + 24;
+  return sp + sfoffs[attempt] + 128 + 24;
 }
 
 struct hppa_linux_sigtramp_unwind_cache
 {
   CORE_ADDR base;
-  struct trad_frame_saved_reg *saved_regs;
+  trad_frame_saved_reg *saved_regs;
 };
 
 static struct hppa_linux_sigtramp_unwind_cache *
-hppa_linux_sigtramp_frame_unwind_cache (struct frame_info *this_frame,
+hppa_linux_sigtramp_frame_unwind_cache (frame_info_ptr this_frame,
 					void **this_cache)
 {
   struct gdbarch *gdbarch = get_frame_arch (this_frame);
@@ -205,7 +202,7 @@ hppa_linux_sigtramp_frame_unwind_cache (struct frame_info *this_frame,
   int i;
 
   if (*this_cache)
-    return *this_cache;
+    return (struct hppa_linux_sigtramp_unwind_cache *) *this_cache;
 
   info = FRAME_OBSTACK_ZALLOC (struct hppa_linux_sigtramp_unwind_cache);
   *this_cache = info;
@@ -228,13 +225,13 @@ hppa_linux_sigtramp_frame_unwind_cache (struct frame_info *this_frame,
   scptr += 4;
 
   /* GR[0] is the psw.  */
-  info->saved_regs[HPPA_IPSW_REGNUM].addr = scptr;
+  info->saved_regs[HPPA_IPSW_REGNUM].set_addr (scptr);
   scptr += 4;
 
   /* General registers.  */
   for (i = 1; i < 32; i++)
     {
-      info->saved_regs[HPPA_R0_REGNUM + i].addr = scptr;
+      info->saved_regs[HPPA_R0_REGNUM + i].set_addr (scptr);
       scptr += 4;
     }
 
@@ -246,24 +243,24 @@ hppa_linux_sigtramp_frame_unwind_cache (struct frame_info *this_frame,
 
   for (i = 4; i < 32; i++)
     {
-      info->saved_regs[HPPA_FP0_REGNUM + (i * 2)].addr = scptr;
+      info->saved_regs[HPPA_FP0_REGNUM + (i * 2)].set_addr (scptr);
       scptr += 4;
-      info->saved_regs[HPPA_FP0_REGNUM + (i * 2) + 1].addr = scptr;
+      info->saved_regs[HPPA_FP0_REGNUM + (i * 2) + 1].set_addr (scptr);
       scptr += 4;
     }
 
   /* IASQ/IAOQ.  */
-  info->saved_regs[HPPA_PCSQ_HEAD_REGNUM].addr = scptr;
+  info->saved_regs[HPPA_PCSQ_HEAD_REGNUM].set_addr (scptr);
   scptr += 4;
-  info->saved_regs[HPPA_PCSQ_TAIL_REGNUM].addr = scptr;
-  scptr += 4;
-
-  info->saved_regs[HPPA_PCOQ_HEAD_REGNUM].addr = scptr;
-  scptr += 4;
-  info->saved_regs[HPPA_PCOQ_TAIL_REGNUM].addr = scptr;
+  info->saved_regs[HPPA_PCSQ_TAIL_REGNUM].set_addr (scptr);
   scptr += 4;
 
-  info->saved_regs[HPPA_SAR_REGNUM].addr = scptr;
+  info->saved_regs[HPPA_PCOQ_HEAD_REGNUM].set_addr (scptr);
+  scptr += 4;
+  info->saved_regs[HPPA_PCOQ_TAIL_REGNUM].set_addr (scptr);
+  scptr += 4;
+
+  info->saved_regs[HPPA_SAR_REGNUM].set_addr (scptr);
 
   info->base = get_frame_register_unsigned (this_frame, HPPA_SP_REGNUM);
 
@@ -271,7 +268,7 @@ hppa_linux_sigtramp_frame_unwind_cache (struct frame_info *this_frame,
 }
 
 static void
-hppa_linux_sigtramp_frame_this_id (struct frame_info *this_frame,
+hppa_linux_sigtramp_frame_this_id (frame_info_ptr this_frame,
 				   void **this_prologue_cache,
 				   struct frame_id *this_id)
 {
@@ -281,7 +278,7 @@ hppa_linux_sigtramp_frame_this_id (struct frame_info *this_frame,
 }
 
 static struct value *
-hppa_linux_sigtramp_frame_prev_register (struct frame_info *this_frame,
+hppa_linux_sigtramp_frame_prev_register (frame_info_ptr this_frame,
 					 void **this_prologue_cache,
 					 int regnum)
 {
@@ -299,7 +296,7 @@ hppa_linux_sigtramp_frame_prev_register (struct frame_info *this_frame,
    we can find the beginning of the struct rt_sigframe.  */
 static int
 hppa_linux_sigtramp_frame_sniffer (const struct frame_unwind *self,
-				   struct frame_info *this_frame,
+				   frame_info_ptr this_frame,
 				   void **this_prologue_cache)
 {
   struct gdbarch *gdbarch = get_frame_arch (this_frame);
@@ -312,6 +309,7 @@ hppa_linux_sigtramp_frame_sniffer (const struct frame_unwind *self,
 }
 
 static const struct frame_unwind hppa_linux_sigtramp_frame_unwind = {
+  "hppa linux sigtramp",
   SIGTRAMP_FRAME,
   default_frame_unwind_stop_reason,
   hppa_linux_sigtramp_frame_this_id,
@@ -374,8 +372,8 @@ hppa_linux_find_global_pointer (struct gdbarch *gdbarch,
 	{
 	  CORE_ADDR addr, endaddr;
 
-	  addr = obj_section_addr (osect);
-	  endaddr = obj_section_endaddr (osect);
+	  addr = osect->addr ();
+	  endaddr = osect->endaddr ();
 
 	  while (addr < endaddr)
 	    {
@@ -386,7 +384,7 @@ hppa_linux_find_global_pointer (struct gdbarch *gdbarch,
 	      status = target_read_memory (addr, buf, sizeof (buf));
 	      if (status != 0)
 		break;
-	      tag = extract_signed_integer (buf, sizeof (buf), byte_order);
+	      tag = extract_signed_integer (buf, byte_order);
 
 	      if (tag == DT_PLTGOT)
 		{
@@ -423,109 +421,74 @@ hppa_linux_find_global_pointer (struct gdbarch *gdbarch,
  * cr10, cr15
  */
 
-#define GR_REGNUM(_n)	(HPPA_R0_REGNUM+_n)
-#define TR_REGNUM(_n)	(HPPA_TR0_REGNUM+_n)
-static const int greg_map[] =
+static const struct regcache_map_entry hppa_linux_gregmap[] =
   {
-    GR_REGNUM(0), GR_REGNUM(1), GR_REGNUM(2), GR_REGNUM(3),
-    GR_REGNUM(4), GR_REGNUM(5), GR_REGNUM(6), GR_REGNUM(7),
-    GR_REGNUM(8), GR_REGNUM(9), GR_REGNUM(10), GR_REGNUM(11),
-    GR_REGNUM(12), GR_REGNUM(13), GR_REGNUM(14), GR_REGNUM(15),
-    GR_REGNUM(16), GR_REGNUM(17), GR_REGNUM(18), GR_REGNUM(19),
-    GR_REGNUM(20), GR_REGNUM(21), GR_REGNUM(22), GR_REGNUM(23),
-    GR_REGNUM(24), GR_REGNUM(25), GR_REGNUM(26), GR_REGNUM(27),
-    GR_REGNUM(28), GR_REGNUM(29), GR_REGNUM(30), GR_REGNUM(31),
-
-    HPPA_SR4_REGNUM+1, HPPA_SR4_REGNUM+2, HPPA_SR4_REGNUM+3, HPPA_SR4_REGNUM+4,
-    HPPA_SR4_REGNUM, HPPA_SR4_REGNUM+5, HPPA_SR4_REGNUM+6, HPPA_SR4_REGNUM+7,
-
-    HPPA_PCOQ_HEAD_REGNUM, HPPA_PCOQ_TAIL_REGNUM,
-    HPPA_PCSQ_HEAD_REGNUM, HPPA_PCSQ_TAIL_REGNUM,
-
-    HPPA_SAR_REGNUM, HPPA_IIR_REGNUM, HPPA_ISR_REGNUM, HPPA_IOR_REGNUM,
-    HPPA_IPSW_REGNUM, HPPA_RCR_REGNUM,
-
-    TR_REGNUM(0), TR_REGNUM(1), TR_REGNUM(2), TR_REGNUM(3),
-    TR_REGNUM(4), TR_REGNUM(5), TR_REGNUM(6), TR_REGNUM(7),
-
-    HPPA_PID0_REGNUM, HPPA_PID1_REGNUM, HPPA_PID2_REGNUM, HPPA_PID3_REGNUM,
-    HPPA_CCR_REGNUM, HPPA_EIEM_REGNUM,
+    { 32, HPPA_R0_REGNUM },
+    { 1, HPPA_SR4_REGNUM+1 },
+    { 1, HPPA_SR4_REGNUM+2 },
+    { 1, HPPA_SR4_REGNUM+3 },
+    { 1, HPPA_SR4_REGNUM+4 },
+    { 1, HPPA_SR4_REGNUM },
+    { 1, HPPA_SR4_REGNUM+5 },
+    { 1, HPPA_SR4_REGNUM+6 },
+    { 1, HPPA_SR4_REGNUM+7 },
+    { 1, HPPA_PCOQ_HEAD_REGNUM },
+    { 1, HPPA_PCOQ_TAIL_REGNUM },
+    { 1, HPPA_PCSQ_HEAD_REGNUM },
+    { 1, HPPA_PCSQ_TAIL_REGNUM },
+    { 1, HPPA_SAR_REGNUM },
+    { 1, HPPA_IIR_REGNUM },
+    { 1, HPPA_ISR_REGNUM },
+    { 1, HPPA_IOR_REGNUM },
+    { 1, HPPA_IPSW_REGNUM },
+    { 1, HPPA_RCR_REGNUM },
+    { 8, HPPA_TR0_REGNUM },
+    { 4, HPPA_PID0_REGNUM },
+    { 1, HPPA_CCR_REGNUM },
+    { 1, HPPA_EIEM_REGNUM },
+    { 0 }
   };
 
-static void
-hppa_linux_supply_regset (const struct regset *regset,
-			  struct regcache *regcache,
-			  int regnum, const void *regs, size_t len)
-{
-  struct gdbarch *arch = get_regcache_arch (regcache);
-  struct gdbarch_tdep *tdep = gdbarch_tdep (arch);
-  const char *buf = regs;
-  int i, offset;
-
-  offset = 0;
-  for (i = 0; i < ARRAY_SIZE (greg_map); i++)
-    {
-      if (regnum == greg_map[i] || regnum == -1)
-        regcache_raw_supply (regcache, greg_map[i], buf + offset);
-
-      offset += tdep->bytes_per_address;
-    }
-}
-
-static void
-hppa_linux_supply_fpregset (const struct regset *regset,
-			    struct regcache *regcache,
-			    int regnum, const void *regs, size_t len)
-{
-  const char *buf = regs;
-  int i, offset;
-
-  offset = 0;
-  for (i = 0; i < 64; i++)
-    {
-      if (regnum == HPPA_FP0_REGNUM + i || regnum == -1)
-        regcache_raw_supply (regcache, HPPA_FP0_REGNUM + i, 
-			     buf + offset);
-      offset += 4;
-    }
-}
+static const struct regcache_map_entry hppa_linux_fpregmap[] =
+  {
+    /* FIXME: Only works for 32-bit mode.  In 64-bit mode there should
+       be 32 fpregs, 8 bytes each.  */
+    { 64, HPPA_FP0_REGNUM, 4 },
+    { 0 }
+  };
 
 /* HPPA Linux kernel register set.  */
-static struct regset hppa_linux_regset =
+static const struct regset hppa_linux_regset =
 {
-  NULL,
-  hppa_linux_supply_regset
+  hppa_linux_gregmap,
+  regcache_supply_regset, regcache_collect_regset
 };
 
-static struct regset hppa_linux_fpregset =
+static const struct regset hppa_linux_fpregset =
 {
-  NULL,
-  hppa_linux_supply_fpregset
+  hppa_linux_fpregmap,
+  regcache_supply_regset, regcache_collect_regset
 };
 
-static const struct regset *
-hppa_linux_regset_from_core_section (struct gdbarch *gdbarch,
-				     const char *sect_name,
-				     size_t sect_size)
+static void
+hppa_linux_iterate_over_regset_sections (struct gdbarch *gdbarch,
+					 iterate_over_regset_sections_cb *cb,
+					 void *cb_data,
+					 const struct regcache *regcache)
 {
-  if (strcmp (sect_name, ".reg") == 0)
-    return &hppa_linux_regset;
-  else if (strcmp (sect_name, ".reg2") == 0)
-    return &hppa_linux_fpregset;
+  hppa_gdbarch_tdep *tdep = gdbarch_tdep<hppa_gdbarch_tdep> (gdbarch);
 
-  return NULL;
+  cb (".reg", 80 * tdep->bytes_per_address, 80 * tdep->bytes_per_address,
+      &hppa_linux_regset, NULL, cb_data);
+  cb (".reg2", 64 * 4, 64 * 4, &hppa_linux_fpregset, NULL, cb_data);
 }
-
-
-/* Forward declarations.  */
-extern initialize_file_ftype _initialize_hppa_linux_tdep;
 
 static void
 hppa_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
 {
-  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  hppa_gdbarch_tdep *tdep = gdbarch_tdep<hppa_gdbarch_tdep> (gdbarch);
 
-  linux_init_abi (info, gdbarch);
+  linux_init_abi (info, gdbarch, 0);
 
   /* GNU/Linux is always ELF.  */
   tdep->is_elf = 1;
@@ -538,7 +501,7 @@ hppa_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
 
   /* GNU/Linux uses SVR4-style shared libraries.  */
   set_solib_svr4_fetch_link_map_offsets
-    (gdbarch, svr4_ilp32_fetch_link_map_offsets);
+    (gdbarch, linux_ilp32_fetch_link_map_offsets);
 
   tdep->in_solib_call_trampoline = hppa_in_solib_call_trampoline;
   set_gdbarch_skip_trampoline_code (gdbarch, hppa_skip_trampoline_code);
@@ -550,19 +513,21 @@ hppa_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
      some discussions to support 128-bit long double, but it requires some
      more work in gcc and glibc first.  */
   set_gdbarch_long_double_bit (gdbarch, 64);
+  set_gdbarch_long_double_format (gdbarch, floatformats_ieee_double);
 
-  set_gdbarch_regset_from_core_section
-    (gdbarch, hppa_linux_regset_from_core_section);
+  set_gdbarch_iterate_over_regset_sections
+    (gdbarch, hppa_linux_iterate_over_regset_sections);
 
   set_gdbarch_dwarf2_reg_to_regnum (gdbarch, hppa_dwarf_reg_to_regnum);
 
   /* Enable TLS support.  */
   set_gdbarch_fetch_tls_load_module_address (gdbarch,
-                                             svr4_fetch_objfile_link_map);
+					     svr4_fetch_objfile_link_map);
 }
 
+void _initialize_hppa_linux_tdep ();
 void
-_initialize_hppa_linux_tdep (void)
+_initialize_hppa_linux_tdep ()
 {
   gdbarch_register_osabi (bfd_arch_hppa, 0, GDB_OSABI_LINUX,
 			  hppa_linux_init_abi);

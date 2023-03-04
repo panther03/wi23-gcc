@@ -1,6 +1,5 @@
 /* tc-mmix.c -- Assembler for Don Knuth's MMIX.
-   Copyright (C) 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010,
-   2012  Free Software Foundation.
+   Copyright (C) 2001-2023 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -113,6 +112,7 @@ static struct loc_assert_s
  {
    segT old_seg;
    symbolS *loc_sym;
+   fragS *frag;
    struct loc_assert_s *next;
  } *loc_asserts = NULL;
 
@@ -186,7 +186,7 @@ int mmix_next_semicolon_is_eoln = 1;
 
 /* Do we have a BSPEC in progress?  */
 static int doing_bspec = 0;
-static char *bspec_file;
+static const char *bspec_file;
 static unsigned int bspec_line;
 
 struct option md_longopts[] =
@@ -217,7 +217,7 @@ struct option md_longopts[] =
 
 size_t md_longopts_size = sizeof (md_longopts);
 
-static struct hash_control *mmix_opcode_hash;
+static htab_t mmix_opcode_hash;
 
 /* We use these when implementing the PREFIX pseudo.  */
 char *mmix_current_prefix;
@@ -395,9 +395,9 @@ const char line_comment_chars[] = "*#";
 
 const char line_separator_chars[] = ";";
 
-const char mmix_exp_chars[] = "eE";
+const char EXP_CHARS[] = "eE";
 
-const char mmix_flt_chars[] = "rf";
+const char FLT_CHARS[] = "rf";
 
 
 /* Fill in the offset-related part of GETA or Bcc.  */
@@ -587,8 +587,10 @@ get_putget_operands (struct mmix_opcode *insn, char *operands,
 	    p++;
 	  sregp = p;
 	  input_line_pointer = sregp;
-	  c = get_symbol_end ();
+	  c = get_symbol_name (&sregp);
 	  sregend = input_line_pointer;
+	  if (c == '"')
+	    ++ input_line_pointer;
 	}
     }
   else
@@ -596,10 +598,10 @@ get_putget_operands (struct mmix_opcode *insn, char *operands,
       expp_sreg = &exp[0];
       expp_reg = &exp[1];
 
-      sregp = p;
-      c = get_symbol_end ();
-      sregend = p = input_line_pointer;
-      *p = c;
+      c = get_symbol_name (&sregp);
+      sregend = input_line_pointer;
+      restore_line_pointer (c);
+      p = input_line_pointer;
 
       /* Skip whitespace */
       while (*p == ' ' || *p == '\t')
@@ -638,7 +640,7 @@ get_putget_operands (struct mmix_opcode *insn, char *operands,
 /* Handle MMIX-specific option.  */
 
 int
-md_parse_option (int c, char *arg ATTRIBUTE_UNUSED)
+md_parse_option (int c, const char *arg ATTRIBUTE_UNUSED)
 {
   switch (c)
     {
@@ -767,24 +769,24 @@ mmix_md_begin (void)
      only way to make ':' part of a name, and a name beginner.  */
   lex_type[':'] = (LEX_NAME | LEX_BEGIN_NAME);
 
-  mmix_opcode_hash = hash_new ();
+  mmix_opcode_hash = str_htab_create ();
 
   real_reg_section
     = bfd_make_section_old_way (stdoutput, MMIX_REG_SECTION_NAME);
 
   for (opcode = mmix_opcodes; opcode->name; opcode++)
-    hash_insert (mmix_opcode_hash, opcode->name, (char *) opcode);
+    str_hash_insert (mmix_opcode_hash, opcode->name, opcode, 0);
 
   /* We always insert the ordinary registers 0..255 as registers.  */
   for (i = 0; i < 256; i++)
     {
-      char buf[5];
+      char buf[16];
 
       /* Alternatively, we could diddle with '$' and the following number,
 	 but keeping the registers as symbols helps keep parsing simple.  */
       sprintf (buf, "$%d", i);
-      symbol_table_insert (symbol_new (buf, reg_section, i,
-				       &zero_address_frag));
+      symbol_table_insert (symbol_new (buf, reg_section,
+				       &zero_address_frag, i));
     }
 
   /* Insert mmixal built-in names if allowed.  */
@@ -793,21 +795,21 @@ mmix_md_begin (void)
       for (i = 0; mmix_spec_regs[i].name != NULL; i++)
 	symbol_table_insert (symbol_new (mmix_spec_regs[i].name,
 					 reg_section,
-					 mmix_spec_regs[i].number + 256,
-					 &zero_address_frag));
+					 &zero_address_frag,
+					 mmix_spec_regs[i].number + 256));
 
       /* FIXME: Perhaps these should be recognized as specials; as field
 	 names for those instructions.  */
-      symbol_table_insert (symbol_new ("ROUND_CURRENT", reg_section, 512,
-				       &zero_address_frag));
-      symbol_table_insert (symbol_new ("ROUND_OFF", reg_section, 512 + 1,
-				       &zero_address_frag));
-      symbol_table_insert (symbol_new ("ROUND_UP", reg_section, 512 + 2,
-				       &zero_address_frag));
-      symbol_table_insert (symbol_new ("ROUND_DOWN", reg_section, 512 + 3,
-				       &zero_address_frag));
-      symbol_table_insert (symbol_new ("ROUND_NEAR", reg_section, 512 + 4,
-				       &zero_address_frag));
+      symbol_table_insert (symbol_new ("ROUND_CURRENT", reg_section,
+				       &zero_address_frag, 512));
+      symbol_table_insert (symbol_new ("ROUND_OFF", reg_section,
+				       &zero_address_frag, 512 + 1));
+      symbol_table_insert (symbol_new ("ROUND_UP", reg_section,
+				       &zero_address_frag, 512 + 2));
+      symbol_table_insert (symbol_new ("ROUND_DOWN", reg_section,
+				       &zero_address_frag, 512 + 3));
+      symbol_table_insert (symbol_new ("ROUND_NEAR", reg_section,
+				       &zero_address_frag, 512 + 4));
     }
 }
 
@@ -841,7 +843,7 @@ md_assemble (char *str)
       *operands++ = '\0';
     }
 
-  instruction = (struct mmix_opcode *) hash_find (mmix_opcode_hash, str);
+  instruction = (struct mmix_opcode *) str_hash_find (mmix_opcode_hash, str);
   if (instruction == NULL)
     {
       as_bad (_("unknown opcode: `%s'"), str);
@@ -1330,6 +1332,7 @@ md_assemble (char *str)
       if (n_operands == 2)
 	{
 	  symbolS *sym;
+	  fixS *tmpfixP;
 
 	  /* The last operand is immediate whenever we see just two
 	     operands.  */
@@ -1378,8 +1381,13 @@ md_assemble (char *str)
 	  /* Now we know it can be a "base address plus offset".  Add
 	     proper fixup types so we can handle this later, when we've
 	     parsed everything.  */
-	  fix_new (opc_fragP, opcodep - opc_fragP->fr_literal + 2,
-		   8, sym, 0, 0, BFD_RELOC_MMIX_BASE_PLUS_OFFSET);
+	  tmpfixP
+	    = fix_new (opc_fragP, opcodep - opc_fragP->fr_literal + 2,
+		       1, sym, 0, 0, BFD_RELOC_MMIX_BASE_PLUS_OFFSET);
+	  /* This is a non-trivial fixup: the ->fx_offset will not
+	     reflect the stored value, so the generic overflow test
+	     doesn't apply. */
+	  tmpfixP->fx_no_overflow = 1;
 	  break;
 	}
 
@@ -1475,8 +1483,8 @@ md_assemble (char *str)
 		&& ((exp[1].X_op == O_register
 		     && exp[1].X_add_number < 512)
 		    || (exp[1].X_op == O_constant
-			&& exp[1].X_add_number < 0
-			&& exp[1].X_add_number > 4)
+			&& (exp[1].X_add_number < 0
+			    || exp[1].X_add_number > 4))
 		    || (exp[1].X_op != O_register
 			&& exp[1].X_op != O_constant))))
 	  {
@@ -1939,11 +1947,9 @@ s_prefix (int unused ATTRIBUTE_UNUSED)
 
   SKIP_WHITESPACE ();
 
-  p = input_line_pointer;
-
-  c = get_symbol_end ();
-
-  /* Reseting prefix?  */
+  c = get_symbol_name (&p);
+  
+  /* Resetting prefix?  */
   if (*p == ':' && p[1] == 0)
     mmix_current_prefix = NULL;
   else
@@ -1961,7 +1967,7 @@ s_prefix (int unused ATTRIBUTE_UNUSED)
       mmix_current_prefix = p;
     }
 
-  *input_line_pointer = c;
+  (void) restore_line_pointer (c);
 
   mmix_handle_rest_of_empty_line ();
 }
@@ -2057,13 +2063,15 @@ s_greg (int unused ATTRIBUTE_UNUSED)
 {
   char *p;
   char c;
-  p = input_line_pointer;
 
   /* This will skip over what can be a symbol and zero out the next
      character, which we assume is a ',' or other meaningful delimiter.
      What comes after that is the initializer expression for the
      register.  */
-  c = get_symbol_end ();
+  c = get_symbol_name (&p);
+
+  if (c == '"')
+    c = * ++ input_line_pointer;
 
   if (! is_end_of_line[(unsigned char) c])
     input_line_pointer++;
@@ -2128,9 +2136,8 @@ s_bspec (int unused ATTRIBUTE_UNUSED)
       if (sec == NULL)
 	as_fatal (_("can't create section %s"), newsecname);
 
-      if (!bfd_set_section_flags (stdoutput, sec,
-				  bfd_get_section_flags (stdoutput, sec)
-				  | SEC_READONLY))
+      if (!bfd_set_section_flags (sec,
+				  bfd_section_flags (sec) | SEC_READONLY))
 	as_fatal (_("can't set section flags for section %s"), newsecname);
     }
 
@@ -2139,7 +2146,7 @@ s_bspec (int unused ATTRIBUTE_UNUSED)
   subseg_set (sec, 0);
 
   /* Save position for missing ESPEC.  */
-  as_where (&bspec_file, &bspec_line);
+  bspec_file = as_where (&bspec_line);
 
   doing_bspec = 1;
 }
@@ -2270,17 +2277,17 @@ md_estimate_size_before_relax (fragS *fragP, segT segment)
    emitted is stored in *sizeP .  An error message is returned, or NULL on
    OK.  */
 
-char *
+const char *
 md_atof (int type, char *litP, int *sizeP)
 {
   if (type == 'r')
     type = 'f';
-  /* FIXME: Having 'f' in mmix_flt_chars (and here) makes it
+  /* FIXME: Having 'f' in FLT_CHARS (and here) makes it
      problematic to also have a forward reference in an expression.
      The testsuite wants it, and it's customary.
      We'll deal with the real problems when they come; we share the
      problem with most other ports.  */
-  return ieee_md_atof (type, litP, sizeP, TRUE);
+  return ieee_md_atof (type, litP, sizeP, true);
 }
 
 /* Convert variable-sized frags into one or more fixups.  */
@@ -2331,11 +2338,18 @@ md_convert_frag (bfd *abfd ATTRIBUTE_UNUSED, segT sec ATTRIBUTE_UNUSED,
     case ENCODE_RELAX (STATE_PUSHJSTUB, STATE_ZERO):
       /* Setting the unknown bits to 0 seems the most appropriate.  */
       mmix_set_geta_branch_offset (opcodep, 0);
-      tmpfixP = fix_new (opc_fragP, opcodep - opc_fragP->fr_literal, 8,
+      tmpfixP = fix_new (opc_fragP, opcodep - opc_fragP->fr_literal, 4,
 			 fragP->fr_symbol, fragP->fr_offset, 1,
 			 BFD_RELOC_MMIX_PUSHJ_STUBBABLE);
       COPY_FR_WHERE_TO_FX (fragP, tmpfixP);
       var_part_size = 0;
+
+      /* This is a non-trivial fixup; we'll be calling a generated
+	 stub, whose address fits into the fixup.  The actual target,
+	 as reflected by the fixup value, is further away than fits
+	 into the fixup, so the generic overflow test doesn't
+	 apply. */
+      tmpfixP->fx_no_overflow = 1;
       break;
 
     case ENCODE_RELAX (STATE_GETA, STATE_ZERO):
@@ -2636,7 +2650,7 @@ tc_gen_reloc (asection *section ATTRIBUTE_UNUSED, fixS *fixP)
      than just helping the user around this limitation here; hopefully the
      code using the local expression is around.  Putting the LOCAL
      semantics in a relocation still seems right; a section didn't do.  */
-  if (bfd_section_size (section->owner, section) == 0)
+  if (bfd_section_size (section) == 0)
     as_bad_where
       (fixP->fx_file, fixP->fx_line,
        fixP->fx_r_type == BFD_RELOC_MMIX_LOCAL
@@ -2706,7 +2720,7 @@ tc_gen_reloc (asection *section ATTRIBUTE_UNUSED, fixS *fixP)
 	 resolve the relocation here.  */
       if (addsy != NULL
 	  && (bfd_is_und_section (addsec)
-	      || strcmp (bfd_get_section_name (addsec->owner, addsec),
+	      || strcmp (bfd_section_name (addsec),
 			 MMIX_REG_CONTENTS_SECTION_NAME) == 0))
 	{
 	  code = fixP->fx_r_type;
@@ -2733,7 +2747,7 @@ tc_gen_reloc (asection *section ATTRIBUTE_UNUSED, fixS *fixP)
 
     case BFD_RELOC_MMIX_BASE_PLUS_OFFSET:
       if (addsy != NULL
-	  && strcmp (bfd_get_section_name (addsec->owner, addsec),
+	  && strcmp (bfd_section_name (addsec),
 		     MMIX_REG_CONTENTS_SECTION_NAME) == 0)
 	{
 	  /* This changed into a register; the relocation is for the
@@ -2836,7 +2850,7 @@ tc_gen_reloc (asection *section ATTRIBUTE_UNUSED, fixS *fixP)
     case BFD_RELOC_MMIX_REG:
       if (addsy != NULL
 	  && (bfd_is_und_section (addsec)
-	      || strcmp (bfd_get_section_name (addsec->owner, addsec),
+	      || strcmp (bfd_section_name (addsec),
 			 MMIX_REG_CONTENTS_SECTION_NAME) == 0))
 	{
 	  code = fixP->fx_r_type;
@@ -2872,9 +2886,9 @@ tc_gen_reloc (asection *section ATTRIBUTE_UNUSED, fixS *fixP)
       return NULL;
     }
 
-  relP = (arelent *) xmalloc (sizeof (arelent));
+  relP = XNEW (arelent);
   gas_assert (relP != 0);
-  relP->sym_ptr_ptr = (asymbol **) xmalloc (sizeof (asymbol *));
+  relP->sym_ptr_ptr = XNEW (asymbol *);
   *relP->sym_ptr_ptr = baddsy;
   relP->address = fixP->fx_frag->fr_address + fixP->fx_where;
 
@@ -2937,18 +2951,16 @@ mmix_handle_mmixal (void)
 	 caller is about to bump the counters.  Adjust the error messages.  */
       if (is_end_of_line[(unsigned int) *s])
 	{
-	  char *name;
 	  unsigned int line;
-	  as_where (&name, &line);
+	  const char * name = as_where (&line);
 	  as_bad_where (name, line + 1,
 			_("[0-9]H labels may not appear alone on a line"));
 	  current_fb_label = -1;
 	}
       if (*s == '.')
 	{
-	  char *name;
 	  unsigned int line;
-	  as_where (&name, &line);
+	  const char * name  = as_where (&line);
 	  as_bad_where (name, line + 1,
 			_("[0-9]H labels do not mix with dot-pseudos"));
 	  current_fb_label = -1;
@@ -2973,7 +2985,7 @@ mmix_handle_mmixal (void)
   if (*s == 0 || is_end_of_line[(unsigned int) *s])
     /* We avoid handling empty lines here.  */
     return;
-      
+
   if (is_name_beginner (*s))
     label = s;
 
@@ -3007,7 +3019,7 @@ mmix_handle_mmixal (void)
 	 it the same alignment and address as the associated instruction.  */
 
       /* Make room for the label including the ending nul.  */
-      int len_0 = s - label + 1;
+      size_t len_0 = s - label + 1;
 
       /* Save this label on the MMIX symbol obstack.  Saving it on an
 	 obstack is needless for "IS"-pseudos, but it's harmless and we
@@ -3159,7 +3171,7 @@ mmix_handle_mmixal (void)
     }
   else if (s[0] == 'G'
 	   && s[1] == 'R'
-	   && strncmp (s, "GREG", 4) == 0
+	   && startswith (s, "GREG")
 	   && (ISSPACE (s[4]) || is_end_of_line[(unsigned char) s[4]]))
     {
       input_line_pointer = s + 4;
@@ -3356,7 +3368,7 @@ mmix_md_relax_frag (segT seg, fragS *fragP, long stretch)
 {
   switch (fragP->fr_subtype)
     {
-      /* Growth for this type has been handled by mmix_md_end and
+      /* Growth for this type has been handled by mmix_md_finish and
 	 correctly estimated, so there's nothing more to do here.  */
     case STATE_GREG_DEF:
       return 0;
@@ -3413,7 +3425,7 @@ mmix_md_relax_frag (segT seg, fragS *fragP, long stretch)
 	fragP->fr_subtype = ENCODE_RELAX (STATE_PUSHJSTUB, STATE_ZERO);
       }
       /* FALLTHROUGH.  */
-    
+
       /* See if this PUSHJ is redirectable to a stub.  */
     case ENCODE_RELAX (STATE_PUSHJSTUB, STATE_ZERO):
       {
@@ -3478,7 +3490,7 @@ mmix_md_relax_frag (segT seg, fragS *fragP, long stretch)
 /* Various things we punt until all input is seen.  */
 
 void
-mmix_md_end (void)
+mmix_md_finish (void)
 {
   fragS *fragP;
   symbolS *mainsym;
@@ -3508,8 +3520,8 @@ mmix_md_end (void)
       sprintf (locsymbol, ":%s%s", MMIX_LOC_SECTION_START_SYMBOL_PREFIX,
 	       ".text");
       symbolP
-	= symbol_new (locsymbol, absolute_section, lowest_text_loc,
-		      &zero_address_frag);
+	= symbol_new (locsymbol, absolute_section, &zero_address_frag,
+		      lowest_text_loc);
       S_SET_EXTERNAL (symbolP);
     }
 
@@ -3524,8 +3536,8 @@ mmix_md_end (void)
       sprintf (locsymbol, ":%s%s", MMIX_LOC_SECTION_START_SYMBOL_PREFIX,
 	       ".data");
       symbolP
-	= symbol_new (locsymbol, absolute_section, lowest_data_loc,
-		      &zero_address_frag);
+	= symbol_new (locsymbol, absolute_section, &zero_address_frag,
+		      lowest_data_loc);
       S_SET_EXTERNAL (symbolP);
     }
 
@@ -3553,7 +3565,7 @@ mmix_md_end (void)
       actual_seg = S_GET_SEGMENT (loc_assert->loc_sym);
       if (actual_seg != loc_assert->old_seg)
 	{
-	  char *fnam;
+	  const char *fnam;
 	  unsigned int line;
 	  int e_valid = expr_symbol_where (loc_assert->loc_sym, &fnam, &line);
 
@@ -3561,6 +3573,15 @@ mmix_md_end (void)
 	  as_bad_where (fnam, line,
 			_("LOC to section unknown or indeterminable "
 			  "at first pass"));
+
+	  /* Patch up the generic location data to avoid cascading
+	     error messages from later passes.  (See original in
+	     write.c:relax_segment.)  */
+	  fragP = loc_assert->frag;
+	  fragP->fr_type = rs_align;
+	  fragP->fr_subtype = 0;
+	  fragP->fr_offset = 0;
+	  fragP->fr_fix = 0;
 	}
     }
 
@@ -3721,8 +3742,7 @@ mmix_frob_file (void)
       /* This case isn't doable in general anyway, methinks.  */
       if (fixP->fx_subsy != NULL)
 	{
-	  as_bad_where (fixP->fx_file, fixP->fx_line,
-			_("GREG expression too complicated"));
+	  as_bad_subtract (fixP);
 	  continue;
 	}
 
@@ -3766,7 +3786,7 @@ mmix_frob_file (void)
 
       if (gregs == NULL)
 	{
-	  gregs = xmalloc (sizeof (*gregs));
+	  gregs = XNEW (struct mmix_symbol_gregs);
 	  gregs->n_gregs = 0;
 	  symbol_set_tc (sym, &gregs);
 	  all_greg_symbols[n_greg_symbols++] = gregs;
@@ -3785,7 +3805,7 @@ mmix_frob_file (void)
   if (real_reg_section != NULL)
     {
       /* FIXME: Pass error state gracefully.  */
-      if (bfd_get_section_flags (stdoutput, real_reg_section) & SEC_HAS_CONTENTS)
+      if (bfd_section_flags (real_reg_section) & SEC_HAS_CONTENTS)
 	as_fatal (_("register section has contents\n"));
 
       bfd_section_list_remove (stdoutput, real_reg_section);
@@ -3804,7 +3824,7 @@ int
 mmix_parse_predefined_name (char *name, expressionS *expP)
 {
   char *canon_name;
-  char *handler_charp;
+  const char *handler_charp;
   const char handler_chars[] = "DVWIOUZX";
   symbolS *symp;
 
@@ -3824,9 +3844,8 @@ mmix_parse_predefined_name (char *name, expressionS *expP)
 	 script.  */
       symp = symbol_find (name);
       if (symp == NULL)
-	symp = symbol_new (name, text_section,
-			   0x10 * (handler_charp + 1 - handler_chars),
-			   &zero_address_frag);
+	symp = symbol_new (name, text_section, &zero_address_frag,
+			   0x10 * (handler_charp + 1 - handler_chars));
     }
   else
     {
@@ -3885,8 +3904,8 @@ mmix_parse_predefined_name (char *name, expressionS *expP)
 	  {
 	    symbol_table_insert (symbol_new (predefined_abs_syms[i].name,
 					     absolute_section,
-					     predefined_abs_syms[i].val,
-					     &zero_address_frag));
+					     &zero_address_frag,
+					     predefined_abs_syms[i].val));
 
 	    /* Let gas find the symbol we just created, through its
                ordinary lookup.  */
@@ -3915,7 +3934,7 @@ mmix_md_elf_section_change_hook (void)
   if (doing_bspec)
     as_bad (_("section change from within a BSPEC/ESPEC pair is not supported"));
 
-  last_alignment = bfd_get_section_alignment (now_seg->owner, now_seg);
+  last_alignment = bfd_section_alignment (now_seg);
   want_unaligned = 0;
 }
 
@@ -4080,11 +4099,11 @@ s_loc (int ignore ATTRIBUTE_UNUSED)
       if (section == undefined_section)
 	{
 	  struct loc_assert_s *next = loc_asserts;
-	  loc_asserts
-	    = (struct loc_assert_s *) xmalloc (sizeof (*loc_asserts));
+	  loc_asserts = XNEW (struct loc_assert_s);
 	  loc_asserts->next = next;
 	  loc_asserts->old_seg = now_seg;
 	  loc_asserts->loc_sym = esym;
+	  loc_asserts->frag = frag_now;
 	}
 
       p = frag_var (rs_org, 1, 1, (relax_substateT) 0, sym, off, (char *) 0);

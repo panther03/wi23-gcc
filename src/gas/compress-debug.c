@@ -1,5 +1,5 @@
 /* compress-debug.c - compress debug sections
-   Copyright 2010 Free Software Foundation, Inc.
+   Copyright (C) 2010-2023 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -20,21 +20,24 @@
 
 #include "config.h"
 #include <stdio.h>
+#include <zlib.h>
+#if HAVE_ZSTD
+#include <zstd.h>
+#endif
 #include "ansidecl.h"
 #include "compress-debug.h"
 
-#ifdef HAVE_ZLIB_H
-#include <zlib.h>
-#endif
-
 /* Initialize the compression engine.  */
 
-struct z_stream_s *
-compress_init (void)
+void *
+compress_init (bool use_zstd)
 {
-#ifndef HAVE_ZLIB_H
-  return NULL;
-#else
+  if (use_zstd) {
+#if HAVE_ZSTD
+    return ZSTD_createCCtx ();
+#endif
+  }
+
   static struct z_stream_s strm;
 
   strm.zalloc = NULL;
@@ -42,42 +45,49 @@ compress_init (void)
   strm.opaque = NULL;
   deflateInit (&strm, Z_DEFAULT_COMPRESSION);
   return &strm;
-#endif /* HAVE_ZLIB_H */
 }
 
 /* Stream the contents of a frag to the compression engine.  Output
    from the engine goes into the current frag on the obstack.  */
 
 int
-compress_data (struct z_stream_s *strm ATTRIBUTE_UNUSED,
-	       const char **next_in ATTRIBUTE_UNUSED,
-	       int *avail_in ATTRIBUTE_UNUSED,
-	       char **next_out ATTRIBUTE_UNUSED,
-	       int *avail_out ATTRIBUTE_UNUSED)
+compress_data (bool use_zstd, void *ctx, const char **next_in, int *avail_in,
+	       char **next_out, int *avail_out)
 {
-#ifndef HAVE_ZLIB_H
-  return -1;
-#else
-  int out_size = 0;
-  int x;
+  if (use_zstd)
+    {
+#if HAVE_ZSTD
+      ZSTD_outBuffer ob = { *next_out, *avail_out, 0 };
+      ZSTD_inBuffer ib = { *next_in, *avail_in, 0 };
+      size_t ret = ZSTD_compressStream2 (ctx, &ob, &ib, ZSTD_e_continue);
+      *next_in += ib.pos;
+      *avail_in -= ib.pos;
+      *next_out += ob.pos;
+      *avail_out -= ob.pos;
+      if (ZSTD_isError (ret))
+	return -1;
+      return (int)ob.pos;
+#endif
+    }
+
+  struct z_stream_s *strm = ctx;
 
   strm->next_in = (Bytef *) (*next_in);
   strm->avail_in = *avail_in;
   strm->next_out = (Bytef *) (*next_out);
   strm->avail_out = *avail_out;
 
-  x = deflate (strm, Z_NO_FLUSH);
+  int x = deflate (strm, Z_NO_FLUSH);
   if (x != Z_OK)
     return -1;
 
-  out_size = *avail_out - strm->avail_out;
+  int out_size = *avail_out - strm->avail_out;
   *next_in = (char *) (strm->next_in);
   *avail_in = strm->avail_in;
   *next_out = (char *) (strm->next_out);
   *avail_out = strm->avail_out;
 
   return out_size;
-#endif /* HAVE_ZLIB_H */
 }
 
 /* Finish the compression and consume the remaining compressed output.
@@ -85,15 +95,28 @@ compress_data (struct z_stream_s *strm ATTRIBUTE_UNUSED,
    needed.  */
 
 int
-compress_finish (struct z_stream_s *strm ATTRIBUTE_UNUSED,
-		 char **next_out ATTRIBUTE_UNUSED,
-		 int *avail_out ATTRIBUTE_UNUSED,
-		 int *out_size ATTRIBUTE_UNUSED)
+compress_finish (bool use_zstd, void *ctx, char **next_out,
+		 int *avail_out, int *out_size)
 {
-#ifndef HAVE_ZLIB_H
-  return -1;
-#else
+  if (use_zstd)
+    {
+#if HAVE_ZSTD
+      ZSTD_outBuffer ob = { *next_out, *avail_out, 0 };
+      ZSTD_inBuffer ib = { 0 };
+      size_t ret = ZSTD_compressStream2 (ctx, &ob, &ib, ZSTD_e_end);
+      *out_size = ob.pos;
+      *next_out += ob.pos;
+      *avail_out -= ob.pos;
+      if (ZSTD_isError (ret))
+	return -1;
+      if (ret == 0)
+	ZSTD_freeCCtx (ctx);
+      return ret ? 1 : 0;
+#endif
+    }
+
   int x;
+  struct z_stream_s *strm = ctx;
 
   strm->avail_in = 0;
   strm->next_out = (Bytef *) (*next_out);
@@ -113,5 +136,4 @@ compress_finish (struct z_stream_s *strm ATTRIBUTE_UNUSED,
   if (strm->avail_out != 0)
     return -1;
   return 1;
-#endif /* HAVE_ZLIB_H */
 }

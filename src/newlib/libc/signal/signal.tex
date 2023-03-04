@@ -10,7 +10,7 @@ error message and aborting your program, or ignoring the signal.
 All systems support at least the following signals:
 @table @code
 @item SIGABRT
-Abnormal termination of a program; raised by the <<abort>> function.
+Abnormal termination of a program; raised by the @code{abort} function.
 
 @item SIGFPE
 A domain error in arithmetic, such as overflow, or division by zero.
@@ -61,6 +61,7 @@ reliable from signal handlers.)
 @menu
 * psignal:: Print a signal message to standard error
 * raise::   Send a signal
+* sig2str:: Translate between signal number and name
 * signal::  Specify handler subroutine for a signal
 @end menu
 
@@ -69,6 +70,9 @@ reliable from signal handlers.)
 
 @page
 @include signal/raise.def
+
+@page
+@include signal/sig2str.def
 
 @page
 @include signal/signal.def

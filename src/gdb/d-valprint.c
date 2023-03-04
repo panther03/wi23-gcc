@@ -1,6 +1,6 @@
 /* Support for printing D values for GDB, the GNU debugger.
 
-   Copyright (C) 2008-2013 Free Software Foundation, Inc.
+   Copyright (C) 2008-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -28,18 +28,18 @@
    TYPE is a dynamic array, non-zero otherwise.  */
 
 static int
-dynamic_array_type (struct type *type, const gdb_byte *valaddr,
-		    int embedded_offset, CORE_ADDR address,
+dynamic_array_type (struct type *type,
+		    LONGEST embedded_offset, CORE_ADDR address,
 		    struct ui_file *stream, int recurse,
-		    const struct value *val,
+		    struct value *val,
 		    const struct value_print_options *options)
 {
-  if (TYPE_NFIELDS (type) == 2
-      && TYPE_CODE (TYPE_FIELD_TYPE (type, 0)) == TYPE_CODE_INT
-      && strcmp (TYPE_FIELD_NAME (type, 0), "length") == 0
-      && strcmp (TYPE_FIELD_NAME (type, 1), "ptr") == 0
-      && value_bits_valid (val, TARGET_CHAR_BIT * embedded_offset,
-			   TARGET_CHAR_BIT * TYPE_LENGTH (type)))
+  if (type->num_fields () == 2
+      && type->field (0).type ()->code () == TYPE_CODE_INT
+      && strcmp (type->field (0).name (), "length") == 0
+      && strcmp (type->field (1).name (), "ptr") == 0
+      && !val->bits_any_optimized_out (TARGET_CHAR_BIT * embedded_offset,
+				       TARGET_CHAR_BIT * type->length ()))
     {
       CORE_ADDR addr;
       struct type *elttype;
@@ -47,47 +47,47 @@ dynamic_array_type (struct type *type, const gdb_byte *valaddr,
       struct type *ptr_type;
       struct value *ival;
       int length;
+      const gdb_byte *valaddr = val->contents_for_printing ().data ();
 
       length = unpack_field_as_long (type, valaddr + embedded_offset, 0);
 
-      ptr_type = TYPE_FIELD_TYPE (type, 1);
-      elttype = check_typedef (TYPE_TARGET_TYPE (ptr_type));
+      ptr_type = type->field (1).type ();
+      elttype = check_typedef (ptr_type->target_type ());
       addr = unpack_pointer (ptr_type,
-			     valaddr + TYPE_FIELD_BITPOS (type, 1) / 8
+			     valaddr + type->field (1).loc_bitpos () / 8
 			     + embedded_offset);
       true_type = check_typedef (elttype);
 
       true_type = lookup_array_range_type (true_type, 0, length - 1);
       ival = value_at (true_type, addr);
+      true_type = ival->type ();
 
-      d_val_print (true_type,
-		   value_contents_for_printing (ival),
-		   value_embedded_offset (ival), addr,
-		   stream, recurse + 1, ival, options);
+      d_value_print_inner (ival, stream, recurse + 1, options);
       return 0;
     }
   return 1;
 }
 
-/* Implements the la_val_print routine for language D.  */
+/* See d-lang.h.  */
+
 void
-d_val_print (struct type *type, const gdb_byte *valaddr, int embedded_offset,
-             CORE_ADDR address, struct ui_file *stream, int recurse,
-	     const struct value *val,
-             const struct value_print_options *options)
+d_value_print_inner (struct value *val, struct ui_file *stream, int recurse,
+		     const struct value_print_options *options)
 {
   int ret;
 
-  CHECK_TYPEDEF (type);
-  switch (TYPE_CODE (type))
+  struct type *type = check_typedef (val->type ());
+  switch (type->code ())
     {
       case TYPE_CODE_STRUCT:
-        ret = dynamic_array_type (type, valaddr, embedded_offset, address,
+	ret = dynamic_array_type (type, val->embedded_offset (),
+				  val->address (),
 				  stream, recurse, val, options);
 	if (ret == 0)
 	  break;
+	/* Fall through.  */
       default:
-	c_val_print (type, valaddr, embedded_offset, address, stream,
-		     recurse, val, options);
+	c_value_print_inner (val, stream, recurse, options);
+	break;
     }
 }

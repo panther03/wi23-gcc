@@ -31,21 +31,9 @@
 
 #include <stdio.h>
 #include <ctype.h>
-
-#ifdef HAVE_STDLIB_H
 #include <stdlib.h>
-#endif
-
 #include <setjmp.h>
-
-#ifdef HAVE_STRING_H
 #include <string.h>
-#else
-#ifdef HAVE_STRINGS_H
-#include <strings.h>
-#endif
-#endif
-
 
 #include "bfd.h"
 #include "libiberty.h"
@@ -75,8 +63,7 @@ struct _psim {
 };
 
 
-int current_target_byte_order;
-int current_host_byte_order;
+enum bfd_endian current_target_byte_order;
 int current_environment;
 int current_alignment;
 int current_floating_point;
@@ -105,20 +92,20 @@ psim_tree(void)
 }
 
 STATIC_INLINE_PSIM\
-(char *)
-find_arg(char *err_msg,
+(const char *)
+find_arg(const char *err_msg,
 	 int *ptr_to_argp,
-	 char **argv)
+	 char * const *argv)
 {
   *ptr_to_argp += 1;
   if (argv[*ptr_to_argp] == NULL)
-    error(err_msg);
+    error("%s", err_msg);
   return argv[*ptr_to_argp];
 }
 
 INLINE_PSIM\
 (void)
-psim_usage(int verbose, int help)
+psim_usage (int verbose, int help, SIM_OPEN_KIND kind)
 {
   printf_filtered("Usage:\n");
   printf_filtered("\n");
@@ -217,15 +204,18 @@ psim_usage(int verbose, int help)
     print_options();
   }
 
-  if (REPORT_BUGS_TO[0])
-    printf ("Report bugs to %s\n", REPORT_BUGS_TO);
-  exit (help ? 0 : 1);
+  if (kind == SIM_OPEN_STANDALONE)
+    {
+      if (REPORT_BUGS_TO[0])
+	printf ("Report bugs to %s\n", REPORT_BUGS_TO);
+      exit (help ? 0 : 1);
+    }
 }
 
 /* Test "string" for containing a string of digits that form a number
 between "min" and "max".  The return value is the number or "err". */
 static
-int is_num( char *string, int min, int max, int err)
+int is_num(const char *string, int min, int max, int err)
 {
   int result = 0;
 
@@ -245,9 +235,10 @@ int is_num( char *string, int min, int max, int err)
 }
 
 INLINE_PSIM\
-(char **)
+(char * const *)
 psim_options(device *root,
-	     char **argv)
+	     char * const *argv,
+	     SIM_OPEN_KIND kind)
 {
   device *current = root;
   int argp;
@@ -255,15 +246,14 @@ psim_options(device *root,
     return NULL;
   argp = 0;
   while (argv[argp] != NULL && argv[argp][0] == '-') {
-    char *p = argv[argp] + 1;
-    char *param;
+    const char *p = argv[argp] + 1;
+    const char *param;
     while (*p != '\0') {
       switch (*p) {
       default:
 	printf_filtered ("Invalid Option: %s\n", argv[argp]);
-	psim_usage(0, 0);
-	error ("");
-	break;
+	psim_usage (0, 0, kind);
+	return NULL;
       case 'c':
 	param = find_arg("Missing <count> option for -c (max-iterations)\n", &argp, argv);
 	tree_parse(root, "/openprom/options/max-iterations %s", param);
@@ -282,7 +272,8 @@ psim_options(device *root,
 	else
 	  {
 	    printf_filtered ("Invalid <endian> option for -E (target-endian)\n");
-	    psim_usage (0, 0);
+	    psim_usage (0, 0, kind);
+	    return NULL;
 	  }
 	break;
       case 'f':
@@ -291,11 +282,11 @@ psim_options(device *root,
 	break;
       case 'h':
       case '?':
-	psim_usage(1, 1);
-	break;
+	psim_usage (1, 1, kind);
+	return NULL;
       case 'H':
-	psim_usage(2, 1);
-	break;
+	psim_usage (2, 1, kind);
+	return NULL;
       case 'i':
 	if (isdigit(p[1])) {
 	  tree_parse(root, "/openprom/trace/print-info %c", p[1]);
@@ -356,7 +347,10 @@ psim_options(device *root,
 	  printf_filtered("Warning - architecture parameter ignored\n");
         }
 	else if (strcmp (argv[argp], "--help") == 0)
-	  psim_usage (0, 1);
+	  {
+	    psim_usage (0, 1, kind);
+	    return NULL;
+	  }
 	else if (strncmp (argv[argp], "--sysroot=",
 			  sizeof ("--sysroot=") - 1) == 0)
 	  /* Ignore this option.  */
@@ -365,13 +359,21 @@ psim_options(device *root,
 	  {
 	    extern const char version[];
 	    printf ("GNU simulator %s%s\n", PKGVERSION, version);
-	    exit (0);
+	    printf ("Copyright (C) 2023 Free Software Foundation, Inc.\n");
+	    printf ( "\
+License GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>\
+\nThis is free software: you are free to change and redistribute it.\n\
+There is NO WARRANTY, to the extent permitted by law.\n");
+	    if (kind == SIM_OPEN_STANDALONE)
+	      exit (0);
+	    else
+	      return NULL;
 	  }
 	else
 	  {
 	    printf_filtered ("Invalid option: %s\n", argv[argp]);
-	    psim_usage (0, 0);
-	    error ("");
+	    psim_usage (0, 0, kind);
+	    return NULL;
 	  }
 	break;
       }
@@ -397,7 +399,7 @@ psim_options(device *root,
 INLINE_PSIM\
 (void)
 psim_command(device *root,
-	     char **argv)
+	     char * const *argv)
 {
   int argp = 0;
   if (argv[argp] == NULL) {
@@ -411,8 +413,8 @@ psim_command(device *root,
       trace_option(opt, 1);
   }
   else if (strcmp(*argv, "change-media") == 0) {
-    char *device = find_arg("Missing device name", &argp, argv);
-    char *media = argv[++argp];
+    const char *device = find_arg("Missing device name", &argp, argv);
+    const char *media = argv[++argp];
     device_ioctl(tree_find_device(root, device), NULL, 0,
 		 device_ioctl_change_media, media);
   }
@@ -453,18 +455,10 @@ psim_create(const char *file_name,
   /* fill in the missing TARGET BYTE ORDER information */
   current_target_byte_order
     = (tree_find_boolean_property(root, "/options/little-endian?")
-       ? LITTLE_ENDIAN
-       : BIG_ENDIAN);
+       ? BFD_ENDIAN_LITTLE
+       : BFD_ENDIAN_BIG);
   if (CURRENT_TARGET_BYTE_ORDER != current_target_byte_order)
     error("target and configured byte order conflict\n");
-
-  /* fill in the missing HOST BYTE ORDER information */
-  current_host_byte_order = (current_host_byte_order = 1,
-			     (*(char*)(&current_host_byte_order)
-			      ? LITTLE_ENDIAN
-			      : BIG_ENDIAN));
-  if (CURRENT_HOST_BYTE_ORDER != current_host_byte_order)
-    error("host and configured byte order conflict\n");
 
   /* fill in the missing OEA/VEA information */
   env = tree_find_string_property(root, "/openprom/options/env");
@@ -546,7 +540,7 @@ psim_create(const char *file_name,
   if (ppc_trace[trace_print_device_tree] || ppc_trace[trace_dump_device_tree])
     tree_print(root);
   if (ppc_trace[trace_dump_device_tree])
-    error("");
+    error("%s", "");
 
   return system;
 }
@@ -740,8 +734,8 @@ psim_init(psim *system)
 INLINE_PSIM\
 (void)
 psim_stack(psim *system,
-	   char **argv,
-	   char **envp)
+	   char * const *argv,
+	   char * const *envp)
 {
   /* pass the stack device the argv/envp and let it work out what to
      do with it */
@@ -884,7 +878,7 @@ psim_read_register(psim *system,
     break;
 
   case reg_evr:
-    *(unsigned64*)cooked_buf = EVR(description.index);
+    *(uint64_t*)cooked_buf = EVR(description.index);
     break;
 
   case reg_acc:
@@ -893,9 +887,8 @@ psim_read_register(psim *system,
 #endif
 
   default:
-    printf_filtered("psim_read_register(processor=0x%lx,buf=0x%lx,reg=%s) %s\n",
-		    (unsigned long)processor, (unsigned long)buf, reg,
-		    "read of this register unimplemented");
+    printf_filtered("psim_read_register(processor=%p,buf=%p,reg=%s) %s\n",
+		    processor, buf, reg, "read of this register unimplemented");
     break;
 
   }
@@ -919,7 +912,7 @@ psim_read_register(psim *system,
       break;
 #ifdef WITH_ALTIVEC
     case 16:
-      if (CURRENT_HOST_BYTE_ORDER != CURRENT_TARGET_BYTE_ORDER)
+      if (HOST_BYTE_ORDER != CURRENT_TARGET_BYTE_ORDER)
         {
 	  union { vreg v; unsigned_8 d[2]; } h, t;
           memcpy(&h.v/*dest*/, cooked_buf/*src*/, description.size);
@@ -998,7 +991,7 @@ psim_write_register(psim *system,
       break;
 #ifdef WITH_ALTIVEC
     case 16:
-      if (CURRENT_HOST_BYTE_ORDER != CURRENT_TARGET_BYTE_ORDER)
+      if (HOST_BYTE_ORDER != CURRENT_TARGET_BYTE_ORDER)
         {
 	  union { vreg v; unsigned_8 d[2]; } h, t;
           memcpy(&t.v/*dest*/, buf/*src*/, description.size);
@@ -1058,8 +1051,8 @@ psim_write_register(psim *system,
 
   case reg_evr:
     {
-      unsigned64 v;
-      v = *(unsigned64*)cooked_buf;
+      uint64_t v;
+      v = *(uint64_t*)cooked_buf;
       cpu_registers(processor)->e500.gprh[description.index] = v >> 32;
       cpu_registers(processor)->gpr[description.index] = v;
       break;
@@ -1081,8 +1074,8 @@ psim_write_register(psim *system,
 #endif
 
   default:
-    printf_filtered("psim_write_register(processor=0x%lx,cooked_buf=0x%lx,reg=%s) %s\n",
-		    (unsigned long)processor, (unsigned long)cooked_buf, reg,
+    printf_filtered("psim_write_register(processor=%p,cooked_buf=%p,reg=%s) %s\n",
+		    processor, cooked_buf, reg,
 		    "read of this register unimplemented");
     break;
 
@@ -1198,7 +1191,7 @@ psim_merge_device_file(device *root,
       /* append the next line */
       if (!fgets(device_path + curlen, sizeof(device_path) - curlen, description)) {
 	fclose(description);
-	error("%s:%s: unexpected eof in line continuation - %s",
+	error("%s:%d: unexpected eof in line continuation - %s",
 	      file_name, line_nr, device_path);
       }
       if (strchr(device_path, '\n') == NULL) {

@@ -1,6 +1,6 @@
 /* Target-dependent code for GNU/Linux Super-H.
 
-   Copyright (C) 2005-2013 Free Software Foundation, Inc.
+   Copyright (C) 2005-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -29,6 +29,7 @@
 #include "glibc-tdep.h"
 #include "sh-tdep.h"
 #include "linux-tdep.h"
+#include "gdbarch.h"
 
 #define REGSx16(base) \
   {(base),      0}, \
@@ -76,7 +77,7 @@ static const struct sh_corefile_regmap fpregs_table[] =
 /* SH signal handler frame support.  */
 
 static void
-sh_linux_sigtramp_cache (struct frame_info *this_frame,
+sh_linux_sigtramp_cache (frame_info_ptr this_frame,
 			 struct trad_frame_cache *this_cache,
 			 CORE_ADDR func, int regs_offset)
 {
@@ -113,7 +114,7 @@ sh_linux_sigtramp_cache (struct frame_info *this_frame,
 
 static void
 sh_linux_sigreturn_init (const struct tramp_frame *self,
-			 struct frame_info *this_frame,
+			 frame_info_ptr this_frame,
 			 struct trad_frame_cache *this_cache,
 			 CORE_ADDR func)
 {
@@ -124,7 +125,7 @@ sh_linux_sigreturn_init (const struct tramp_frame *self,
 
 static void
 sh_linux_rt_sigreturn_init (const struct tramp_frame *self,
-			    struct frame_info *this_frame,
+			    frame_info_ptr this_frame,
 			    struct trad_frame_cache *this_cache,
 			    CORE_ADDR func)
 {
@@ -183,36 +184,33 @@ static struct tramp_frame sh_linux_rt_sigreturn_tramp_frame = {
 static void
 sh_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
 {
-  linux_init_abi (info, gdbarch);
+  linux_init_abi (info, gdbarch, 0);
 
   /* GNU/Linux uses SVR4-style shared libraries.  */
   set_gdbarch_skip_trampoline_code (gdbarch, find_solib_trampoline_target);
   set_solib_svr4_fetch_link_map_offsets
-    (gdbarch, svr4_ilp32_fetch_link_map_offsets);
+    (gdbarch, linux_ilp32_fetch_link_map_offsets);
   set_gdbarch_skip_solib_resolver (gdbarch, glibc_skip_solib_resolver);
 
   set_gdbarch_fetch_tls_load_module_address (gdbarch,
-                                             svr4_fetch_objfile_link_map);
+					     svr4_fetch_objfile_link_map);
 
-  /* Core files and signal handler frame unwinding are supported for
-     32-bit SH only, at present.  */
-  if (info.bfd_arch_info->mach != bfd_mach_sh5)
-    {
-      struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  sh_gdbarch_tdep *tdep = gdbarch_tdep<sh_gdbarch_tdep> (gdbarch);
 
-      tdep->core_gregmap = (struct sh_corefile_regmap *)gregs_table;
-      tdep->core_fpregmap = (struct sh_corefile_regmap *)fpregs_table;
+  /* Remember regset characteristics.  The sizes should match
+     elf_gregset_t and elf_fpregset_t from Linux.  */
+  tdep->core_gregmap = (struct sh_corefile_regmap *) gregs_table;
+  tdep->sizeof_gregset = 92;
+  tdep->core_fpregmap = (struct sh_corefile_regmap *) fpregs_table;
+  tdep->sizeof_fpregset = 136;
 
-      tramp_frame_prepend_unwinder (gdbarch, &sh_linux_sigreturn_tramp_frame);
-      tramp_frame_prepend_unwinder (gdbarch, &sh_linux_rt_sigreturn_tramp_frame);
-    }
+  tramp_frame_prepend_unwinder (gdbarch, &sh_linux_sigreturn_tramp_frame);
+  tramp_frame_prepend_unwinder (gdbarch, &sh_linux_rt_sigreturn_tramp_frame);
 }
 
-/* Provide a prototype to silence -Wmissing-prototypes.  */
-extern void _initialize_sh_linux_tdep (void);
-
+void _initialize_sh_linux_tdep ();
 void
-_initialize_sh_linux_tdep (void)
+_initialize_sh_linux_tdep ()
 {
   gdbarch_register_osabi (bfd_arch_sh, 0, GDB_OSABI_LINUX, sh_linux_init_abi);
 }

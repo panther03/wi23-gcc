@@ -1,6 +1,6 @@
 /* Main interface for GDB, the GNU debugger.
 
-   Copyright (C) 2002-2013 Free Software Foundation, Inc.
+   Copyright (C) 2002-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -24,7 +24,6 @@ struct captured_main_args
 {
   int argc;
   char **argv;
-  int use_windows;
   const char *interpreter_p;
 };
 
@@ -35,6 +34,9 @@ extern int return_child_result;
 extern int return_child_result_value;
 extern int batch_silent;
 extern int batch_flag;
+
+/* * The name of the interpreter if specified on the command line.  */
+extern std::string interpreter_p;
 
 /* From mingw-hdep.c, used by main.c.  */
 
@@ -47,5 +49,7 @@ extern char *windows_get_absolute_argv0 (const char *argv0);
    platform.  Could return NULL if called before gdb has had a chance to
    parse the argv array.  */
 extern const char *get_gdb_program_name (void);
+
+extern void set_gdb_data_directory (const char *new_data_dir);
 
 #endif

@@ -1,5 +1,9 @@
+/* This must come before any other includes.  */
+#include "defs.h"
+
 #include "sim-main.h"
-#include "v850_sim.h"
+#include "sim-signal.h"
+#include "v850-sim.h"
 #include "simops.h"
 
 #include <sys/types.h>
@@ -7,24 +11,10 @@
 #ifdef HAVE_UTIME_H
 #include <utime.h>
 #endif
-
-#ifdef HAVE_TIME_H
 #include <time.h>
-#endif
-
-#ifdef HAVE_UNISTD_H
 #include <unistd.h>
-#endif
-
-#ifdef HAVE_STRING_H
+#include <stdlib.h>
 #include <string.h>
-#else
-#ifdef HAVE_STRINGS_H
-#include <strings.h>
-#endif
-#endif
-
-#include "targ-vals.h"
 
 #include "libiberty.h"
 
@@ -34,6 +24,8 @@
 #include <sys/times.h>
 #include <sys/time.h>
 #endif
+
+#include "target-newlib-syscall.h"
 
 /* This is an array of the bit positions of registers r20 .. r31 in
    that order in a prepare/dispose instruction.  */
@@ -45,7 +37,7 @@ int type2_regs[16] = { 3, 2, 1, 0, 27, 26, 25, 24, 31, 30, 29, 28, 23, 22, 20, 2
    that order in a push/pop instruction.  */
 int type3_regs[15] = { 2, 1, 0, 27, 26, 25, 24, 31, 30, 29, 28, 23, 22, 20, 21};
 
-#ifdef DEBUG
+#if WITH_TRACE_ANY_P
 #ifndef SIZE_INSTRUCTION
 #define SIZE_INSTRUCTION 18
 #endif
@@ -54,21 +46,20 @@ int type3_regs[15] = { 2, 1, 0, 27, 26, 25, 24, 31, 30, 29, 28, 23, 22, 20, 21};
 #define SIZE_VALUES 11
 #endif
 
+/* TODO: This file largely assumes a single CPU.  */
+#define CPU STATE_CPU (sd, 0)
 
-unsigned32 trace_values[3];
-int trace_num_values;
-unsigned32 trace_pc;
-const char *trace_name;
-int trace_module;
+
+uint32_t   trace_values[3];
+int          trace_num_values;
+uint32_t   trace_pc;
+const char * trace_name;
+int          trace_module;
 
 
 void
-trace_input (name, type, size)
-     char *name;
-     enum op_types type;
-     int size;
+trace_input (char *name, enum op_types type, int size)
 {
-
   if (!TRACE_ALU_P (STATE_CPU (simulator, 0)))
     return;
 
@@ -200,7 +191,7 @@ trace_input (name, type, size)
 }
 
 void
-trace_result (int has_result, unsigned32 result)
+trace_result (int has_result, uint32_t result)
 {
   char buf[1000];
   char *chp;
@@ -226,14 +217,13 @@ trace_result (int has_result, unsigned32 result)
 
   /* append any result to the end of the buffer */
   if (has_result)
-    sprintf (chp, " :: 0x%.8lx", (unsigned long)result);
+    sprintf (chp, " :: 0x%.8lx", (unsigned long) result);
   
-  trace_generic (simulator, STATE_CPU (simulator, 0), trace_module, buf);
+  trace_generic (simulator, STATE_CPU (simulator, 0), trace_module, "%s", buf);
 }
 
 void
-trace_output (result)
-     enum op_types result;
+trace_output (enum op_types result)
 {
   if (!TRACE_ALU_P (STATE_CPU (simulator, 0)))
     return;
@@ -350,10 +340,10 @@ Multiply64 (int sign, unsigned long op0)
 	  
       sign = (op0 ^ op1) & 0x80000000;
 	  
-      if (((signed long) op0) < 0)
+      if (op0 & 0x80000000)
 	op0 = - op0;
 	  
-      if (((signed long) op1) < 0)
+      if (op1 & 0x80000000)
 	op1 = - op1;
     }
       
@@ -396,35 +386,37 @@ Multiply64 (int sign, unsigned long op0)
 }
 
 
-/* Read a null terminated string from memory, return in a buffer */
+/* Read a null terminated string from memory, return in a buffer.  */
+
 static char *
-fetch_str (sd, addr)
-     SIM_DESC sd;
-     address_word addr;
+fetch_str (SIM_DESC sd, address_word addr)
 {
   char *buf;
   int nr = 0;
+
   while (sim_core_read_1 (STATE_CPU (sd, 0),
 			  PC, read_map, addr + nr) != 0)
     nr++;
+
   buf = NZALLOC (char, nr + 1);
   sim_read (simulator, addr, buf, nr);
+
   return buf;
 }
 
 /* Read a null terminated argument vector from memory, return in a
-   buffer */
+   buffer.  */
+
 static char **
-fetch_argv (sd, addr)
-     SIM_DESC sd;
-     address_word addr;
+fetch_argv (SIM_DESC sd, address_word addr)
 {
   int max_nr = 64;
   int nr = 0;
   char **buf = xmalloc (max_nr * sizeof (char*));
+
   while (1)
     {
-      unsigned32 a = sim_core_read_4 (STATE_CPU (sd, 0),
+      uint32_t a = sim_core_read_4 (STATE_CPU (sd, 0),
 				      PC, read_map, addr + nr * 4);
       if (a == 0) break;
       buf[nr] = fetch_str (sd, a);
@@ -442,7 +434,7 @@ fetch_argv (sd, addr)
 
 /* sst.b */
 int
-OP_380 ()
+OP_380 (void)
 {
   trace_input ("sst.b", OP_STORE16, 1);
 
@@ -455,7 +447,7 @@ OP_380 ()
 
 /* sst.h */
 int
-OP_480 ()
+OP_480 (void)
 {
   trace_input ("sst.h", OP_STORE16, 2);
 
@@ -468,7 +460,7 @@ OP_480 ()
 
 /* sst.w */
 int
-OP_501 ()
+OP_501 (void)
 {
   trace_input ("sst.w", OP_STORE16, 4);
 
@@ -481,7 +473,7 @@ OP_501 ()
 
 /* ld.b */
 int
-OP_700 ()
+OP_700 (void)
 {
   int adr;
 
@@ -498,7 +490,7 @@ OP_700 ()
 
 /* ld.h */
 int
-OP_720 ()
+OP_720 (void)
 {
   int adr;
 
@@ -516,7 +508,7 @@ OP_720 ()
 
 /* ld.w */
 int
-OP_10720 ()
+OP_10720 (void)
 {
   int adr;
 
@@ -534,7 +526,7 @@ OP_10720 ()
 
 /* st.b */
 int
-OP_740 ()
+OP_740 (void)
 {
   trace_input ("st.b", OP_STORE32, 1);
 
@@ -547,7 +539,7 @@ OP_740 ()
 
 /* st.h */
 int
-OP_760 ()
+OP_760 (void)
 {
   int adr;
   
@@ -565,7 +557,7 @@ OP_760 ()
 
 /* st.w */
 int
-OP_10760 ()
+OP_10760 (void)
 {
   int adr;
   
@@ -583,7 +575,7 @@ OP_10760 ()
 
 /* add reg, reg */
 int
-OP_1C0 ()
+OP_1C0 (void)
 {
   unsigned int op0, op1, result, z, s, cy, ov;
 
@@ -615,7 +607,7 @@ OP_1C0 ()
 
 /* add sign_extend(imm5), reg */
 int
-OP_240 ()
+OP_240 (void)
 {
   unsigned int op0, op1, result, z, s, cy, ov;
   int temp;
@@ -647,7 +639,7 @@ OP_240 ()
 
 /* addi sign_extend(imm16), reg, reg */
 int
-OP_600 ()
+OP_600 (void)
 {
   unsigned int op0, op1, result, z, s, cy, ov;
 
@@ -678,7 +670,7 @@ OP_600 ()
 
 /* sub reg1, reg2 */
 int
-OP_1A0 ()
+OP_1A0 (void)
 {
   unsigned int op0, op1, result, z, s, cy, ov;
 
@@ -707,7 +699,7 @@ OP_1A0 ()
 
 /* subr reg1, reg2 */
 int
-OP_180 ()
+OP_180 (void)
 {
   unsigned int op0, op1, result, z, s, cy, ov;
 
@@ -736,7 +728,7 @@ OP_180 ()
 
 /* sxh reg1 */
 int
-OP_E0 ()
+OP_E0 (void)
 {
   trace_input ("mulh", OP_REG_REG, 0);
       
@@ -749,7 +741,7 @@ OP_E0 ()
 
 /* mulh sign_extend(imm5), reg2 */
 int
-OP_2E0 ()
+OP_2E0 (void)
 {
   trace_input ("mulh", OP_IMM_REG, 0);
   
@@ -762,7 +754,7 @@ OP_2E0 ()
 
 /* mulhi imm16, reg1, reg2 */
 int
-OP_6E0 ()
+OP_6E0 (void)
 {
   trace_input ("mulhi", OP_IMM16_REG_REG, 0);
   
@@ -775,7 +767,7 @@ OP_6E0 ()
 
 /* cmp reg, reg */
 int
-OP_1E0 ()
+OP_1E0 (void)
 {
   unsigned int op0, op1, result, z, s, cy, ov;
 
@@ -803,7 +795,7 @@ OP_1E0 ()
 
 /* cmp sign_extend(imm5), reg */
 int
-OP_260 ()
+OP_260 (void)
 {
   unsigned int op0, op1, result, z, s, cy, ov;
   int temp;
@@ -833,7 +825,7 @@ OP_260 ()
 
 /* setf cccc,reg2 */
 int
-OP_7E0 ()
+OP_7E0 (void)
 {
   trace_input ("setf", OP_EX1, 0);
 
@@ -846,7 +838,7 @@ OP_7E0 ()
 
 /* satadd reg,reg */
 int
-OP_C0 ()
+OP_C0 (void)
 {
   unsigned int op0, op1, result, z, s, cy, ov, sat;
   
@@ -894,7 +886,7 @@ OP_C0 ()
 
 /* satadd sign_extend(imm5), reg */
 int
-OP_220 ()
+OP_220 (void)
 {
   unsigned int op0, op1, result, z, s, cy, ov, sat;
 
@@ -945,7 +937,7 @@ OP_220 ()
 
 /* satsub reg1, reg2 */
 int
-OP_A0 ()
+OP_A0 (void)
 {
   unsigned int op0, op1, result, z, s, cy, ov, sat;
   
@@ -993,7 +985,7 @@ OP_A0 ()
 
 /* satsubi sign_extend(imm16), reg */
 int
-OP_660 ()
+OP_660 (void)
 {
   unsigned int op0, op1, result, z, s, cy, ov, sat;
   int temp;
@@ -1044,7 +1036,7 @@ OP_660 ()
 
 /* satsubr reg,reg */
 int
-OP_80 ()
+OP_80 (void)
 {
   unsigned int op0, op1, result, z, s, cy, ov, sat;
   
@@ -1093,7 +1085,7 @@ OP_80 ()
 
 /* tst reg,reg */
 int
-OP_160 ()
+OP_160 (void)
 {
   unsigned int op0, op1, result, z, s;
 
@@ -1118,7 +1110,7 @@ OP_160 ()
 
 /* mov sign_extend(imm5), reg */
 int
-OP_200 ()
+OP_200 (void)
 {
   int value = SEXT5 (OP[0]);
   
@@ -1133,7 +1125,7 @@ OP_200 ()
 
 /* movhi imm16, reg, reg */
 int
-OP_640 ()
+OP_640 (void)
 {
   trace_input ("movhi", OP_UIMM16_REG_REG, 16);
       
@@ -1146,7 +1138,7 @@ OP_640 ()
 
 /* sar zero_extend(imm5),reg1 */
 int
-OP_2A0 ()
+OP_2A0 (void)
 {
   unsigned int op0, op1, result, z, s, cy;
 
@@ -1172,7 +1164,7 @@ OP_2A0 ()
 
 /* sar reg1, reg2 */
 int
-OP_A007E0 ()
+OP_A007E0 (void)
 {
   unsigned int op0, op1, result, z, s, cy;
 
@@ -1199,7 +1191,7 @@ OP_A007E0 ()
 
 /* shl zero_extend(imm5),reg1 */
 int
-OP_2C0 ()
+OP_2C0 (void)
 {
   unsigned int op0, op1, result, z, s, cy;
 
@@ -1225,7 +1217,7 @@ OP_2C0 ()
 
 /* shl reg1, reg2 */
 int
-OP_C007E0 ()
+OP_C007E0 (void)
 {
   unsigned int op0, op1, result, z, s, cy;
 
@@ -1251,7 +1243,7 @@ OP_C007E0 ()
 
 /* shr zero_extend(imm5),reg1 */
 int
-OP_280 ()
+OP_280 (void)
 {
   unsigned int op0, op1, result, z, s, cy;
 
@@ -1277,7 +1269,7 @@ OP_280 ()
 
 /* shr reg1, reg2 */
 int
-OP_8007E0 ()
+OP_8007E0 (void)
 {
   unsigned int op0, op1, result, z, s, cy;
 
@@ -1303,7 +1295,7 @@ OP_8007E0 ()
 
 /* or reg, reg */
 int
-OP_100 ()
+OP_100 (void)
 {
   unsigned int op0, op1, result, z, s;
 
@@ -1329,7 +1321,7 @@ OP_100 ()
 
 /* ori zero_extend(imm16), reg, reg */
 int
-OP_680 ()
+OP_680 (void)
 {
   unsigned int op0, op1, result, z, s;
 
@@ -1353,7 +1345,7 @@ OP_680 ()
 
 /* and reg, reg */
 int
-OP_140 ()
+OP_140 (void)
 {
   unsigned int op0, op1, result, z, s;
 
@@ -1379,7 +1371,7 @@ OP_140 ()
 
 /* andi zero_extend(imm16), reg, reg */
 int
-OP_6C0 ()
+OP_6C0 (void)
 {
   unsigned int result, z;
 
@@ -1403,7 +1395,7 @@ OP_6C0 ()
 
 /* xor reg, reg */
 int
-OP_120 ()
+OP_120 (void)
 {
   unsigned int op0, op1, result, z, s;
 
@@ -1429,7 +1421,7 @@ OP_120 ()
 
 /* xori zero_extend(imm16), reg, reg */
 int
-OP_6A0 ()
+OP_6A0 (void)
 {
   unsigned int op0, op1, result, z, s;
 
@@ -1453,7 +1445,7 @@ OP_6A0 ()
 
 /* not reg1, reg2 */
 int
-OP_20 ()
+OP_20 (void)
 {
   unsigned int op0, result, z, s;
 
@@ -1477,7 +1469,7 @@ OP_20 ()
 
 /* set1 */
 int
-OP_7C0 ()
+OP_7C0 (void)
 {
   unsigned int op0, op1, op2;
   int temp;
@@ -1500,7 +1492,7 @@ OP_7C0 ()
 
 /* not1 */
 int
-OP_47C0 ()
+OP_47C0 (void)
 {
   unsigned int op0, op1, op2;
   int temp;
@@ -1523,7 +1515,7 @@ OP_47C0 ()
 
 /* clr1 */
 int
-OP_87C0 ()
+OP_87C0 (void)
 {
   unsigned int op0, op1, op2;
   int temp;
@@ -1546,7 +1538,7 @@ OP_87C0 ()
 
 /* tst1 */
 int
-OP_C7C0 ()
+OP_C7C0 (void)
 {
   unsigned int op0, op1, op2;
   int temp;
@@ -1567,7 +1559,7 @@ OP_C7C0 ()
 
 /* di */
 int
-OP_16007E0 ()
+OP_16007E0 (void)
 {
   trace_input ("di", OP_NONE, 0);
   PSW |= PSW_ID;
@@ -1578,7 +1570,7 @@ OP_16007E0 ()
 
 /* ei */
 int
-OP_16087E0 ()
+OP_16087E0 (void)
 {
   trace_input ("ei", OP_NONE, 0);
   PSW &= ~PSW_ID;
@@ -1589,7 +1581,7 @@ OP_16087E0 ()
 
 /* halt */
 int
-OP_12007E0 ()
+OP_12007E0 (void)
 {
   trace_input ("halt", OP_NONE, 0);
   /* FIXME this should put processor into a mode where NMI still handled */
@@ -1601,7 +1593,7 @@ OP_12007E0 ()
 
 /* trap */
 int
-OP_10007E0 ()
+OP_10007E0 (void)
 {
   trace_input ("trap", OP_TRAP, 0);
   trace_output (OP_TRAP);
@@ -1635,22 +1627,19 @@ OP_10007E0 ()
 	{
 
 #ifdef HAVE_FORK
-#ifdef TARGET_SYS_fork
-	case TARGET_SYS_fork:
+	case TARGET_NEWLIB_V850_SYS_fork:
 	  RETVAL = fork ();
 	  RETERR = errno;
 	  break;
 #endif
-#endif
 
 #ifdef HAVE_EXECVE
-#ifdef TARGET_SYS_execv
-	case TARGET_SYS_execve:
+	case TARGET_NEWLIB_V850_SYS_execve:
 	  {
 	    char *path = fetch_str (simulator, PARM1);
 	    char **argv = fetch_argv (simulator, PARM2);
 	    char **envp = fetch_argv (simulator, PARM3);
-	    RETVAL = execve (path, argv, envp);
+	    RETVAL = execve (path, (void *)argv, (void *)envp);
 	    free (path);
 	    freeargv (argv);
 	    freeargv (envp);
@@ -1658,26 +1647,22 @@ OP_10007E0 ()
 	    break;
 	  }
 #endif
-#endif
 
 #if HAVE_EXECV
-#ifdef TARGET_SYS_execv
-	case TARGET_SYS_execv:
+	case TARGET_NEWLIB_V850_SYS_execv:
 	  {
 	    char *path = fetch_str (simulator, PARM1);
 	    char **argv = fetch_argv (simulator, PARM2);
-	    RETVAL = execv (path, argv);
+	    RETVAL = execv (path, (void *)argv);
 	    free (path);
 	    freeargv (argv);
 	    RETERR = errno;
 	    break;
 	  }
 #endif
-#endif
 
 #if 0
-#ifdef TARGET_SYS_pipe
-	case TARGET_SYS_pipe:
+	case TARGET_NEWLIB_V850_SYS_pipe:
 	  {
 	    reg_t buf;
 	    int host_fd[2];
@@ -1685,17 +1670,15 @@ OP_10007E0 ()
 	    buf = PARM1;
 	    RETVAL = pipe (host_fd);
 	    SW (buf, host_fd[0]);
-	    buf += sizeof(uint16);
+	    buf += sizeof (uint16_t);
 	    SW (buf, host_fd[1]);
 	    RETERR = errno;
 	  }
 	  break;
 #endif
-#endif
 
 #if 0
-#ifdef TARGET_SYS_wait
-	case TARGET_SYS_wait:
+	case TARGET_NEWLIB_V850_SYS_wait:
 	  {
 	    int status;
 
@@ -1705,10 +1688,8 @@ OP_10007E0 ()
 	  }
 	  break;
 #endif
-#endif
 
-#ifdef TARGET_SYS_read
-	case TARGET_SYS_read:
+	case TARGET_NEWLIB_V850_SYS_read:
 	  {
 	    char *buf = zalloc (PARM3);
 	    RETVAL = sim_io_read (simulator, PARM1, buf, PARM3);
@@ -1718,10 +1699,8 @@ OP_10007E0 ()
 	      RETERR = sim_io_get_errno (simulator);
 	    break;
 	  }
-#endif
 
-#ifdef TARGET_SYS_write
-	case TARGET_SYS_write:
+	case TARGET_NEWLIB_V850_SYS_write:
 	  {
 	    char *buf = zalloc (PARM3);
 	    sim_read (simulator, PARM2, buf, PARM3);
@@ -1734,26 +1713,20 @@ OP_10007E0 ()
 	      RETERR = sim_io_get_errno (simulator);
 	    break;
 	  }
-#endif
 
-#ifdef TARGET_SYS_lseek
-	case TARGET_SYS_lseek:
+	case TARGET_NEWLIB_V850_SYS_lseek:
 	  RETVAL = sim_io_lseek (simulator, PARM1, PARM2, PARM3);
 	  if ((int) RETVAL < 0)
 	    RETERR = sim_io_get_errno (simulator);
 	  break;
-#endif
 
-#ifdef TARGET_SYS_close
-	case TARGET_SYS_close:
+	case TARGET_NEWLIB_V850_SYS_close:
 	  RETVAL = sim_io_close (simulator, PARM1);
 	  if ((int) RETVAL < 0)
 	    RETERR = sim_io_get_errno (simulator);
 	  break;
-#endif
 
-#ifdef TARGET_SYS_open
-	case TARGET_SYS_open:
+	case TARGET_NEWLIB_V850_SYS_open:
 	  {
 	    char *buf = fetch_str (simulator, PARM1);
 	    RETVAL = sim_io_open (simulator, buf, PARM2);
@@ -1762,10 +1735,8 @@ OP_10007E0 ()
 	      RETERR = sim_io_get_errno (simulator);
 	    break;
 	  }
-#endif
 
-#ifdef TARGET_SYS_exit
-	case TARGET_SYS_exit:
+	case TARGET_NEWLIB_V850_SYS_exit:
 	  if ((PARM1 & 0xffff0000) == 0xdead0000 && (PARM1 & 0xffff) != 0)
 	    /* get signal encoded by kill */
 	    sim_engine_halt (simulator, STATE_CPU (simulator, 0), NULL, PC,
@@ -1779,10 +1750,8 @@ OP_10007E0 ()
 	    sim_engine_halt (simulator, STATE_CPU (simulator, 0), NULL, PC,
 			     sim_exited, PARM1);
 	  break;
-#endif
 
-#ifdef TARGET_SYS_stat
-	case TARGET_SYS_stat:	/* added at hmsi */
+	case TARGET_NEWLIB_V850_SYS_stat:	/* added at hmsi */
 	  /* stat system call */
 	  {
 	    struct stat host_stat;
@@ -1811,10 +1780,8 @@ OP_10007E0 ()
 	      RETERR = sim_io_get_errno (simulator);
 	  }
 	  break;
-#endif
 
-#ifdef TARGET_SYS_fstat
-	case TARGET_SYS_fstat:
+	case TARGET_NEWLIB_V850_SYS_fstat:
 	  /* fstat system call */
 	  {
 	    struct stat host_stat;
@@ -1841,10 +1808,8 @@ OP_10007E0 ()
 	      RETERR = sim_io_get_errno (simulator);
 	  }
 	  break;
-#endif
 
-#ifdef TARGET_SYS_rename
-	case TARGET_SYS_rename:
+	case TARGET_NEWLIB_V850_SYS_rename:
 	  {
 	    char *oldpath = fetch_str (simulator, PARM1);
 	    char *newpath = fetch_str (simulator, PARM2);
@@ -1855,10 +1820,8 @@ OP_10007E0 ()
 	      RETERR = sim_io_get_errno (simulator);
 	  }
 	  break;
-#endif
 
-#ifdef TARGET_SYS_unlink
-	case TARGET_SYS_unlink:
+	case TARGET_NEWLIB_V850_SYS_unlink:
 	  {
 	    char *path = fetch_str (simulator, PARM1);
 	    RETVAL = sim_io_unlink (simulator, path);
@@ -1867,11 +1830,8 @@ OP_10007E0 ()
 	      RETERR = sim_io_get_errno (simulator);
 	  }
 	  break;
-#endif
 
-#ifdef HAVE_CHOWN
-#ifdef TARGET_SYS_chown
-	case TARGET_SYS_chown:
+	case TARGET_NEWLIB_V850_SYS_chown:
 	  {
 	    char *path = fetch_str (simulator, PARM1);
 	    RETVAL = chown (path, PARM2, PARM3);
@@ -1879,12 +1839,9 @@ OP_10007E0 ()
 	    RETERR = errno;
 	  }
 	  break;
-#endif
-#endif
 
 #if HAVE_CHMOD
-#ifdef TARGET_SYS_chmod
-	case TARGET_SYS_chmod:
+	case TARGET_NEWLIB_V850_SYS_chmod:
 	  {
 	    char *path = fetch_str (simulator, PARM1);
 	    RETVAL = chmod (path, PARM2);
@@ -1893,11 +1850,9 @@ OP_10007E0 ()
 	  }
 	  break;
 #endif
-#endif
 
-#ifdef TARGET_SYS_time
 #if HAVE_TIME
-	case TARGET_SYS_time:
+	case TARGET_NEWLIB_V850_SYS_time:
 	  {
 	    time_t now;
 	    RETVAL = time (&now);
@@ -1906,11 +1861,9 @@ OP_10007E0 ()
 	  }
 	  break;
 #endif
-#endif
 
 #if !defined(__GO32__) && !defined(_WIN32)
-#ifdef TARGET_SYS_times
-	case TARGET_SYS_times:
+	case TARGET_NEWLIB_V850_SYS_times:
 	  {
 	    struct tms tms;
 	    RETVAL = times (&tms);
@@ -1918,15 +1871,13 @@ OP_10007E0 ()
 	    store_mem (PARM1 + 4, 4, tms.tms_stime);
 	    store_mem (PARM1 + 8, 4, tms.tms_cutime);
 	    store_mem (PARM1 + 12, 4, tms.tms_cstime);
-	    reterr = errno;
+	    RETERR = errno;
 	    break;
 	  }
 #endif
-#endif
 
-#ifdef TARGET_SYS_gettimeofday
 #if !defined(__GO32__) && !defined(_WIN32)
-	case TARGET_SYS_gettimeofday:
+	case TARGET_NEWLIB_V850_SYS_gettimeofday:
 	  {
 	    struct timeval t;
 	    struct timezone tz;
@@ -1939,11 +1890,9 @@ OP_10007E0 ()
 	    break;
 	  }
 #endif
-#endif
 
-#ifdef TARGET_SYS_utime
 #if HAVE_UTIME
-	case TARGET_SYS_utime:
+	case TARGET_NEWLIB_V850_SYS_utime:
 	  {
 	    /* Cast the second argument to void *, to avoid type mismatch
 	       if a prototype is present.  */
@@ -1951,7 +1900,6 @@ OP_10007E0 ()
 	    /* RETVAL = utime (path, (void *) MEMPTR (PARM2)); */
 	  }
 	  break;
-#endif
 #endif
 
 	default:
@@ -2070,8 +2018,8 @@ divun
   unsigned int       N,
   unsigned long int  als,
   unsigned long int  sfi,
-  unsigned32 /*unsigned long int*/ *  quotient_ptr,
-  unsigned32 /*unsigned long int*/ *  remainder_ptr,
+  uint32_t /*unsigned long int*/ *  quotient_ptr,
+  uint32_t /*unsigned long int*/ *  remainder_ptr,
   int *          overflow_ptr
 )
 {
@@ -2144,8 +2092,8 @@ divn
   unsigned int       N,
   unsigned long int  als,
   unsigned long int  sfi,
-  signed32 /*signed long int*/ *  quotient_ptr,
-  signed32 /*signed long int*/ *  remainder_ptr,
+  int32_t /*signed long int*/ *  quotient_ptr,
+  int32_t /*signed long int*/ *  remainder_ptr,
   int *          overflow_ptr
 )
 {
@@ -2241,8 +2189,8 @@ divn
 int
 OP_1C207E0 (void)
 {
-  unsigned32 /*unsigned long int*/  quotient;
-  unsigned32 /*unsigned long int*/  remainder;
+  uint32_t /*unsigned long int*/  quotient;
+  uint32_t /*unsigned long int*/  remainder;
   unsigned long int  divide_by;
   unsigned long int  divide_this;
   int            overflow = 0;
@@ -2276,8 +2224,8 @@ OP_1C207E0 (void)
 int
 OP_1C007E0 (void)
 {
-  signed32 /*signed long int*/  quotient;
-  signed32 /*signed long int*/  remainder;
+  int32_t /*signed long int*/  quotient;
+  int32_t /*signed long int*/  remainder;
   signed long int  divide_by;
   signed long int  divide_this;
   int          overflow = 0;
@@ -2287,8 +2235,8 @@ OP_1C007E0 (void)
 
   imm5 = 32 - ((OP[3] & 0x3c0000) >> 17);
 
-  divide_by   = (signed32) State.regs[ OP[0] ];
-  divide_this = (signed32) (State.regs[ OP[1] ] << imm5);
+  divide_by   = (int32_t) State.regs[ OP[0] ];
+  divide_this = (int32_t) (State.regs[ OP[1] ] << imm5);
 
   divn (imm5, divide_by, divide_this, & quotient, & remainder, & overflow);
   
@@ -2311,8 +2259,8 @@ OP_1C007E0 (void)
 int
 OP_18207E0 (void)
 {
-  unsigned32 /*unsigned long int*/  quotient;
-  unsigned32 /*unsigned long int*/  remainder;
+  uint32_t /*unsigned long int*/  quotient;
+  uint32_t /*unsigned long int*/  remainder;
   unsigned long int  divide_by;
   unsigned long int  divide_this;
   int            overflow = 0;
@@ -2346,8 +2294,8 @@ OP_18207E0 (void)
 int
 OP_18007E0 (void)
 {
-  signed32 /*signed long int*/  quotient;
-  signed32 /*signed long int*/  remainder;
+  int32_t /*signed long int*/  quotient;
+  int32_t /*signed long int*/  remainder;
   signed long int  divide_by;
   signed long int  divide_this;
   int          overflow = 0;
@@ -2358,7 +2306,7 @@ OP_18007E0 (void)
   imm5 = 32 - ((OP[3] & 0x3c0000) >> 17);
 
   divide_by   = EXTEND16 (State.regs[ OP[0] ]);
-  divide_this = (signed32) (State.regs[ OP[1] ] << imm5);
+  divide_this = (int32_t) (State.regs[ OP[1] ] << imm5);
 
   divn (imm5, divide_by, divide_this, & quotient, & remainder, & overflow);
   
@@ -2429,7 +2377,7 @@ OP_2C007E0 (void)
   
   /* Compute the result.  */
   
-  divide_by   = (signed32) State.regs[ OP[0] ];
+  divide_by   = (int32_t) State.regs[ OP[0] ];
   divide_this = State.regs[ OP[1] ];
   
   if (divide_by == 0)
@@ -2445,7 +2393,7 @@ OP_2C007E0 (void)
     }
   else
     {
-      divide_this = (signed32) divide_this;
+      divide_this = (int32_t) divide_this;
       State.regs[ OP[1]       ] = quotient  = divide_this / divide_by;
       State.regs[ OP[2] >> 11 ] = remainder = divide_this % divide_by;
  
@@ -2530,7 +2478,7 @@ OP_28007E0 (void)
     }
   else
     {
-      divide_this = (signed32) divide_this;
+      divide_this = (int32_t) divide_this;
       State.regs[ OP[1]       ] = quotient  = divide_this / divide_by;
       State.regs[ OP[2] >> 11 ] = remainder = divide_this % divide_by;
   
@@ -2858,7 +2806,8 @@ OP_307E0 (void)
   sim_fpu_status_denorm = 16384,				----U (sim spec.)
 */  
     
-void update_fpsr (SIM_DESC sd, sim_fpu_status status, unsigned int mask, unsigned int double_op_p)
+void
+update_fpsr (SIM_DESC sd, sim_fpu_status status, unsigned int mask, unsigned int double_op_p)
 {
   unsigned int fpsr = FPSR & mask;
 
@@ -2911,15 +2860,14 @@ void update_fpsr (SIM_DESC sd, sim_fpu_status status, unsigned int mask, unsigne
       FPSR &= ~FPSR_XC;
       FPSR |= flags;
 
-      SignalExceptionFPE(sd, double_op_p);
+      SignalExceptionFPE (sd, double_op_p);
     }
 }
 
-/*
-  exception
-*/
+/* Exception.  */
 
-void  SignalException(SIM_DESC sd)
+void
+SignalException (SIM_DESC sd)
 {
   if (MPM & MPM_AUE)
     {
@@ -2927,7 +2875,8 @@ void  SignalException(SIM_DESC sd)
     }
 }
 
-void SignalExceptionFPE(SIM_DESC sd, unsigned int double_op_p)
+void
+SignalExceptionFPE (SIM_DESC sd, unsigned int double_op_p)
 {								
   if (((PSW & (PSW_NP|PSW_ID)) == 0)
       || !(FPSR & (double_op_p ? FPSR_DEM : FPSR_SEM)))		
@@ -2939,12 +2888,12 @@ void SignalExceptionFPE(SIM_DESC sd, unsigned int double_op_p)
       PSW |= (PSW_EP | PSW_ID);
       PC = 0x70;
 
-      SignalException(sd);
+      SignalException (sd);
     }								
 }
 
-
-void check_invalid_snan(SIM_DESC sd, sim_fpu_status status, unsigned int double_op_p)
+void
+check_invalid_snan (SIM_DESC sd, sim_fpu_status status, unsigned int double_op_p)
 {
   if ((FPSR & FPSR_XEI)
       && (status & sim_fpu_status_invalid_snan))
@@ -2952,22 +2901,23 @@ void check_invalid_snan(SIM_DESC sd, sim_fpu_status status, unsigned int double_
       FPSR &= ~FPSR_XC;
       FPSR |= FPSR_XCV;
       FPSR |= FPSR_XPV;
-      SignalExceptionFPE(sd, double_op_p);
+      SignalExceptionFPE (sd, double_op_p);
     }
 }
 
-int v850_float_compare(SIM_DESC sd, int cmp, sim_fpu wop1, sim_fpu wop2, int double_op_p)
+int
+v850_float_compare (SIM_DESC sd, int cmp, sim_fpu wop1, sim_fpu wop2, int double_op_p)
 {
   int result = -1;
   
-  if (sim_fpu_is_nan(&wop1) || sim_fpu_is_nan(&wop2))
+  if (sim_fpu_is_nan (&wop1) || sim_fpu_is_nan (&wop2))
     {
       if (cmp & 0x8)
 	{
 	  if (FPSR & FPSR_XEV)
 	    {
 	      FPSR |= FPSR_XCV | FPSR_XPV;
-	      SignalExceptionFPE(sd, double_op_p);
+	      SignalExceptionFPE (sd, double_op_p);
 	    }
 	}
 
@@ -3022,11 +2972,11 @@ int v850_float_compare(SIM_DESC sd, int cmp, sim_fpu wop1, sim_fpu wop2, int dou
 	  result = 1;
 	  break;
 	default:
-	  abort();
+	  abort ();
 	}
     }
-  else if (sim_fpu_is_infinity(&wop1) && sim_fpu_is_infinity(&wop2)
-	   && sim_fpu_sign(&wop1) == sim_fpu_sign(&wop2))
+  else if (sim_fpu_is_infinity (&wop1) && sim_fpu_is_infinity (&wop2)
+	   && sim_fpu_sign (&wop1) == sim_fpu_sign (&wop2))
     {
       switch (cmp)
 	{
@@ -3079,44 +3029,45 @@ int v850_float_compare(SIM_DESC sd, int cmp, sim_fpu wop1, sim_fpu wop2, int dou
 	  result = 1;
 	  break;
 	default:
-	  abort();
+	  abort ();
 	}
     }
   else
     {
       int gt = 0,lt = 0,eq = 0, status;
 
-      status = sim_fpu_cmp( &wop1, &wop2 );
+      status = sim_fpu_cmp (&wop1, &wop2);
 
-      switch (status) {
-      case SIM_FPU_IS_SNAN:
-      case SIM_FPU_IS_QNAN:
-	abort();
-	break;
+      switch (status)
+	{
+	case SIM_FPU_IS_SNAN:
+	case SIM_FPU_IS_QNAN:
+	  abort ();
+	  break;
 
-      case SIM_FPU_IS_NINF:
-	lt = 1;
-	break;
-      case SIM_FPU_IS_PINF:
-	gt = 1;
-	break;
-      case SIM_FPU_IS_NNUMBER:
-	lt = 1;
-	break;
-      case SIM_FPU_IS_PNUMBER:
-	gt = 1;
-	break;
-      case SIM_FPU_IS_NDENORM:
-	lt = 1;
-	break;
-      case SIM_FPU_IS_PDENORM:
-	gt = 1;
-	break;
-      case SIM_FPU_IS_NZERO:
-      case SIM_FPU_IS_PZERO:
-	eq = 1;
-	break;
-      }
+	case SIM_FPU_IS_NINF:
+	  lt = 1;
+	  break;
+	case SIM_FPU_IS_PINF:
+	  gt = 1;
+	  break;
+	case SIM_FPU_IS_NNUMBER:
+	  lt = 1;
+	  break;
+	case SIM_FPU_IS_PNUMBER:
+	  gt = 1;
+	  break;
+	case SIM_FPU_IS_NDENORM:
+	  lt = 1;
+	  break;
+	case SIM_FPU_IS_PDENORM:
+	  gt = 1;
+	  break;
+	case SIM_FPU_IS_NZERO:
+	case SIM_FPU_IS_PZERO:
+	  eq = 1;
+	  break;
+	}
   
       switch (cmp)
 	{
@@ -3171,11 +3122,12 @@ int v850_float_compare(SIM_DESC sd, int cmp, sim_fpu wop1, sim_fpu wop2, int dou
 	}
     }
 
-  ASSERT(result != -1);
+  ASSERT (result != -1);
   return result;
 }
 
-void v850_div(SIM_DESC sd, unsigned int op0, unsigned int op1, unsigned int *op2p, unsigned int *op3p)
+void
+v850_div (SIM_DESC sd, unsigned int op0, unsigned int op1, unsigned int *op2p, unsigned int *op3p)
 {
   signed long int quotient;
   signed long int remainder;
@@ -3184,9 +3136,9 @@ void v850_div(SIM_DESC sd, unsigned int op0, unsigned int op1, unsigned int *op2
   bfd_boolean     overflow = FALSE;
   
   /* Compute the result.  */
-  divide_by   = op0;
-  divide_this = op1;
-  
+  divide_by   = (int32_t)op0;
+  divide_this = (int32_t)op1;
+
   if (divide_by == 0 || (divide_by == -1 && divide_this == (1 << 31)))
     {
       overflow  = TRUE;
@@ -3207,7 +3159,8 @@ void v850_div(SIM_DESC sd, unsigned int op0, unsigned int op1, unsigned int *op2
   *op3p = remainder;
 }
 
-void v850_divu(SIM_DESC sd, unsigned int op0, unsigned int op1, unsigned int *op2p, unsigned int *op3p)
+void
+v850_divu (SIM_DESC sd, unsigned int op0, unsigned int op1, unsigned int *op2p, unsigned int *op3p)
 {
   unsigned long int quotient;
   unsigned long int remainder;
@@ -3240,8 +3193,8 @@ void v850_divu(SIM_DESC sd, unsigned int op0, unsigned int op1, unsigned int *op
   *op3p = remainder;
 }
 
-
-void v850_sar(SIM_DESC sd, unsigned int op0, unsigned int op1, unsigned int *op2p)
+void
+v850_sar (SIM_DESC sd, unsigned int op0, unsigned int op1, unsigned int *op2p)
 {
   unsigned int result, z, s, cy;
 
@@ -3261,7 +3214,8 @@ void v850_sar(SIM_DESC sd, unsigned int op0, unsigned int op1, unsigned int *op2
   *op2p = result;
 }
 
-void v850_shl(SIM_DESC sd, unsigned int op0, unsigned int op1, unsigned int *op2p)
+void
+v850_shl (SIM_DESC sd, unsigned int op0, unsigned int op1, unsigned int *op2p)
 {
   unsigned int result, z, s, cy;
 
@@ -3314,7 +3268,14 @@ v850_bins (SIM_DESC sd, unsigned int source, unsigned int lsb, unsigned int msb,
   pos = lsb;
   width = (msb - lsb) + 1;
 
-  mask = ~ (-1 << width);
+  /* A width of 32 exhibits undefined behavior on the shift.  The easiest
+     way to make this code safe is to just avoid that case and set the mask
+     to the right value.  */
+  if (width >= 32)
+    mask = 0xffffffff;
+  else
+    mask = ~ (-(1 << width));
+
   source &= mask;
   mask <<= pos;
   result = (* dest) & ~ mask;
@@ -3331,7 +3292,8 @@ v850_bins (SIM_DESC sd, unsigned int source, unsigned int lsb, unsigned int msb,
   * dest = result;
 }
 
-void v850_shr(SIM_DESC sd, unsigned int op0, unsigned int op1, unsigned int *op2p)
+void
+v850_shr (SIM_DESC sd, unsigned int op0, unsigned int op1, unsigned int *op2p)
 {
   unsigned int result, z, s, cy;
 
@@ -3351,7 +3313,8 @@ void v850_shr(SIM_DESC sd, unsigned int op0, unsigned int op1, unsigned int *op2
   *op2p = result;
 }
 
-void v850_satadd(SIM_DESC sd, unsigned int op0, unsigned int op1, unsigned int *op2p)
+void
+v850_satadd (SIM_DESC sd, unsigned int op0, unsigned int op1, unsigned int *op2p)
 {
   unsigned int result, z, s, cy, ov, sat;
 
@@ -3386,7 +3349,8 @@ void v850_satadd(SIM_DESC sd, unsigned int op0, unsigned int op1, unsigned int *
   *op2p = result;
 }
 
-void v850_satsub(SIM_DESC sd, unsigned int op0, unsigned int op1, unsigned int *op2p)
+void
+v850_satsub (SIM_DESC sd, unsigned int op0, unsigned int op1, unsigned int *op2p)
 {
   unsigned int result, z, s, cy, ov, sat;
 
@@ -3422,13 +3386,12 @@ void v850_satsub(SIM_DESC sd, unsigned int op0, unsigned int op1, unsigned int *
   *op2p = result;
 }
 
-unsigned32
-load_data_mem(sd, addr, len)
-     SIM_DESC sd;
-     SIM_ADDR addr;
-     int len;
+uint32_t
+load_data_mem (SIM_DESC  sd,
+	       address_word  addr,
+	       int       len)
 {
-  uint32 data;
+  uint32_t data;
 
   switch (len)
     {
@@ -3451,74 +3414,74 @@ load_data_mem(sd, addr, len)
 }
 
 void
-store_data_mem(sd, addr, len, data)
-     SIM_DESC sd;
-     SIM_ADDR addr;
-     int len;
-     unsigned32 data;
+store_data_mem (SIM_DESC    sd,
+		address_word    addr,
+		int         len,
+		uint32_t  data)
 {
   switch (len)
     {
     case 1:
-      store_mem(addr, 1, data);
+      store_mem (addr, 1, data);
       break;
     case 2:
-      store_mem(addr, 2, data);
+      store_mem (addr, 2, data);
       break;
     case 4:
-      store_mem(addr, 4, data);
+      store_mem (addr, 4, data);
       break;
     default:
       abort ();
     }
 }
 
-int mpu_load_mem_test(SIM_DESC sd, unsigned int addr, int size, int base_reg)
+int
+mpu_load_mem_test (SIM_DESC sd, unsigned int addr, int size, int base_reg)
 {
   int result = 1;
 
   if (PSW & PSW_DMP)
     {
-      if (IPE0 && addr >= IPA2ADDR(IPA0L) && addr <= IPA2ADDR(IPA0L) && IPR0)
+      if (IPE0 && addr >= IPA2ADDR (IPA0L) && addr <= IPA2ADDR (IPA0L) && IPR0)
 	{
 	  /* text area */
 	}
-      else if (IPE1 && addr >= IPA2ADDR(IPA1L) && addr <= IPA2ADDR(IPA1L) && IPR1)
+      else if (IPE1 && addr >= IPA2ADDR (IPA1L) && addr <= IPA2ADDR (IPA1L) && IPR1)
 	{
 	  /* text area */
 	}
-      else if (IPE2 && addr >= IPA2ADDR(IPA2L) && addr <= IPA2ADDR(IPA2L) && IPR2)
+      else if (IPE2 && addr >= IPA2ADDR (IPA2L) && addr <= IPA2ADDR (IPA2L) && IPR2)
 	{
 	  /* text area */
 	}
-      else if (IPE3 && addr >= IPA2ADDR(IPA3L) && addr <= IPA2ADDR(IPA3L) && IPR3)
+      else if (IPE3 && addr >= IPA2ADDR (IPA3L) && addr <= IPA2ADDR (IPA3L) && IPR3)
 	{
 	  /* text area */
 	}
-      else if (addr >= PPA2ADDR(PPA & ~PPM) && addr <= DPA2ADDR(PPA | PPM))
+      else if (addr >= PPA2ADDR (PPA & ~PPM) && addr <= DPA2ADDR (PPA | PPM))
 	{
 	  /* preifarallel area */
 	}
-      else if (addr >= PPA2ADDR(SPAL) && addr <= DPA2ADDR(SPAU))
+      else if (addr >= PPA2ADDR (SPAL) && addr <= DPA2ADDR (SPAU))
 	{
 	  /* stack area */
 	}
-      else if (DPE0 && addr >= DPA2ADDR(DPA0L) && addr <= DPA2ADDR(DPA0L) && DPR0
+      else if (DPE0 && addr >= DPA2ADDR (DPA0L) && addr <= DPA2ADDR (DPA0L) && DPR0
 	       && ((SPAL & SPAL_SPS) ? base_reg == SP_REGNO : 1))
 	{
 	  /* data area */
 	}
-      else if (DPE1 && addr >= DPA2ADDR(DPA1L) && addr <= DPA2ADDR(DPA1L) && DPR1
+      else if (DPE1 && addr >= DPA2ADDR (DPA1L) && addr <= DPA2ADDR (DPA1L) && DPR1
 	       && ((SPAL & SPAL_SPS) ? base_reg == SP_REGNO : 1))
 	{
 	  /* data area */
 	}
-      else if (DPE2 && addr >= DPA2ADDR(DPA2L) && addr <= DPA2ADDR(DPA2L) && DPR2
+      else if (DPE2 && addr >= DPA2ADDR (DPA2L) && addr <= DPA2ADDR (DPA2L) && DPR2
 	       && ((SPAL & SPAL_SPS) ? base_reg == SP_REGNO : 1))
 	{
 	  /* data area */
 	}
-      else if (DPE3 && addr >= DPA2ADDR(DPA3L) && addr <= DPA2ADDR(DPA3L) && DPR3
+      else if (DPE3 && addr >= DPA2ADDR (DPA3L) && addr <= DPA2ADDR (DPA3L) && DPR3
 	       && ((SPAL & SPAL_SPS) ? base_reg == SP_REGNO : 1))
 	{
 	  /* data area */
@@ -3533,7 +3496,7 @@ int mpu_load_mem_test(SIM_DESC sd, unsigned int addr, int size, int base_reg)
 
 	  PC = 0x30;
 
-	  SignalException(sd);
+	  SignalException (sd);
 	  result = 0;
 	}
     }
@@ -3541,43 +3504,44 @@ int mpu_load_mem_test(SIM_DESC sd, unsigned int addr, int size, int base_reg)
   return result;
 }
 
-int mpu_store_mem_test(SIM_DESC sd, unsigned int addr, int size, int base_reg)
+int
+mpu_store_mem_test (SIM_DESC sd, unsigned int addr, int size, int base_reg)
 {
   int result = 1;
 
   if (PSW & PSW_DMP)
     {
-      if (addr >= PPA2ADDR(PPA & ~PPM) && addr <= DPA2ADDR(PPA | PPM))
+      if (addr >= PPA2ADDR (PPA & ~PPM) && addr <= DPA2ADDR (PPA | PPM))
 	{
 	  /* preifarallel area */
 	}
-      else if (addr >= PPA2ADDR(SPAL) && addr <= DPA2ADDR(SPAU))
+      else if (addr >= PPA2ADDR (SPAL) && addr <= DPA2ADDR (SPAU))
 	{
 	  /* stack area */
 	}
-      else if (DPE0 && addr >= DPA2ADDR(DPA0L) && addr <= DPA2ADDR(DPA0L) && DPW0
+      else if (DPE0 && addr >= DPA2ADDR (DPA0L) && addr <= DPA2ADDR (DPA0L) && DPW0
 	       && ((SPAL & SPAL_SPS) ? base_reg == SP_REGNO : 1))
 	{
 	  /* data area */
 	}
-      else if (DPE1 && addr >= DPA2ADDR(DPA1L) && addr <= DPA2ADDR(DPA1L) && DPW1
+      else if (DPE1 && addr >= DPA2ADDR (DPA1L) && addr <= DPA2ADDR (DPA1L) && DPW1
 	       && ((SPAL & SPAL_SPS) ? base_reg == SP_REGNO : 1))
 	{
 	  /* data area */
 	}
-      else if (DPE2 && addr >= DPA2ADDR(DPA2L) && addr <= DPA2ADDR(DPA2L) && DPW2
+      else if (DPE2 && addr >= DPA2ADDR (DPA2L) && addr <= DPA2ADDR (DPA2L) && DPW2
 	       && ((SPAL & SPAL_SPS) ? base_reg == SP_REGNO : 1))
 	{
 	  /* data area */
 	}
-      else if (DPE3 && addr >= DPA2ADDR(DPA3L) && addr <= DPA2ADDR(DPA3L) && DPW3
+      else if (DPE3 && addr >= DPA2ADDR (DPA3L) && addr <= DPA2ADDR (DPA3L) && DPW3
 	       && ((SPAL & SPAL_SPS) ? base_reg == SP_REGNO : 1))
 	{
 	  /* data area */
 	}
       else
 	{
-	  if (addr >= PPA2ADDR(PPA & ~PPM) && addr <= DPA2ADDR(PPA | PPM))
+	  if (addr >= PPA2ADDR (PPA & ~PPM) && addr <= DPA2ADDR (PPA | PPM))
 	    {
 	      FEIC = 0x432;
 	      VPTID = TID;

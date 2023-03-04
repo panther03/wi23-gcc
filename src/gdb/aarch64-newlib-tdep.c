@@ -1,6 +1,6 @@
 /* Target-dependent code for Newlib AArch64.
 
-   Copyright (C) 2011-2013 Free Software Foundation, Inc.
+   Copyright (C) 2011-2023 Free Software Foundation, Inc.
    Contributed by ARM Ltd.
 
    This file is part of GDB.
@@ -29,18 +29,16 @@
 static void
 aarch64_newlib_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
 {
-  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  aarch64_gdbarch_tdep *tdep = gdbarch_tdep<aarch64_gdbarch_tdep> (gdbarch);
 
   /* Jump buffer - support for longjmp.
      Offset of original PC in jump buffer (in registers).  */
   tdep->jb_pc = 11;
 }
 
-/* Provide a prototype to silence -Wmissing-prototypes.  */
-extern initialize_file_ftype _initialize_aarch64_newlib_tdep;
-
+void _initialize_aarch64_newlib_tdep ();
 void
-_initialize_aarch64_newlib_tdep (void)
+_initialize_aarch64_newlib_tdep ()
 {
   gdbarch_register_osabi (bfd_arch_aarch64, 0, GDB_OSABI_NEWLIB,
 			  aarch64_newlib_init_abi);

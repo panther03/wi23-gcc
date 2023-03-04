@@ -1,3 +1,4 @@
+#as: -mthumb-interwork
 #objdump: -dr --prefix-addresses --show-raw-insn
 #name: ADR
 
@@ -6,4 +7,4 @@
 .*: +file format .*arm.*
 
 Disassembly of section .text:
-0+ <.*> 824ff203 	subhi	pc, pc, #805306368	; 0x30000000
+0+ <.*> 824ff203 	subhi	pc, pc, #805306368	@ 0x30000000

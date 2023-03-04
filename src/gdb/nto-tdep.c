@@ -1,6 +1,6 @@
 /* nto-tdep.c - general QNX Neutrino target functionality.
 
-   Copyright (C) 2003-2013 Free Software Foundation, Inc.
+   Copyright (C) 2003-2023 Free Software Foundation, Inc.
 
    Contributed by QNX Software Systems Ltd.
 
@@ -20,19 +20,22 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 #include "defs.h"
-#include "gdb_stat.h"
-#include "gdb_string.h"
+#include <sys/stat.h>
 #include "nto-tdep.h"
 #include "top.h"
 #include "inferior.h"
+#include "infrun.h"
 #include "gdbarch.h"
 #include "bfd.h"
 #include "elf-bfd.h"
 #include "solib-svr4.h"
 #include "gdbcore.h"
 #include "objfiles.h"
+#include "source.h"
+#include "gdbsupport/pathstuff.h"
 
-#include <string.h>
+#define QNX_NOTE_NAME	"QNX"
+#define QNX_INFO_SECT_NAME "QNX_info"
 
 #ifdef __CYGWIN__
 #include <sys/cygwin.h>
@@ -47,6 +50,9 @@ static char default_nto_target[] = "";
 #endif
 
 struct nto_target_ops current_nto_target;
+
+static const registry<inferior>::key<struct nto_inferior_data>
+  nto_inferior_data_reg;
 
 static char *
 nto_target (void)
@@ -84,9 +90,11 @@ nto_map_arch_to_cputype (const char *arch)
 }
 
 int
-nto_find_and_open_solib (char *solib, unsigned o_flags, char **temp_pathname)
+nto_find_and_open_solib (const char *solib, unsigned o_flags,
+			 gdb::unique_xmalloc_ptr<char> *temp_pathname)
 {
-  char *buf, *arch_path, *nto_root, *endian;
+  char *buf, *arch_path, *nto_root;
+  const char *endian;
   const char *base;
   const char *arch;
   int arch_len, len, ret;
@@ -119,11 +127,11 @@ nto_find_and_open_solib (char *solib, unsigned o_flags, char **temp_pathname)
 
   arch_len = (strlen (nto_root) + strlen (arch) + strlen (endian) + 2
 	      + strlen (solib));
-  arch_path = alloca (arch_len);
+  arch_path = (char *) alloca (arch_len);
   xsnprintf (arch_path, arch_len, "%s/%s%s", nto_root, arch, endian);
 
   len = strlen (PATH_FMT) + strlen (arch_path) * 5 + 1;
-  buf = alloca (len);
+  buf = (char *) alloca (len);
   xsnprintf (buf, len, PATH_FMT, arch_path, arch_path, arch_path, arch_path,
 	     arch_path);
 
@@ -139,7 +147,7 @@ nto_find_and_open_solib (char *solib, unsigned o_flags, char **temp_pathname)
 	  if (ret >= 0)
 	    *temp_pathname = gdb_realpath (arch_path);
 	  else
-	    *temp_pathname = NULL;
+	    temp_pathname->reset (NULL);
 	}
     }
   return ret;
@@ -149,7 +157,8 @@ void
 nto_init_solib_absolute_prefix (void)
 {
   char buf[PATH_MAX * 2], arch_path[PATH_MAX];
-  char *nto_root, *endian;
+  char *nto_root;
+  const char *endian;
   const char *arch;
 
   nto_root = nto_target ();
@@ -184,7 +193,7 @@ nto_parse_redirection (char *pargv[], const char **pin, const char **pout,
 		       const char **perr)
 {
   char **argv;
-  char *in, *out, *err, *p;
+  const char *in, *out, *err, *p;
   int argc, i, n;
 
   for (n = 0; pargv[n]; n++);
@@ -194,7 +203,7 @@ nto_parse_redirection (char *pargv[], const char **pin, const char **pout,
   out = "";
   err = "";
 
-  argv = xcalloc (n + 1, sizeof argv[0]);
+  argv = XCNEWVEC (char *, n + 1);
   argc = n;
   for (i = 0, n = 0; n < argc; n++)
     {
@@ -233,43 +242,12 @@ nto_parse_redirection (char *pargv[], const char **pin, const char **pout,
   return argv;
 }
 
-/* The struct lm_info, lm_addr, and nto_truncate_ptr are copied from
-   solib-svr4.c to support nto_relocate_section_addresses
-   which is different from the svr4 version.  */
-
-/* Link map info to include in an allocated so_list entry */
-
-struct lm_info
-  {
-    /* Pointer to copy of link map from inferior.  The type is char *
-       rather than void *, so that we may use byte offsets to find the
-       various fields without the need for a cast.  */
-    gdb_byte *lm;
-
-    /* Amount by which addresses in the binary should be relocated to
-       match the inferior.  This could most often be taken directly
-       from lm, but when prelinking is involved and the prelink base
-       address changes, we may need a different offset, we want to
-       warn about the difference and compute it only once.  */
-    CORE_ADDR l_addr;
-
-    /* The target location of lm.  */
-    CORE_ADDR lm_addr;
-  };
-
-
 static CORE_ADDR
 lm_addr (struct so_list *so)
 {
-  if (so->lm_info->l_addr == (CORE_ADDR)-1)
-    {
-      struct link_map_offsets *lmo = nto_fetch_link_map_offsets ();
-      struct type *ptr_type = builtin_type (target_gdbarch ())->builtin_data_ptr;
+  lm_info_svr4 *li = (lm_info_svr4 *) so->lm_info;
 
-      so->lm_info->l_addr =
-	extract_typed_address (so->lm_info->lm + lmo->l_addr_offset, ptr_type);
-    }
-  return so->lm_info->l_addr;
+  return li->l_addr;
 }
 
 static CORE_ADDR
@@ -330,15 +308,54 @@ nto_dummy_supply_regset (struct regcache *regcache, char *regs)
   /* Do nothing.  */
 }
 
+static void
+nto_sniff_abi_note_section (bfd *abfd, asection *sect, void *obj)
+{
+  const char *sectname;
+  unsigned int sectsize;
+  /* Buffer holding the section contents.  */
+  char *note;
+  unsigned int namelen;
+  const char *name;
+  const unsigned sizeof_Elf_Nhdr = 12;
+
+  sectname = bfd_section_name (sect);
+  sectsize = bfd_section_size (sect);
+
+  if (sectsize > 128)
+    sectsize = 128;
+
+  if (sectname != NULL && strstr (sectname, QNX_INFO_SECT_NAME) != NULL)
+    *(enum gdb_osabi *) obj = GDB_OSABI_QNXNTO;
+  else if (sectname != NULL && strstr (sectname, "note") != NULL
+	   && sectsize > sizeof_Elf_Nhdr)
+    {
+      note = XNEWVEC (char, sectsize);
+      bfd_get_section_contents (abfd, sect, note, 0, sectsize);
+      namelen = (unsigned int) bfd_h_get_32 (abfd, note);
+      name = note + sizeof_Elf_Nhdr;
+      if (sectsize >= namelen + sizeof_Elf_Nhdr
+	  && namelen == sizeof (QNX_NOTE_NAME)
+	  && 0 == strcmp (name, QNX_NOTE_NAME))
+	*(enum gdb_osabi *) obj = GDB_OSABI_QNXNTO;
+
+      XDELETEVEC (note);
+    }
+}
+
 enum gdb_osabi
 nto_elf_osabi_sniffer (bfd *abfd)
 {
-  if (nto_is_nto_target)
-    return nto_is_nto_target (abfd);
-  return GDB_OSABI_UNKNOWN;
+  enum gdb_osabi osabi = GDB_OSABI_UNKNOWN;
+
+  bfd_map_over_sections (abfd,
+			 nto_sniff_abi_note_section,
+			 &osabi);
+
+  return osabi;
 }
 
-static const char *nto_thread_state_str[] =
+static const char * const nto_thread_state_str[] =
 {
   "DEAD",		/* 0  0x00 */
   "RUNNING",	/* 1  0x01 */
@@ -363,12 +380,16 @@ static const char *nto_thread_state_str[] =
   "NET_REPLY"	/* 20 0x14 */
 };
 
-char *
-nto_extra_thread_info (struct thread_info *ti)
+const char *
+nto_extra_thread_info (struct target_ops *self, struct thread_info *ti)
 {
-  if (ti && ti->private
-      && ti->private->state < ARRAY_SIZE (nto_thread_state_str))
-    return (char *)nto_thread_state_str [ti->private->state];
+  if (ti != NULL && ti->priv != NULL)
+    {
+      nto_thread_info *priv = get_nto_thread_info (ti);
+
+      if (priv->state < ARRAY_SIZE (nto_thread_state_str))
+	return nto_thread_state_str [priv->state];
+    }
   return "";
 }
 
@@ -393,4 +414,105 @@ nto_initialize_signals (void)
   signal_print_update (SIGPHOTON, 0);
   signal_pass_update (SIGPHOTON, 1);
 #endif
+}
+
+/* Read AUXV from initial_stack.  */
+LONGEST
+nto_read_auxv_from_initial_stack (CORE_ADDR initial_stack, gdb_byte *readbuf,
+				  LONGEST len, size_t sizeof_auxv_t)
+{
+  gdb_byte targ32[4]; /* For 32 bit target values.  */
+  gdb_byte targ64[8]; /* For 64 bit target values.  */
+  CORE_ADDR data_ofs = 0;
+  ULONGEST anint;
+  LONGEST len_read = 0;
+  gdb_byte *buff;
+  enum bfd_endian byte_order;
+  int ptr_size;
+
+  if (sizeof_auxv_t == 16)
+    ptr_size = 8;
+  else
+    ptr_size = 4;
+
+  /* Skip over argc, argv and envp... Comment from ldd.c:
+
+     The startup frame is set-up so that we have:
+     auxv
+     NULL
+     ...
+     envp2
+     envp1 <----- void *frame + (argc + 2) * sizeof(char *)
+     NULL
+     ...
+     argv2
+     argv1
+     argc  <------ void * frame
+
+     On entry to ldd, frame gives the address of argc on the stack.  */
+  /* Read argc. 4 bytes on both 64 and 32 bit arches and luckily little
+   * endian. So we just read first 4 bytes.  */
+  if (target_read_memory (initial_stack + data_ofs, targ32, 4) != 0)
+    return 0;
+
+  byte_order = gdbarch_byte_order (target_gdbarch ());
+
+  anint = extract_unsigned_integer (targ32, sizeof (targ32), byte_order);
+
+  /* Size of pointer is assumed to be 4 bytes (32 bit arch.) */
+  data_ofs += (anint + 2) * ptr_size; /* + 2 comes from argc itself and
+						NULL terminating pointer in
+						argv.  */
+
+  /* Now loop over env table:  */
+  anint = 0;
+  while (target_read_memory (initial_stack + data_ofs, targ64, ptr_size)
+	 == 0)
+    {
+      if (extract_unsigned_integer (targ64, ptr_size, byte_order) == 0)
+	anint = 1; /* Keep looping until non-null entry is found.  */
+      else if (anint)
+	break;
+      data_ofs += ptr_size;
+    }
+  initial_stack += data_ofs;
+
+  memset (readbuf, 0, len);
+  buff = readbuf;
+  while (len_read <= len-sizeof_auxv_t)
+    {
+      if (target_read_memory (initial_stack + len_read, buff, sizeof_auxv_t)
+	  == 0)
+	{
+	  /* Both 32 and 64 bit structures have int as the first field.  */
+	  const ULONGEST a_type
+	    = extract_unsigned_integer (buff, sizeof (targ32), byte_order);
+
+	  if (a_type == AT_NULL)
+	    break;
+	  buff += sizeof_auxv_t;
+	  len_read += sizeof_auxv_t;
+	}
+      else
+	break;
+    }
+  return len_read;
+}
+
+/* Return nto_inferior_data for the given INFERIOR.  If not yet created,
+   construct it.  */
+
+struct nto_inferior_data *
+nto_inferior_data (struct inferior *const inferior)
+{
+  struct inferior *const inf = inferior ? inferior : current_inferior ();
+  struct nto_inferior_data *inf_data;
+
+  gdb_assert (inf != NULL);
+
+  inf_data = nto_inferior_data_reg.get (inf);
+  if (inf_data == NULL)
+    inf_data = nto_inferior_data_reg.emplace (inf);
+
+  return inf_data;
 }

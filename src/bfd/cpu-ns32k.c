@@ -1,6 +1,5 @@
 /* BFD support for the ns32k architecture.
-   Copyright 1990, 1991, 1994, 1995, 1998, 1999, 2000, 2001, 2002, 2003,
-   2004, 2005, 2007, 2012 Free Software Foundation, Inc.
+   Copyright (C) 1990-2023 Free Software Foundation, Inc.
    Almost totally rewritten by Ian Dall from initial work
    by Andrew Cagney.
 
@@ -27,16 +26,16 @@
 #include "ns32k.h"
 
 #define N(machine, printable, d, next)  \
-{  32, 32, 8, bfd_arch_ns32k, machine, "ns32k",printable,3,d, \
-   bfd_default_compatible,bfd_default_scan,bfd_arch_default_fill,next, }
+ { 32, 32, 8, bfd_arch_ns32k, machine, "ns32k",printable,3,d, \
+   bfd_default_compatible,bfd_default_scan,bfd_arch_default_fill,next, 0 }
 
 static const bfd_arch_info_type arch_info_struct[] =
 {
-  N(32532,"ns32k:32532",TRUE, 0), /* The word ns32k will match this too.  */
+  N (32532, "ns32k:32532", true, 0), /* The word ns32k will match this too.  */
 };
 
 const bfd_arch_info_type bfd_ns32k_arch =
-  N(32032,"ns32k:32032",FALSE, &arch_info_struct[0]);
+  N (32032, "ns32k:32032", false, &arch_info_struct[0]);
 
 bfd_vma
 _bfd_ns32k_get_displacement (bfd_byte *buffer, int size)
@@ -107,8 +106,10 @@ _bfd_ns32k_get_immediate (bfd_byte *buffer, int size)
     case 4:
       value = (value << 8) | (*buffer++ & 0xff);
       value = (value << 8) | (*buffer++ & 0xff);
+      /* Fall through.  */
     case 2:
       value = (value << 8) | (*buffer++ & 0xff);
+      /* Fall through.  */
     case 1:
       value = (value << 8) | (*buffer++ & 0xff);
       break;
@@ -127,8 +128,10 @@ _bfd_ns32k_put_immediate (bfd_vma value, bfd_byte *buffer, int size)
     case 4:
       *buffer-- = (value & 0xff); value >>= 8;
       *buffer-- = (value & 0xff); value >>= 8;
+      /* Fall through.  */
     case 2:
       *buffer-- = (value & 0xff); value >>= 8;
+      /* Fall through.  */
     case 1:
       *buffer-- = (value & 0xff); value >>= 8;
     }
@@ -217,8 +220,8 @@ do_ns32k_reloc (bfd *      abfd,
 	 the addend to be the negative of the position of the location
 	 within the section; for example, i386-aout does this.  For
 	 i386-aout, pcrel_offset is FALSE.  Some other targets do not
-	 include the position of the location; for example, m88kbcs,
-	 or ELF.  For those targets, pcrel_offset is TRUE.
+	 include the position of the location; for example, ELF.
+	 For those targets, pcrel_offset is TRUE.
 
 	 If we are producing relocatable output, then we must ensure
 	 that this reloc will be correctly computed when the final
@@ -480,31 +483,37 @@ do_ns32k_reloc (bfd *      abfd,
      R result
 
      Do this:
-     i i i i i o o o o o        from bfd_get<size>
-     and           S S S S S    to get the size offset we want
-     +   r r r r r r r r r r  to get the final value to place
-     and           D D D D D  to chop to right size
+     i i i i i o o o o o	from bfd_get<size>
+     and	   S S S S S	to get the size offset we want
+     +	 r r r r r r r r r r  to get the final value to place
+     and	   D D D D D  to chop to right size
      -----------------------
      A A A A A
      And this:
-     ...   i i i i i o o o o o  from bfd_get<size>
-     and   N N N N N            get instruction
+     ...   i i i i i o o o o o	from bfd_get<size>
+     and   N N N N N		get instruction
      -----------------------
      ...   B B B B B
 
      And then:
      B B B B B
-     or              A A A A A
+     or		     A A A A A
      -----------------------
-     R R R R R R R R R R        put into bfd_put<size>.  */
+     R R R R R R R R R R	put into bfd_put<size>.  */
+
+  if (howto->negate)
+    relocation = -relocation;
 
 #define DOIT(x) \
   x = ( (x & ~howto->dst_mask) | (((x & howto->src_mask) +  relocation) & howto->dst_mask))
 
   location = (bfd_byte *) data + addr;
-  switch (howto->size)
+  switch (bfd_get_reloc_size (howto))
     {
     case 0:
+      break;
+
+    case 1:
       {
 	bfd_vma x = get_data (location, 1);
 	DOIT (x);
@@ -512,7 +521,7 @@ do_ns32k_reloc (bfd *      abfd,
       }
       break;
 
-    case 1:
+    case 2:
       if (relocation)
 	{
 	  bfd_vma x = get_data (location, 2);
@@ -520,7 +529,7 @@ do_ns32k_reloc (bfd *      abfd,
 	  put_data ((bfd_vma) x, location, 2);
 	}
       break;
-    case 2:
+    case 4:
       if (relocation)
 	{
 	  bfd_vma x = get_data (location, 4);
@@ -528,20 +537,8 @@ do_ns32k_reloc (bfd *      abfd,
 	  put_data ((bfd_vma) x, location, 4);
 	}
       break;
-    case -2:
-      {
-	bfd_vma x = get_data (location, 4);
-	relocation = -relocation;
-	DOIT(x);
-	put_data ((bfd_vma) x, location, 4);
-      }
-      break;
 
-    case 3:
-      /* Do nothing.  */
-      break;
-
-    case 4:
+    case 8:
 #ifdef BFD64
       if (relocation)
 	{
@@ -574,11 +571,9 @@ _bfd_do_ns32k_reloc_contents (reloc_howto_type *howto,
 {
   int size;
   bfd_vma x;
-  bfd_boolean overflow;
+  bool overflow;
 
-  /* If the size is negative, negate RELOCATION.  This isn't very
-     general.  */
-  if (howto->size < 0)
+  if (howto->negate)
     relocation = -relocation;
 
   /* Get the value we are going to relocate.  */
@@ -586,8 +581,9 @@ _bfd_do_ns32k_reloc_contents (reloc_howto_type *howto,
   switch (size)
     {
     default:
-    case 0:
       abort ();
+    case 0:
+      return bfd_reloc_ok;
     case 1:
     case 2:
     case 4:
@@ -602,7 +598,7 @@ _bfd_do_ns32k_reloc_contents (reloc_howto_type *howto,
      which we don't check for.  We must either check at every single
      operation, which would be tedious, or we must do the computations
      in a type larger than bfd_vma, which would be inefficient.  */
-  overflow = FALSE;
+  overflow = false;
   if (howto->complain_on_overflow != complain_overflow_dont)
     {
       bfd_vma check;
@@ -677,7 +673,7 @@ _bfd_do_ns32k_reloc_contents (reloc_howto_type *howto,
 
 	    if (signed_check > reloc_signed_max
 		|| signed_check < reloc_signed_min)
-	      overflow = TRUE;
+	      overflow = true;
 	  }
 	  break;
 	case complain_overflow_unsigned:
@@ -689,7 +685,7 @@ _bfd_do_ns32k_reloc_contents (reloc_howto_type *howto,
 	    (((1 << (howto->bitsize - 1)) - 1) << 1) | 1;
 
 	    if (check > reloc_unsigned_max)
-	      overflow = TRUE;
+	      overflow = true;
 	  }
 	  break;
 	case complain_overflow_bitfield:
@@ -702,7 +698,7 @@ _bfd_do_ns32k_reloc_contents (reloc_howto_type *howto,
 	    if ((check & ~reloc_bits) != 0
 		&& (((bfd_vma) signed_check & ~reloc_bits)
 		    != (-(bfd_vma) 1 & ~reloc_bits)))
-	      overflow = TRUE;
+	      overflow = true;
 	  }
 	  break;
 	default:
@@ -789,12 +785,7 @@ _bfd_ns32k_final_link_relocate (reloc_howto_type *howto,
 
   /* If the relocation is PC relative, we want to set RELOCATION to
      the distance between the symbol (currently in RELOCATION) and the
-     location we are relocating.  Some targets (e.g., i386-aout)
-     arrange for the contents of the section to be the negative of the
-     offset of the location within the section; for such targets
-     pcrel_offset is FALSE.  Other targets (e.g., m88kbcs or ELF)
-     simply leave the contents of the section as zero; for such
-     targets pcrel_offset is TRUE.  If pcrel_offset is FALSE we do not
+     location we are relocating.  If pcrel_offset is FALSE we do not
      need to subtract out the offset of the location within the
      section (which is just ADDRESS).  */
   if (howto->pc_relative)

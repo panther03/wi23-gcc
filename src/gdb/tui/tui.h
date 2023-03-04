@@ -1,6 +1,6 @@
 /* External/Public TUI Header File.
 
-   Copyright (C) 1998-2013 Free Software Foundation, Inc.
+   Copyright (C) 1998-2023 Free Software Foundation, Inc.
 
    Contributed by Hewlett-Packard Company.
 
@@ -19,12 +19,27 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef TUI_H
-#define TUI_H
+#ifndef TUI_TUI_H
+#define TUI_TUI_H
+
+/* Flag to control tui debugging.  */
+
+extern bool debug_tui;
+
+/* Print a "tui" debug statement.  */
+
+#define tui_debug_printf(fmt, ...) \
+  debug_prefixed_printf_cond (debug_tui, "tui", fmt, ##__VA_ARGS__)
+
+/* Print "tui" enter/exit debug statements.  */
+
+#define TUI_SCOPED_DEBUG_ENTER_EXIT \
+  scoped_debug_enter_exit (debug_tui, "tui")
+
+#define TUI_SCOPED_DEBUG_START_END(fmt, ...) \
+  scoped_debug_start_end (debug_tui, "tui", fmt, ##__VA_ARGS__)
 
 struct ui_file;
-
-extern void strcat_to_buf (char *, int, const char *);
 
 /* Types of error returns.  */
 enum tui_status
@@ -40,33 +55,21 @@ enum tui_win_type
   DISASSEM_WIN,
   DATA_WIN,
   CMD_WIN,
+  STATUS_WIN,
   /* This must ALWAYS be AFTER the major windows last.  */
   MAX_MAJOR_WINDOWS,
-  /* Auxillary windows.  */
-  LOCATOR_WIN,
-  EXEC_INFO_WIN,
-  DATA_ITEM_WIN,
-  /* This must ALWAYS be next to last.  */
-  MAX_WINDOWS,
-  UNDEFINED_WIN		/* LAST */
 };
 
-/* GENERAL TUI FUNCTIONS */
-/* tui.c */
 extern CORE_ADDR tui_get_low_disassembly_address (struct gdbarch *,
 						  CORE_ADDR, CORE_ADDR);
 extern void tui_show_assembly (struct gdbarch *gdbarch, CORE_ADDR addr);
-extern int tui_is_window_visible (enum tui_win_type type);
-extern int tui_get_command_dimension (unsigned int *width,
-				      unsigned int *height);
+extern bool tui_is_window_visible (enum tui_win_type type);
+extern bool tui_get_command_dimension (unsigned int *width,
+				       unsigned int *height);
 
-/* Initialize readline and configure the keymap for the switching
-   key shortcut.  */
-extern void tui_initialize_readline (void);
-
-/* True if enabling the TUI is allowed.  Example, if the top level
-   interpreter is MI, enabling curses will certainly lose.  */
-extern int tui_allowed_p (void);
+/* Initialize readline and configure the keymap for the switching key
+   shortcut.  May be called more than once without issue.  */
+extern void tui_ensure_readline_initialized ();
 
 /* Enter in the tui mode (curses).  */
 extern void tui_enable (void);
@@ -93,13 +96,6 @@ extern enum tui_key_mode tui_current_key_mode;
    keymap.  */
 extern void tui_set_key_mode (enum tui_key_mode mode);
 
-extern int tui_active;
+extern bool tui_active;
 
-extern void tui_show_source (const char *fullname, int line);
-
-extern struct ui_out *tui_out_new (struct ui_file *stream);
-
-/* tui-layout.c */
-extern enum tui_status tui_set_layout_for_display_command (const char *);
-
-#endif
+#endif /* TUI_TUI_H */

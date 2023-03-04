@@ -1,5 +1,5 @@
 /* tc-mn10200.c -- Assembler code for the Matsushita 10200
-   Copyright 1996-2013 Free Software Foundation, Inc.
+   Copyright (C) 1996-2023 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -101,7 +101,7 @@ const pseudo_typeS md_pseudo_table[] =
 };
 
 /* Opcode hash table.  */
-static struct hash_control *mn10200_hash;
+static htab_t mn10200_hash;
 
 /* This table is sorted. Suitable for searching by a binary search.  */
 static const struct reg_name data_registers[] =
@@ -133,7 +133,7 @@ static const struct reg_name other_registers[] =
   (sizeof (other_registers) / sizeof (struct reg_name))
 
 /* reg_name_search does a binary search of the given register table
-   to see if "name" is a valid regiter name.  Returns the register
+   to see if "name" is a valid register name.  Returns the register
    number from the array on success, or -1 on failure.  */
 
 static int
@@ -172,7 +172,7 @@ reg_name_search (const struct reg_name *regs,
   	Input_line_pointer->(next non-blank) char after operand, or is in
   	its original state.  */
 
-static bfd_boolean
+static bool
 data_register_name (expressionS *expressionP)
 {
   int reg_number;
@@ -181,13 +181,12 @@ data_register_name (expressionS *expressionP)
   char c;
 
   /* Find the spelling of the operand.  */
-  start = name = input_line_pointer;
-
-  c = get_symbol_end ();
+  start = input_line_pointer;
+  c = get_symbol_name (&name);
   reg_number = reg_name_search (data_registers, DATA_REG_NAME_CNT, name);
 
   /* Put back the delimiting char.  */
-  *input_line_pointer = c;
+  (void) restore_line_pointer (c);
 
   /* Look to see if it's in the register table.  */
   if (reg_number >= 0)
@@ -199,12 +198,12 @@ data_register_name (expressionS *expressionP)
       expressionP->X_add_symbol = NULL;
       expressionP->X_op_symbol = NULL;
 
-      return TRUE;
+      return true;
     }
 
   /* Reset the line as if we had not done anything.  */
   input_line_pointer = start;
-  return FALSE;
+  return false;
 }
 
 /* Summary of register_name().
@@ -217,7 +216,7 @@ data_register_name (expressionS *expressionP)
   	Input_line_pointer->(next non-blank) char after operand, or is in
   	its original state.  */
 
-static bfd_boolean
+static bool
 address_register_name (expressionS *expressionP)
 {
   int reg_number;
@@ -226,13 +225,12 @@ address_register_name (expressionS *expressionP)
   char c;
 
   /* Find the spelling of the operand.  */
-  start = name = input_line_pointer;
-
-  c = get_symbol_end ();
+  start = input_line_pointer;
+  c = get_symbol_name (&name);
   reg_number = reg_name_search (address_registers, ADDRESS_REG_NAME_CNT, name);
 
   /* Put back the delimiting char.  */
-  *input_line_pointer = c;
+  (void) restore_line_pointer (c);
 
   /* Look to see if it's in the register table.  */
   if (reg_number >= 0)
@@ -244,12 +242,12 @@ address_register_name (expressionS *expressionP)
       expressionP->X_add_symbol = NULL;
       expressionP->X_op_symbol = NULL;
 
-      return TRUE;
+      return true;
     }
 
   /* Reset the line as if we had not done anything.  */
   input_line_pointer = start;
-  return FALSE;
+  return false;
 }
 
 /* Summary of register_name().
@@ -262,7 +260,7 @@ address_register_name (expressionS *expressionP)
   	Input_line_pointer->(next non-blank) char after operand, or is in
   	its original state.  */
 
-static bfd_boolean
+static bool
 other_register_name (expressionS *expressionP)
 {
   int reg_number;
@@ -271,13 +269,12 @@ other_register_name (expressionS *expressionP)
   char c;
 
   /* Find the spelling of the operand.  */
-  start = name = input_line_pointer;
-
-  c = get_symbol_end ();
+  start = input_line_pointer;
+  c = get_symbol_name (&name);
   reg_number = reg_name_search (other_registers, OTHER_REG_NAME_CNT, name);
 
   /* Put back the delimiting char.  */
-  *input_line_pointer = c;
+  (void) restore_line_pointer (c);
 
   /* Look to see if it's in the register table.  */
   if (reg_number >= 0)
@@ -289,12 +286,12 @@ other_register_name (expressionS *expressionP)
       expressionP->X_add_symbol = NULL;
       expressionP->X_op_symbol = NULL;
 
-      return TRUE;
+      return true;
     }
 
   /* Reset the line as if we had not done anything.  */
   input_line_pointer = start;
-  return FALSE;
+  return false;
 }
 
 void
@@ -306,7 +303,7 @@ none yet\n"));
 
 int
 md_parse_option (int c ATTRIBUTE_UNUSED,
-		 char *arg ATTRIBUTE_UNUSED)
+		 const char *arg ATTRIBUTE_UNUSED)
 {
   return 0;
 }
@@ -317,10 +314,10 @@ md_undefined_symbol (char *name ATTRIBUTE_UNUSED)
   return 0;
 }
 
-char *
+const char *
 md_atof (int type, char *litp, int *sizep)
 {
-  return ieee_md_atof (type, litp, sizep, FALSE);
+  return ieee_md_atof (type, litp, sizep, false);
 }
 
 void
@@ -385,7 +382,7 @@ md_convert_frag (bfd *abfd ATTRIBUTE_UNUSED,
       /* Create a fixup for the reversed conditional branch.  */
       sprintf (buf, ".%s_%ld", FAKE_LABEL_NAME, label_count++);
       fix_new (fragP, fragP->fr_fix + 1, 1,
-	       symbol_new (buf, sec, 0, fragP->fr_next),
+	       symbol_new (buf, sec, fragP->fr_next, 0),
 	       fragP->fr_offset, 1, BFD_RELOC_8_PCREL);
 
       /* Now create the unconditional branch + fixup to the
@@ -442,7 +439,7 @@ md_convert_frag (bfd *abfd ATTRIBUTE_UNUSED,
       /* Create a fixup for the reversed conditional branch.  */
       sprintf (buf, ".%s_%ld", FAKE_LABEL_NAME, label_count++);
       fix_new (fragP, fragP->fr_fix + 1, 1,
-	       symbol_new (buf, sec, 0, fragP->fr_next),
+	       symbol_new (buf, sec, fragP->fr_next, 0),
 	       fragP->fr_offset, 1, BFD_RELOC_8_PCREL);
 
       /* Now create the unconditional branch + fixup to the
@@ -531,7 +528,7 @@ md_convert_frag (bfd *abfd ATTRIBUTE_UNUSED,
       /* Create a fixup for the reversed conditional branch.  */
       sprintf (buf, ".%s_%ld", FAKE_LABEL_NAME, label_count++);
       fix_new (fragP, fragP->fr_fix + 2, 1,
-	       symbol_new (buf, sec, 0, fragP->fr_next),
+	       symbol_new (buf, sec, fragP->fr_next, 0),
 	       fragP->fr_offset, 1, BFD_RELOC_8_PCREL);
 
       /* Now create the unconditional branch + fixup to the
@@ -612,7 +609,7 @@ md_convert_frag (bfd *abfd ATTRIBUTE_UNUSED,
       /* Create a fixup for the reversed conditional branch.  */
       sprintf (buf, ".%s_%ld", FAKE_LABEL_NAME, label_count++);
       fix_new (fragP, fragP->fr_fix + 2, 1,
-	       symbol_new (buf, sec, 0, fragP->fr_next),
+	       symbol_new (buf, sec, fragP->fr_next, 0),
 	       fragP->fr_offset, 1, BFD_RELOC_8_PCREL);
 
       /* Now create the unconditional branch + fixup to the
@@ -678,17 +675,17 @@ md_convert_frag (bfd *abfd ATTRIBUTE_UNUSED,
 valueT
 md_section_align (asection *seg, valueT addr)
 {
-  int align = bfd_get_section_alignment (stdoutput, seg);
-  return ((addr + (1 << align) - 1) & (-1 << align));
+  int align = bfd_section_alignment (seg);
+  return ((addr + (1 << align) - 1) & -(1 << align));
 }
 
 void
 md_begin (void)
 {
-  char *prev_name = "";
-  register const struct mn10200_opcode *op;
+  const char *prev_name = "";
+  const struct mn10200_opcode *op;
 
-  mn10200_hash = hash_new ();
+  mn10200_hash = str_htab_create ();
 
   /* Insert unique names into hash table.  The MN10200 instruction set
      has many identical opcode names that have different opcodes based
@@ -701,7 +698,7 @@ md_begin (void)
       if (strcmp (prev_name, op->name))
 	{
 	  prev_name = (char *) op->name;
-	  hash_insert (mn10200_hash, op->name, (char *) op);
+	  str_hash_insert (mn10200_hash, op->name, op, 0);
 	}
       op++;
     }
@@ -751,7 +748,7 @@ arelent *
 tc_gen_reloc (asection *seg ATTRIBUTE_UNUSED, fixS *fixp)
 {
   arelent *reloc;
-  reloc = xmalloc (sizeof (arelent));
+  reloc = XNEW (arelent);
 
   if (fixp->fx_subsy != NULL)
     {
@@ -765,14 +762,7 @@ tc_gen_reloc (asection *seg ATTRIBUTE_UNUSED, fixS *fixp)
 	/* FIXME: We should try more ways to resolve difference expressions
 	   here.  At least this is better than silently ignoring the
 	   subtrahend.  */
-	as_bad_where (fixp->fx_file, fixp->fx_line,
-		      _("can't resolve `%s' {%s section} - `%s' {%s section}"),
-		      fixp->fx_addsy ? S_GET_NAME (fixp->fx_addsy) : "0",
-		      segment_name (fixp->fx_addsy
-				    ? S_GET_SEGMENT (fixp->fx_addsy)
-				    : absolute_section),
-		      S_GET_NAME (fixp->fx_subsy),
-		      segment_name (S_GET_SEGMENT (fixp->fx_addsy)));
+	as_bad_subtract (fixp);
     }
 
   reloc->howto = bfd_reloc_type_lookup (stdoutput, fixp->fx_r_type);
@@ -784,7 +774,7 @@ tc_gen_reloc (asection *seg ATTRIBUTE_UNUSED, fixS *fixp)
       return NULL;
     }
   reloc->address = fixp->fx_frag->fr_address + fixp->fx_where;
-  reloc->sym_ptr_ptr = xmalloc (sizeof (asymbol *));
+  reloc->sym_ptr_ptr = XNEW (asymbol *);
   *reloc->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
   reloc->addend = fixp->fx_offset;
   return reloc;
@@ -893,7 +883,7 @@ md_assemble (char *str)
     *s++ = '\0';
 
   /* Find the first opcode with the proper name.  */
-  opcode = (struct mn10200_opcode *) hash_find (mn10200_hash, str);
+  opcode = (struct mn10200_opcode *) str_hash_find (mn10200_hash, str);
   if (opcode == NULL)
     {
       as_bad (_("Unrecognized opcode: `%s'"), str);
@@ -980,32 +970,32 @@ md_assemble (char *str)
 	    }
 	  else if (operand->flags & MN10200_OPERAND_PSW)
 	    {
-	      char *start = input_line_pointer;
-	      char c = get_symbol_end ();
+	      char *start;
+	      char c = get_symbol_name (&start);
 
 	      if (strcmp (start, "psw") != 0)
 		{
-		  *input_line_pointer = c;
+		  (void) restore_line_pointer (c);
 		  input_line_pointer = hold;
 		  str = hold;
 		  goto error;
 		}
-	      *input_line_pointer = c;
+	      (void) restore_line_pointer (c);
 	      goto keep_going;
 	    }
 	  else if (operand->flags & MN10200_OPERAND_MDR)
 	    {
-	      char *start = input_line_pointer;
-	      char c = get_symbol_end ();
+	      char *start;
+	      char c = get_symbol_name (&start);
 
 	      if (strcmp (start, "mdr") != 0)
 		{
-		  *input_line_pointer = c;
+		  (void) restore_line_pointer (c);
 		  input_line_pointer = hold;
 		  str = hold;
 		  goto error;
 		}
-	      *input_line_pointer = c;
+	      (void) restore_line_pointer (c);
 	      goto keep_going;
 	    }
 	  else if (data_register_name (&ex))
@@ -1106,7 +1096,7 @@ md_assemble (char *str)
 	      break;
 	    }
 
-keep_going:
+	keep_going:
 	  str = input_line_pointer;
 	  input_line_pointer = hold;
 
@@ -1157,14 +1147,14 @@ keep_going:
     abort ();
 
   /* Write out the instruction.  */
-  dwarf2_emit_insn (0);
+  dwarf2_emit_insn (size);
   if (relaxable && fc > 0)
     {
       /* On a 64-bit host the size of an 'int' is not the same
 	 as the size of a pointer, so we need a union to convert
 	 the opindex field of the fr_cgen structure into a char *
 	 so that it can be stored in the frag.  We do not have
-	 to worry about loosing accuracy as we are not going to
+	 to worry about losing accuracy as we are not going to
 	 be even close to the 32bit limit of the int.  */
       union
       {
@@ -1337,4 +1327,3 @@ keep_going:
 	}
     }
 }
-

@@ -1,6 +1,6 @@
 /* Target-dependent code for GNU/Linux x86.
 
-   Copyright (C) 2002-2013 Free Software Foundation, Inc.
+   Copyright (C) 2002-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -29,7 +29,7 @@
 /* Register number for the "orig_eax" pseudo-register.  If this
    pseudo-register contains a value >= 0 it is interpreted as the
    system call number that the kernel is supposed to restart.  */
-#define I386_LINUX_ORIG_EAX_REGNUM I386_AVX_NUM_REGS
+#define I386_LINUX_ORIG_EAX_REGNUM (I386_PKRU_REGNUM + 1)
 
 /* Total number of registers for GNU/Linux.  */
 #define I386_LINUX_NUM_REGS (I386_LINUX_ORIG_EAX_REGNUM + 1)
@@ -37,18 +37,28 @@
 /* Get XSAVE extended state xcr0 from core dump.  */
 extern uint64_t i386_linux_core_read_xcr0 (bfd *abfd);
 
-/* Linux target description.  */
-extern struct target_desc *tdesc_i386_linux;
-extern struct target_desc *tdesc_i386_mmx_linux;
-extern struct target_desc *tdesc_i386_avx_linux;
+/* Handle and display information related to the MPX bound violation
+   to the user.  */
+extern void i386_linux_report_signal_info (struct gdbarch *gdbarch,
+					   struct ui_out *uiout,
+					   enum gdb_signal siggnal);
+
+/* Return the target description according to XCR0.  */
+extern const struct target_desc *i386_linux_read_description (uint64_t xcr0);
 
 /* Format of XSAVE extended state is:
- 	struct
+	struct
 	{
 	  fxsave_bytes[0..463]
 	  sw_usable_bytes[464..511]
 	  xstate_hdr_bytes[512..575]
 	  avx_bytes[576..831]
+	  mpx_bytes [960..1032]
+	  avx512_k_regs[1088..1152]
+	  avx512_zmmh_regs0-7[1153..1407]
+	  avx512_zmmh_regs8-15[1408..1663]
+	  avx512_zmm_regs16-31[1664..2687]
+	  pkru[2688..2752]
 	  future_state etc
 	};
 
@@ -64,5 +74,8 @@ extern struct target_desc *tdesc_i386_avx_linux;
 #define I386_LINUX_XSAVE_XCR0_OFFSET 464
 
 extern int i386_linux_gregset_reg_offset[];
+
+/* Return x86 siginfo type.  */
+extern struct type *x86_linux_get_siginfo_type (struct gdbarch *gdbarch);
 
 #endif /* i386-linux-tdep.h */

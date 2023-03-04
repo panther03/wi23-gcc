@@ -1,6 +1,5 @@
 /* tc-mmix.h -- Header file for tc-mmix.c.
-   Copyright (C) 2001, 2002, 2003, 2005, 2007, 2008
-   Free Software Foundation, Inc.
+   Copyright (C) 2001-2023 Free Software Foundation, Inc.
    Written by Hans-Peter Nilsson (hp@bitrange.com).
 
    This file is part of GAS, the GNU Assembler.
@@ -33,12 +32,6 @@ extern const char mmix_comment_chars[];
 extern const char mmix_symbol_chars[];
 #define tc_symbol_chars mmix_symbol_chars
 
-extern const char mmix_exp_chars[];
-#define EXP_CHARS mmix_exp_chars
-
-extern const char mmix_flt_chars[];
-#define FLT_CHARS mmix_flt_chars
-
 /* "@" is a synonym for ".".  */
 #define LEX_AT (LEX_BEGIN_NAME)
 
@@ -55,8 +48,8 @@ extern void mmix_handle_mmixal (void);
 extern void mmix_md_begin (void);
 #define md_begin mmix_md_begin
 
-extern void mmix_md_end (void);
-#define md_end mmix_md_end
+extern void mmix_md_finish (void);
+#define md_finish mmix_md_finish
 
 extern int mmix_current_location \
   (void (*fn) (expressionS *), expressionS *);
@@ -175,7 +168,6 @@ extern int mmix_force_relocation (struct fix *);
 
 /* Call md_pcrel_from_section(), not md_pcrel_from().  */
 #define MD_PCREL_FROM_SECTION(FIX, SEC) md_pcrel_from_section (FIX, SEC)
-extern long md_pcrel_from_section (struct fix *, segT);
 
 #define md_section_align(seg, size) (size)
 
@@ -186,7 +178,7 @@ extern long md_pcrel_from_section (struct fix *, segT);
 
 extern fragS *mmix_opcode_frag;
 #define TC_FRAG_TYPE fragS *
-#define TC_FRAG_INIT(frag) (frag)->tc_frag_data = mmix_opcode_frag
+#define TC_FRAG_INIT(frag, max_bytes) (frag)->tc_frag_data = mmix_opcode_frag
 
 /* We need to associate each section symbol with a list of GREGs defined
    for that section/segment and sorted on offset, between the point where
@@ -234,8 +226,7 @@ extern void mmix_md_do_align (int, char *, int, int);
    explicitly say one byte.  */
 #define DWARF2_LINE_MIN_INSN_LENGTH 1
 
-/* This target is buggy, and sets fix size too large.  */
-#define TC_FX_SIZE_SLACK(FIX) 6
-
 /* MMIX has global register symbols.  */
 #define TC_GLOBAL_REGISTER_SYMBOL_OK
+
+#define md_single_noop_insn "swym 0"

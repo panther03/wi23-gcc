@@ -1,5 +1,5 @@
 /* Simulator option handling.
-   Copyright (C) 1996-2013 Free Software Foundation, Inc.
+   Copyright (C) 1996-2023 Free Software Foundation, Inc.
    Contributed by Cygnus Support.
 
 This file is part of GDB, the GNU debugger.
@@ -17,24 +17,25 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "sim-main.h"
-#ifdef HAVE_STRING_H
-#include <string.h>
-#else
-#ifdef HAVE_STRINGS_H
-#include <strings.h>
-#endif
-#endif
-#ifdef HAVE_STDLIB_H
-#include <stdlib.h>
-#endif
+/* This must come before any other includes.  */
+#include "defs.h"
+
 #include <ctype.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+#include "bfd.h"
+#include "environ.h"
+#include "hashtab.h"
 #include "libiberty.h"
+
+#include "sim-main.h"
 #include "sim-options.h"
 #include "sim-io.h"
 #include "sim-assert.h"
-
-#include "bfd.h"
+#include "version.h"
 
 /* Add a set of options to the simulator.
    TABLE is an array of OPTIONS terminated by a NULL `opt.name' entry.
@@ -95,24 +96,22 @@ typedef enum {
   OPTION_DO_COMMAND,
   OPTION_ARCHITECTURE,
   OPTION_TARGET,
+  OPTION_TARGET_INFO,
   OPTION_ARCHITECTURE_INFO,
   OPTION_ENVIRONMENT,
   OPTION_ALIGNMENT,
   OPTION_VERBOSE,
   OPTION_ENDIAN,
   OPTION_DEBUG,
-#ifdef SIM_HAVE_FLATMEM
-  OPTION_MEM_SIZE,
-#endif
   OPTION_HELP,
-#ifdef SIM_H8300 /* FIXME: Should be movable to h8300 dir.  */
-  OPTION_H8300H,
-  OPTION_H8300S,
-  OPTION_H8300SX,
-#endif
+  OPTION_VERSION,
   OPTION_LOAD_LMA,
   OPTION_LOAD_VMA,
-  OPTION_SYSROOT
+  OPTION_SYSROOT,
+  OPTION_ARGV0,
+  OPTION_ENV_SET,
+  OPTION_ENV_UNSET,
+  OPTION_ENV_CLEAR,
 } STANDARD_OPTIONS;
 
 static const OPTION standard_options[] =
@@ -122,17 +121,15 @@ static const OPTION standard_options[] =
       standard_option_handler, NULL },
 
   { {"endian", required_argument, NULL, OPTION_ENDIAN},
-      'E', "big|little", "Set endianness",
+      'E', "B|big|L|little", "Set endianness",
       standard_option_handler, NULL },
 
-#ifdef SIM_HAVE_ENVIRONMENT
   /* This option isn't supported unless all choices are supported in keeping
      with the goal of not printing in --help output things the simulator can't
      do [as opposed to things that just haven't been configured in].  */
   { {"environment", required_argument, NULL, OPTION_ENVIRONMENT},
       '\0', "user|virtual|operating", "Set running environment",
       standard_option_handler },
-#endif
 
   { {"alignment", required_argument, NULL, OPTION_ALIGNMENT},
       '\0', "strict|nonstrict|forced", "Set memory access alignment",
@@ -148,30 +145,15 @@ static const OPTION standard_options[] =
       '\0', "FILE NAME", "Specify debugging output file",
       standard_option_handler },
 
-#ifdef SIM_H8300 /* FIXME: Should be movable to h8300 dir.  */
-  { {"h8300h", no_argument, NULL, OPTION_H8300H},
-      'h', NULL, "Indicate the CPU is H8/300H",
-      standard_option_handler },
-  { {"h8300s", no_argument, NULL, OPTION_H8300S},
-      'S', NULL, "Indicate the CPU is H8S",
-      standard_option_handler },
-  { {"h8300sx", no_argument, NULL, OPTION_H8300SX},
-      'x', NULL, "Indicate the CPU is H8SX",
-      standard_option_handler },
-#endif
-
-#ifdef SIM_HAVE_FLATMEM
-  { {"mem-size", required_argument, NULL, OPTION_MEM_SIZE},
-     'm', "<size>[in bytes, Kb (k suffix), Mb (m suffix) or Gb (g suffix)]",
-     "Specify memory size", standard_option_handler },
-#endif
-
   { {"do-command", required_argument, NULL, OPTION_DO_COMMAND},
       '\0', "COMMAND", ""/*undocumented*/,
       standard_option_handler },
 
   { {"help", no_argument, NULL, OPTION_HELP},
-      'H', NULL, "Print help information",
+      'h', NULL, "Print help information",
+      standard_option_handler },
+  { {"version", no_argument, NULL, OPTION_VERSION},
+      '\0', NULL, "Print version information",
       standard_option_handler },
 
   { {"architecture", required_argument, NULL, OPTION_ARCHITECTURE},
@@ -187,27 +169,83 @@ static const OPTION standard_options[] =
   { {"target", required_argument, NULL, OPTION_TARGET},
       '\0', "BFDNAME", "Specify the object-code format for the object files",
       standard_option_handler },
+  { {"target-info", no_argument, NULL, OPTION_TARGET_INFO},
+      '\0', NULL, "List supported targets", standard_option_handler },
+  { {"info-target", no_argument, NULL, OPTION_TARGET_INFO},
+      '\0', NULL, NULL, standard_option_handler },
 
-#ifdef SIM_HANDLES_LMA
   { {"load-lma", no_argument, NULL, OPTION_LOAD_LMA},
       '\0', NULL,
-#if SIM_HANDLES_LMA
     "Use VMA or LMA addresses when loading image (default LMA)",
-#else
-    "Use VMA or LMA addresses when loading image (default VMA)",
-#endif
       standard_option_handler, "load-{lma,vma}" },
   { {"load-vma", no_argument, NULL, OPTION_LOAD_VMA},
       '\0', NULL, "", standard_option_handler,  "" },
-#endif
 
   { {"sysroot", required_argument, NULL, OPTION_SYSROOT},
       '\0', "SYSROOT",
     "Root for system calls with absolute file-names and cwd at start",
       standard_option_handler, NULL },
 
+  { {"argv0", required_argument, NULL, OPTION_ARGV0},
+      '\0', "ARGV0", "Set argv[0] to the specified string",
+      standard_option_handler, NULL },
+
+  { {"env-set", required_argument, NULL, OPTION_ENV_SET},
+      '\0', "VAR=VAL", "Set the variable in the program's environment",
+      standard_option_handler, NULL },
+  { {"env-unset", required_argument, NULL, OPTION_ENV_UNSET},
+      '\0', "VAR", "Unset the variable in the program's environment",
+      standard_option_handler, NULL },
+  { {"env-clear", no_argument, NULL, OPTION_ENV_CLEAR},
+      '\0', NULL, "Clear the program's environment",
+      standard_option_handler, NULL },
+
   { {NULL, no_argument, NULL, 0}, '\0', NULL, NULL, NULL, NULL }
 };
+
+static SIM_RC
+env_set (SIM_DESC sd, const char *arg)
+{
+  int i, varlen;
+  char *eq;
+  char **envp;
+
+  if (STATE_PROG_ENVP (sd) == NULL)
+    STATE_PROG_ENVP (sd) = dupargv (environ);
+
+  eq = strchr (arg, '=');
+  if (eq == NULL)
+    {
+      sim_io_eprintf (sd, "invalid syntax when setting env var `%s'"
+		      ": missing value", arg);
+      return SIM_RC_FAIL;
+    }
+  /* Include the = in the comparison below.  */
+  varlen = eq - arg + 1;
+
+  /* If we can find an existing variable, replace it.  */
+  envp = STATE_PROG_ENVP (sd);
+  for (i = 0; envp[i]; ++i)
+    {
+      if (strncmp (envp[i], arg, varlen) == 0)
+	{
+	  free (envp[i]);
+	  envp[i] = xstrdup (arg);
+	  break;
+	}
+    }
+
+  /* If we didn't find the var, add it.  */
+  if (envp[i] == NULL)
+    {
+      envp = xrealloc (envp, (i + 2) * sizeof (char *));
+      envp[i] = xstrdup (arg);
+      envp[i + 1] = NULL;
+      STATE_PROG_ENVP (sd) = envp;
+  }
+
+  return SIM_RC_OK;
+}
 
 static SIM_RC
 standard_option_handler (SIM_DESC sd, sim_cpu *cpu, int opt,
@@ -222,25 +260,25 @@ standard_option_handler (SIM_DESC sd, sim_cpu *cpu, int opt,
       break;
 
     case OPTION_ENDIAN:
-      if (strcmp (arg, "big") == 0)
+      if (strcmp (arg, "big") == 0 || strcmp (arg, "B") == 0)
 	{
-	  if (WITH_TARGET_BYTE_ORDER == LITTLE_ENDIAN)
+	  if (WITH_TARGET_BYTE_ORDER == BFD_ENDIAN_LITTLE)
 	    {
 	      sim_io_eprintf (sd, "Simulator compiled for little endian only.\n");
 	      return SIM_RC_FAIL;
 	    }
 	  /* FIXME:wip: Need to set something in STATE_CONFIG.  */
-	  current_target_byte_order = BIG_ENDIAN;
+	  current_target_byte_order = BFD_ENDIAN_BIG;
 	}
-      else if (strcmp (arg, "little") == 0)
+      else if (strcmp (arg, "little") == 0 || strcmp (arg, "L") == 0)
 	{
-	  if (WITH_TARGET_BYTE_ORDER == BIG_ENDIAN)
+	  if (WITH_TARGET_BYTE_ORDER == BFD_ENDIAN_BIG)
 	    {
 	      sim_io_eprintf (sd, "Simulator compiled for big endian only.\n");
 	      return SIM_RC_FAIL;
 	    }
 	  /* FIXME:wip: Need to set something in STATE_CONFIG.  */
-	  current_target_byte_order = LITTLE_ENDIAN;
+	  current_target_byte_order = BFD_ENDIAN_LITTLE;
 	}
       else
 	{
@@ -270,6 +308,7 @@ standard_option_handler (SIM_DESC sd, sim_cpu *cpu, int opt,
 	    case USER_ENVIRONMENT: type = "user"; break;
 	    case VIRTUAL_ENVIRONMENT: type = "virtual"; break;
 	    case OPERATING_ENVIRONMENT: type = "operating"; break;
+	    default: abort ();
 	    }
 	  sim_io_eprintf (sd, "Simulator compiled for the %s environment only.\n",
 			  type);
@@ -318,6 +357,7 @@ standard_option_handler (SIM_DESC sd, sim_cpu *cpu, int opt,
 	case FORCED_ALIGNMENT:
 	  sim_io_eprintf (sd, "Simulator compiled for forced alignment only.\n");
 	  break;
+	default: abort ();
 	}
       return SIM_RC_FAIL;
 
@@ -359,47 +399,6 @@ standard_option_handler (SIM_DESC sd, sim_cpu *cpu, int opt,
 	}
       break;
 
-#ifdef SIM_H8300 /* FIXME: Can be moved to h8300 dir.  */
-    case OPTION_H8300H:
-      set_h8300h (bfd_mach_h8300h);
-      break;
-    case OPTION_H8300S:
-      set_h8300h (bfd_mach_h8300s);
-      break;
-    case OPTION_H8300SX:
-      set_h8300h (bfd_mach_h8300sx);
-      break;
-#endif
-
-#ifdef SIM_HAVE_FLATMEM
-    case OPTION_MEM_SIZE:
-      {
-	char * endp;
-	unsigned long ul = strtol (arg, &endp, 0);
-
-	switch (* endp)
-	  {
-	  case 'k': case 'K': size <<= 10; break;
-	  case 'm': case 'M': size <<= 20; break;
-	  case 'g': case 'G': size <<= 30; break;
-	  case ' ': case '\0': case '\t':  break;
-	  default:
-	    if (ul > 0)
-	      sim_io_eprintf (sd, "Ignoring strange character at end of memory size: %c\n", * endp);
-	    break;
-	  }
-
-	/* 16384: some minimal amount */
-	if (! isdigit (arg[0]) || ul < 16384)
-	  {
-	    sim_io_eprintf (sd, "Invalid memory size `%s'", arg);
-	    return SIM_RC_FAIL;
-	  }
-	STATE_MEM_SIZE (sd) = ul;
-      }
-      break;
-#endif
-
     case OPTION_DO_COMMAND:
       sim_do_command (sd, arg);
       break;
@@ -436,6 +435,20 @@ standard_option_handler (SIM_DESC sd, sim_cpu *cpu, int opt,
 	break;
       }
 
+    case OPTION_TARGET_INFO:
+      {
+	const char **list = bfd_target_list ();
+	const char **lp;
+	if (list == NULL)
+	  abort ();
+	sim_io_printf (sd, "Possible targets:");
+	for (lp = list; *lp != NULL; lp++)
+	  sim_io_printf (sd, " %s", *lp);
+	sim_io_printf (sd, "\n");
+	free (list);
+	break;
+      }
+
     case OPTION_LOAD_LMA:
       {
 	STATE_LOAD_AT_LMA_P (sd) = 1;
@@ -455,6 +468,12 @@ standard_option_handler (SIM_DESC sd, sim_cpu *cpu, int opt,
       /* FIXME: 'twould be nice to do something similar if gdb.  */
       break;
 
+    case OPTION_VERSION:
+      sim_print_version (sd, is_command);
+      if (STATE_OPEN_KIND (sd) == SIM_OPEN_STANDALONE)
+	exit (0);
+      break;
+
     case OPTION_SYSROOT:
       /* Don't leak memory in the odd event that there's lots of
 	 --sysroot=... options.  We treat "" specially since this
@@ -465,6 +484,51 @@ standard_option_handler (SIM_DESC sd, sim_cpu *cpu, int opt,
 	simulator_sysroot = xstrdup (arg);
       else
 	simulator_sysroot = "";
+      break;
+
+    case OPTION_ARGV0:
+      free (STATE_PROG_ARGV0 (sd));
+      STATE_PROG_ARGV0 (sd) = xstrdup (arg);
+      break;
+
+    case OPTION_ENV_SET:
+      return env_set (sd, arg);
+
+    case OPTION_ENV_UNSET:
+      {
+	int i, varlen;
+	char **envp;
+
+	if (STATE_PROG_ENVP (sd) == NULL)
+	  STATE_PROG_ENVP (sd) = dupargv (environ);
+
+	varlen = strlen (arg);
+
+	/* If we can find an existing variable, replace it.  */
+	envp = STATE_PROG_ENVP (sd);
+	for (i = 0; envp[i]; ++i)
+	  {
+	    char *env = envp[i];
+
+	    if (strncmp (env, arg, varlen) == 0
+		&& (env[varlen] == '\0' || env[varlen] == '='))
+	      {
+		free (envp[i]);
+		break;
+	      }
+	  }
+
+	/* If we clear the var, shift the array down.  */
+	for (; envp[i]; ++i)
+	  envp[i] = envp[i + 1];
+
+	break;
+      }
+
+    case OPTION_ENV_CLEAR:
+      freeargv (STATE_PROG_ENVP (sd));
+      STATE_PROG_ENVP (sd) = xmalloc (sizeof (char *));
+      STATE_PROG_ENVP (sd)[0] = NULL;
       break;
     }
 
@@ -479,52 +543,42 @@ standard_install (SIM_DESC sd)
   SIM_ASSERT (STATE_MAGIC (sd) == SIM_MAGIC_NUMBER);
   if (sim_add_option_table (sd, NULL, standard_options) != SIM_RC_OK)
     return SIM_RC_FAIL;
-#ifdef SIM_HANDLES_LMA
-  STATE_LOAD_AT_LMA_P (sd) = SIM_HANDLES_LMA;
-#endif
+  STATE_LOAD_AT_LMA_P (sd) = 1;
   return SIM_RC_OK;
 }
 
 /* Return non-zero if arg is a duplicate argument.
    If ARG is NULL, initialize.  */
 
-#define ARG_HASH_SIZE 97
-#define ARG_HASH(a) ((256 * (unsigned char) a[0] + (unsigned char) a[1]) % ARG_HASH_SIZE)
-
 static int
 dup_arg_p (const char *arg)
 {
-  int hash;
-  static const char **arg_table = NULL;
+  static htab_t arg_table = NULL;
+  void **slot;
 
   if (arg == NULL)
     {
       if (arg_table == NULL)
-	arg_table = (const char **) xmalloc (ARG_HASH_SIZE * sizeof (char *));
-      memset (arg_table, 0, ARG_HASH_SIZE * sizeof (char *));
+	arg_table = htab_create_alloc (10, htab_hash_string,
+				       htab_eq_string, NULL,
+				       xcalloc, free);
+      htab_empty (arg_table);
       return 0;
     }
 
-  hash = ARG_HASH (arg);
-  while (arg_table[hash] != NULL)
-    {
-      if (strcmp (arg, arg_table[hash]) == 0)
-	return 1;
-      /* We assume there won't be more than ARG_HASH_SIZE arguments so we
-	 don't check if the table is full.  */
-      if (++hash == ARG_HASH_SIZE)
-	hash = 0;
-    }
-  arg_table[hash] = arg;
+  slot = htab_find_slot (arg_table, arg, INSERT);
+  if (*slot != NULL)
+    return 1;
+  *slot = (void *) arg;
   return 0;
 }
 
 /* Called by sim_open to parse the arguments.  */
 
 SIM_RC
-sim_parse_args (SIM_DESC sd, char **argv)
+sim_parse_args (SIM_DESC sd, char * const *argv)
 {
-  int c, i, argc, num_opts;
+  int c, i, argc, num_opts, save_opterr;
   char *p, *short_options;
   /* The `val' option struct entry is dynamically assigned for options that
      only come in the long form.  ORIG_VAL is used to get the original value
@@ -538,8 +592,7 @@ sim_parse_args (SIM_DESC sd, char **argv)
   SIM_RC result = SIM_RC_OK;
 
   /* Count the number of arguments.  */
-  for (argc = 0; argv[argc] != NULL; ++argc)
-    continue;
+  argc = countargv (argv);
 
   /* Count the number of options.  */
   num_opts = 0;
@@ -648,6 +701,11 @@ sim_parse_args (SIM_DESC sd, char **argv)
   /* Ensure getopt is initialized.  */
   optind = 0;
 
+  /* Do not lot getopt throw errors for us.  But don't mess with the state for
+     any callers higher up by saving/restoring it.  */
+  save_opterr = opterr;
+  opterr = 0;
+
   while (1)
     {
       int longind, optc;
@@ -656,11 +714,67 @@ sim_parse_args (SIM_DESC sd, char **argv)
       if (optc == -1)
 	{
 	  if (STATE_OPEN_KIND (sd) == SIM_OPEN_STANDALONE)
-	    STATE_PROG_ARGV (sd) = dupargv (argv + optind);
+	    {
+	      char **new_argv;
+
+	      free (STATE_PROG_FILE (sd));
+	      STATE_PROG_FILE (sd) = NULL;
+
+	      /* Handle any inline variables if -- wasn't used.  */
+	      if (argv[optind] != NULL && optind > 0
+		  && strcmp (argv[optind - 1], "--") != 0)
+		{
+		  while (1)
+		    {
+		      const char *arg = argv[optind];
+
+		      if (strchr (arg, '=') == NULL)
+			break;
+
+		      env_set (sd, arg);
+		      ++optind;
+		    }
+		}
+
+	      new_argv = dupargv (argv + optind);
+	      freeargv (STATE_PROG_ARGV (sd));
+	      STATE_PROG_ARGV (sd) = new_argv;
+
+	      /* Skip steps when argc == 0.  */
+	      if (argv[optind] != NULL)
+		{
+		  STATE_PROG_FILE (sd) = xstrdup (argv[optind]);
+
+		  if (STATE_PROG_ARGV0 (sd) != NULL)
+		    {
+		      free (new_argv[0]);
+		      new_argv[0] = xstrdup (STATE_PROG_ARGV0 (sd));
+		    }
+		}
+	    }
 	  break;
 	}
       if (optc == '?')
 	{
+	  /* If getopt rejects a short option, optopt is set to the bad char.
+	     If it rejects a long option, we have to look at optind.  In the
+	     short option case, argv could be multiple short options.  */
+	  const char *badopt;
+	  char optbuf[3];
+
+	  if (optopt)
+	    {
+	      sprintf (optbuf, "-%c", optopt);
+	      badopt = optbuf;
+	    }
+	  else
+	    badopt = argv[optind - 1];
+
+	  sim_io_eprintf (sd,
+			  "%s: unrecognized option '%s'\n"
+			  "Use --help for a complete list of options.\n",
+			  STATE_MY_NAME (sd), badopt);
+
 	  result = SIM_RC_FAIL;
 	  break;
 	}
@@ -671,6 +785,8 @@ sim_parse_args (SIM_DESC sd, char **argv)
 	  break;
 	}
     }
+
+  opterr = save_opterr;
 
   free (long_options);
   free (short_options);
@@ -815,7 +931,8 @@ void
 sim_print_help (SIM_DESC sd, int is_command)
 {
   if (STATE_OPEN_KIND (sd) == SIM_OPEN_STANDALONE)
-    sim_io_printf (sd, "Usage: %s [options] program [program args]\n",
+    sim_io_printf (sd,
+		   "Usage: %s [options] [VAR=VAL|--] program [program args]\n",
 		   STATE_MY_NAME (sd));
 
   /* Initialize duplicate argument checker.  */
@@ -851,9 +968,47 @@ sim_print_help (SIM_DESC sd, int is_command)
   if (STATE_OPEN_KIND (sd) == SIM_OPEN_STANDALONE)
     {
       sim_io_printf (sd, "\n");
+      sim_io_printf (sd,
+		     "VAR=VAL         Environment variables to set.  "
+		     "Ignored if -- is used.\n");
       sim_io_printf (sd, "program args    Arguments to pass to simulated program.\n");
       sim_io_printf (sd, "                Note: Very few simulators support this.\n");
     }
+}
+
+/* Print version information.  */
+
+void
+sim_print_version (SIM_DESC sd, int is_command)
+{
+  sim_io_printf (sd, "GNU simulator %s%s\n", PKGVERSION, version);
+
+  sim_io_printf (sd, "Copyright (C) 2023 Free Software Foundation, Inc.\n");
+
+  /* Following the copyright is a brief statement that the program is
+     free software, that users are free to copy and change it on
+     certain conditions, that it is covered by the GNU GPL, and that
+     there is no warranty.  */
+
+  sim_io_printf (sd, "\
+License GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>\
+\nThis is free software: you are free to change and redistribute it.\n\
+There is NO WARRANTY, to the extent permitted by law.\n");
+
+  if (!is_command)
+    return;
+
+  sim_io_printf (sd, "This SIM was configured as:\n");
+  sim_config_print (sd);
+
+  if (REPORT_BUGS_TO[0])
+    {
+      sim_io_printf (sd, "For bug reporting instructions, please see:\n\
+    %s.\n",
+		     REPORT_BUGS_TO);
+    }
+  sim_io_printf (sd, "Find the SIM homepage & other documentation resources \
+online at:\n    <https://sourceware.org/gdb/wiki/Sim/>.\n");
 }
 
 /* Utility of sim_args_command to find the closest match for a command.
@@ -971,7 +1126,7 @@ sim_complete_command (SIM_DESC sd, const char *text, const char *word)
 }
 
 SIM_RC
-sim_args_command (SIM_DESC sd, char *cmd)
+sim_args_command (SIM_DESC sd, const char *cmd)
 {
   /* something to do? */
   if (cmd == NULL)
@@ -993,7 +1148,10 @@ sim_args_command (SIM_DESC sd, char *cmd)
       sim_cpu *cpu;
 
       if (argv [0] == NULL)
-	return SIM_RC_OK; /* FIXME - perhaps help would be better */
+	{
+	  freeargv (argv);
+	  return SIM_RC_OK; /* FIXME - perhaps help would be better */
+	}
 
       /* First check for a cpu selector.  */
       {

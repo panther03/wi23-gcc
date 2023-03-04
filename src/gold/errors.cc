@@ -1,6 +1,6 @@
 // errors.cc -- handle errors for gold
 
-// Copyright 2006, 2007, 2008, 2009, 2010, 2011 Free Software Foundation, Inc.
+// Copyright (C) 2006-2023 Free Software Foundation, Inc.
 // Written by Ian Lance Taylor <iant@google.com>.
 
 // This file is part of gold.
@@ -128,6 +128,15 @@ Errors::info(const char* format, va_list args)
   fputc('\n', stderr);
 }
 
+// Print a trace message.
+
+void
+Errors::trace(const char* format, va_list args)
+{
+  vfprintf(stdout, format, args);
+  fputc('\n', stdout);
+}
+
 // Report an error at a reloc location.
 
 template<int size, bool big_endian>
@@ -193,6 +202,14 @@ Errors::undefined_symbol(const Symbol* sym, const std::string& location)
     fprintf(stderr,
             _("%s: %s: undefined reference to '%s', version '%s'\n"),
 	    location.c_str(), zmsg, sym->demangled_name().c_str(), version);
+
+  if (sym->is_cxx_vtable())
+    gold_info(_("%s: the vtable symbol may be undefined because "
+		"the class is missing its key function"),
+	      program_name);
+  if (sym->is_placeholder())
+    gold_info(_("%s: the symbol should have been defined by a plugin"),
+	      program_name);
 }
 
 // Issue a debugging message.
@@ -264,6 +281,17 @@ gold_info(const char* format, ...)
   va_list args;
   va_start(args, format);
   parameters->errors()->info(format, args);
+  va_end(args);
+}
+
+// Print a trace message (to stdout).
+
+void
+gold_trace(const char* format, ...)
+{
+  va_list args;
+  va_start(args, format);
+  parameters->errors()->trace(format, args);
   va_end(args);
 }
 

@@ -1,6 +1,6 @@
 /* Builtin frame register, for GDB, the GNU debugger.
 
-   Copyright (C) 2002-2013 Free Software Foundation, Inc.
+   Copyright (C) 2002-2023 Free Software Foundation, Inc.
 
    Contributed by Red Hat.
 
@@ -24,11 +24,10 @@
 #include "frame.h"
 #include "gdbtypes.h"
 #include "value.h"
-#include "gdb_string.h"
-
+#include "gdbarch.h"
 
 static struct value *
-value_of_builtin_frame_fp_reg (struct frame_info *frame, const void *baton)
+value_of_builtin_frame_fp_reg (frame_info_ptr frame, const void *baton)
 {
   struct gdbarch *gdbarch = get_frame_arch (frame);
 
@@ -44,8 +43,8 @@ value_of_builtin_frame_fp_reg (struct frame_info *frame, const void *baton)
   else
     {
       struct type *data_ptr_type = builtin_type (gdbarch)->builtin_data_ptr;
-      struct value *val = allocate_value (data_ptr_type);
-      gdb_byte *buf = value_contents_raw (val);
+      struct value *val = value::allocate (data_ptr_type);
+      gdb_byte *buf = val->contents_raw ().data ();
 
       gdbarch_address_to_pointer (gdbarch, data_ptr_type,
 				  buf, get_frame_base_address (frame));
@@ -54,7 +53,7 @@ value_of_builtin_frame_fp_reg (struct frame_info *frame, const void *baton)
 }
 
 static struct value *
-value_of_builtin_frame_pc_reg (struct frame_info *frame, const void *baton)
+value_of_builtin_frame_pc_reg (frame_info_ptr frame, const void *baton)
 {
   struct gdbarch *gdbarch = get_frame_arch (frame);
 
@@ -63,8 +62,8 @@ value_of_builtin_frame_pc_reg (struct frame_info *frame, const void *baton)
   else
     {
       struct type *func_ptr_type = builtin_type (gdbarch)->builtin_func_ptr;
-      struct value *val = allocate_value (func_ptr_type);
-      gdb_byte *buf = value_contents_raw (val);
+      struct value *val = value::allocate (func_ptr_type);
+      gdb_byte *buf = val->contents_raw ().data ();
 
       gdbarch_address_to_pointer (gdbarch, func_ptr_type,
 				  buf, get_frame_pc (frame));
@@ -73,7 +72,7 @@ value_of_builtin_frame_pc_reg (struct frame_info *frame, const void *baton)
 }
 
 static struct value *
-value_of_builtin_frame_sp_reg (struct frame_info *frame, const void *baton)
+value_of_builtin_frame_sp_reg (frame_info_ptr frame, const void *baton)
 {
   struct gdbarch *gdbarch = get_frame_arch (frame);
 
@@ -83,7 +82,7 @@ value_of_builtin_frame_sp_reg (struct frame_info *frame, const void *baton)
 }
 
 static struct value *
-value_of_builtin_frame_ps_reg (struct frame_info *frame, const void *baton)
+value_of_builtin_frame_ps_reg (frame_info_ptr frame, const void *baton)
 {
   struct gdbarch *gdbarch = get_frame_arch (frame);
 
@@ -92,10 +91,9 @@ value_of_builtin_frame_ps_reg (struct frame_info *frame, const void *baton)
   error (_("Standard register ``$ps'' is not available for this target"));
 }
 
-extern initialize_file_ftype _initialize_frame_reg; /* -Wmissing-prototypes */
-
+void _initialize_frame_reg ();
 void
-_initialize_frame_reg (void)
+_initialize_frame_reg ()
 {
   /* Frame based $fp, $pc, $sp and $ps.  These only come into play
      when the target does not define its own version of these

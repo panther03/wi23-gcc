@@ -24,14 +24,14 @@ Section Headers:
  +\[[ 0-9]+\] .dynamic +DYNAMIC +0+11[0-9a-f]+ 0+1[0-9a-f]+ 0+140 10 +WA +3 +0 +8
  +\[[ 0-9]+\] .got +PROGBITS +0+112d8 0+12d8 0+50 00 WAp +0 +0 +8
  +\[[ 0-9]+\] .IA_64.pltoff +.*
- +\[[ 0-9]+\] .shstrtab +.*
  +\[[ 0-9]+\] .symtab +.*
  +\[[ 0-9]+\] .strtab +.*
+ +\[[ 0-9]+\] .shstrtab +.*
 Key to Flags:
 #...
 
 Elf file type is DYN \(Shared object file\)
-Entry point 0x1000
+Entry point 0x[0-9a-f]+
 There are [0-9]+ program headers, starting at offset [0-9]+
 
 Program Headers:
@@ -52,7 +52,7 @@ Relocation section '.rela.dyn' at offset 0x[0-9a-f]+ contains 6 entries:
 [0-9a-f ]+R_IA64_TPREL64LSB +44
 [0-9a-f ]+R_IA64_TPREL64LSB +24
 
-Relocation section '.rela.IA_64.pltoff' at offset 0x[0-9a-f]+ contains 1 entries:
+Relocation section '.rela.IA_64.pltoff' at offset 0x[0-9a-f]+ contains 1 entry:
  +Offset +Info +Type +Symbol's Value +Symbol's Name \+ Addend
 [0-9a-f ]+R_IA64_IPLTLSB +0+ __tls_get_addr \+ 0
 
@@ -66,30 +66,27 @@ Symbol table '\.dynsym' contains [0-9]+ entries:
 .* NOTYPE +GLOBAL +DEFAULT +UND __tls_get_addr
 .* TLS +GLOBAL +DEFAULT +10 sg1
 .* FUNC +GLOBAL +DEFAULT +7 fn1
-.* NOTYPE +GLOBAL +DEFAULT +14 __bss_start
 .* TLS +GLOBAL +DEFAULT +10 sg2
 .* TLS +GLOBAL +DEFAULT +10 sg6
 .* TLS +GLOBAL +DEFAULT +10 sg7
-.* NOTYPE +GLOBAL +DEFAULT +14 _edata
-.* NOTYPE +GLOBAL +DEFAULT +14 _end
 
 Symbol table '\.symtab' contains [0-9]+ entries:
  +Num: +Value +Size Type +Bind +Vis +Ndx Name
 .* NOTYPE +LOCAL +DEFAULT +UND *
-.* SECTION +LOCAL +DEFAULT +1 *
-.* SECTION +LOCAL +DEFAULT +2 *
-.* SECTION +LOCAL +DEFAULT +3 *
-.* SECTION +LOCAL +DEFAULT +4 *
-.* SECTION +LOCAL +DEFAULT +5 *
-.* SECTION +LOCAL +DEFAULT +6 *
-.* SECTION +LOCAL +DEFAULT +7 *
-.* SECTION +LOCAL +DEFAULT +8 *
-.* SECTION +LOCAL +DEFAULT +9 *
-.* SECTION +LOCAL +DEFAULT +10 *
-.* SECTION +LOCAL +DEFAULT +11 *
-.* SECTION +LOCAL +DEFAULT +12 *
-.* SECTION +LOCAL +DEFAULT +13 *
-.* SECTION +LOCAL +DEFAULT +14 *
+.* SECTION +LOCAL +DEFAULT +1.*
+.* SECTION +LOCAL +DEFAULT +2.*
+.* SECTION +LOCAL +DEFAULT +3.*
+.* SECTION +LOCAL +DEFAULT +4.*
+.* SECTION +LOCAL +DEFAULT +5.*
+.* SECTION +LOCAL +DEFAULT +6.*
+.* SECTION +LOCAL +DEFAULT +7.*
+.* SECTION +LOCAL +DEFAULT +8.*
+.* SECTION +LOCAL +DEFAULT +9.*
+.* SECTION +LOCAL +DEFAULT +10.*
+.* SECTION +LOCAL +DEFAULT +11.*
+.* SECTION +LOCAL +DEFAULT +12.*
+.* SECTION +LOCAL +DEFAULT +13.*
+.* SECTION +LOCAL +DEFAULT +14.*
 .* FILE +LOCAL +DEFAULT +ABS .*
 .* TLS +LOCAL +DEFAULT +10 sl1
 .* TLS +LOCAL +DEFAULT +10 sl2
@@ -99,7 +96,9 @@ Symbol table '\.symtab' contains [0-9]+ entries:
 .* TLS +LOCAL +DEFAULT +10 sl6
 .* TLS +LOCAL +DEFAULT +10 sl7
 .* TLS +LOCAL +DEFAULT +10 sl8
+.* FILE +LOCAL +DEFAULT +ABS 
 .* TLS +LOCAL +DEFAULT +11 sH1
+.* OBJECT +LOCAL +DEFAULT +ABS _DYNAMIC
 .* TLS +LOCAL +DEFAULT +10 sh3
 .* TLS +LOCAL +DEFAULT +11 sH2
 .* TLS +LOCAL +DEFAULT +11 sH7
@@ -113,11 +112,9 @@ Symbol table '\.symtab' contains [0-9]+ entries:
 .* TLS +LOCAL +DEFAULT +11 sH6
 .* TLS +LOCAL +DEFAULT +11 sH8
 .* TLS +LOCAL +DEFAULT +10 sh1
+.* OBJECT +LOCAL +DEFAULT +ABS _GLOBAL_OFFSET_TABLE_
 .* TLS +LOCAL +DEFAULT +10 sh2
 .* TLS +LOCAL +DEFAULT +10 sh6
-.* FILE +LOCAL +DEFAULT +ABS .*
-.* OBJECT +LOCAL +DEFAULT +ABS _DYNAMIC
-.* OBJECT +LOCAL +DEFAULT +ABS _GLOBAL_OFFSET_TABLE_
 .* TLS +GLOBAL +DEFAULT +10 sg8
 .* TLS +GLOBAL +DEFAULT +10 sg3
 .* TLS +GLOBAL +DEFAULT +10 sg4
@@ -125,9 +122,6 @@ Symbol table '\.symtab' contains [0-9]+ entries:
 .* NOTYPE +GLOBAL +DEFAULT +UND __tls_get_addr
 .* TLS +GLOBAL +DEFAULT +10 sg1
 .* FUNC +GLOBAL +DEFAULT +7 fn1
-.* NOTYPE +GLOBAL +DEFAULT +14 __bss_start
 .* TLS +GLOBAL +DEFAULT +10 sg2
 .* TLS +GLOBAL +DEFAULT +10 sg6
 .* TLS +GLOBAL +DEFAULT +10 sg7
-.* NOTYPE +GLOBAL +DEFAULT +14 _edata
-.* NOTYPE +GLOBAL +DEFAULT +14 _end

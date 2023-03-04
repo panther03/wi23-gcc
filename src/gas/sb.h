@@ -1,6 +1,5 @@
 /* sb.h - header file for string buffer manipulation routines
-   Copyright 1994, 1995, 2000, 2003, 2005, 2006, 2007, 2012
-   Free Software Foundation, Inc.
+   Copyright (C) 1994-2023 Free Software Foundation, Inc.
 
    Written by Steve and Judy Chamberlain of Cygnus Support,
       sac@cygnus.com
@@ -66,6 +65,11 @@ extern size_t sb_skip_white (size_t, sb *);
 extern size_t sb_skip_comma (size_t, sb *);
 
 /* Actually in input-scrub.c.  */
-extern void input_scrub_include_sb (sb *, char *, int);
+enum expansion {
+  expanding_none,
+  expanding_repeat,
+  expanding_macro,
+};
+extern void input_scrub_include_sb (sb *, char *, enum expansion);
 
 #endif /* SB_H */

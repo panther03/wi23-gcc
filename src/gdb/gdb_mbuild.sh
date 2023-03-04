@@ -3,7 +3,7 @@
 #  Multi-build script for testing compilation of all maintained
 #  configs of GDB.
 
-#  Copyright (C) 2002-2013 Free Software Foundation, Inc.
+#  Copyright (C) 2002-2023 Free Software Foundation, Inc.
 
 #  Contributed by Richard Earnshaw  (rearnsha@arm.com)
 
@@ -31,7 +31,7 @@ usage()
 Usage: gdb_mbuild.sh [ <options> ... ] <srcdir> <builddir>
  Options:
    -j <makejobs>  Run <makejobs> in parallel.  Passed to make.
-	          On a single cpu machine, 2 is recommended.
+		  On a single cpu machine, 2 is recommended.
    -k             Keep going.  Do not stop after the first build fails.
    --keep         Keep builds.  Do not remove each build when finished.
    -e <regexp>    Regular expression for selecting the targets to build.
@@ -79,7 +79,7 @@ do
 	keepgoing=-k
 	;;
     --keep )
-        keep=true
+	keep=true
 	;;
     -e )
 	# A regular expression for selecting targets
@@ -171,7 +171,7 @@ fail ()
 	if test "${keepgoing}" != ""
 	then
 	    #exit 1
-	    continue
+	    return 1
 	else
 	    kill $$
 	    exit 1
@@ -195,7 +195,7 @@ log ()
 
 
 
-# Warn the user of what is comming, print the list of targets
+# Warn the user of what is coming, print the list of targets
 
 echo "$alltarg"
 echo ""
@@ -273,7 +273,7 @@ do
     then
 	# Iff the build fails remove the final build target so that
 	# the follow-on code knows things failed.  Stops the follow-on
-	# code thinking that a failed rebuild succedded (executable
+	# code thinking that a failed rebuild succeeded (executable
 	# left around from previous build).
 	echo ... ${make} ${keepgoing} ${makejobs} ${target}
 	( ${make} ${keepgoing} ${makejobs} all-gdb || rm -f gdb/gdb gdb/gdb.exe

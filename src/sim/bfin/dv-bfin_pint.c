@@ -1,6 +1,6 @@
 /* Blackfin Pin Interrupt (PINT) model
 
-   Copyright (C) 2010-2013 Free Software Foundation, Inc.
+   Copyright (C) 2010-2023 Free Software Foundation, Inc.
    Contributed by Analog Devices, Inc. and Mike Frysinger.
 
    This file is part of simulators.
@@ -18,7 +18,8 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "config.h"
+/* This must come before any other includes.  */
+#include "defs.h"
 
 #include "sim-main.h"
 #include "devices.h"
@@ -63,17 +64,19 @@ bfin_pint_io_write_buffer (struct hw *me, const void *source, int space,
   bu32 value;
   bu32 *valuep;
 
+  /* Invalid access mode is higher priority than missing register.  */
+  /* XXX: The hardware allows 16 or 32 bit accesses ...  */
+  if (!dv_bfin_mmr_require_32 (me, addr, nr_bytes, true))
+    return 0;
+
   if (nr_bytes == 4)
     value = dv_load_4 (source);
   else
     value = dv_load_2 (source);
   mmr_off = addr - pint->base;
-  valuep = (void *)((unsigned long)pint + mmr_base() + mmr_off);
+  valuep = (void *)((uintptr_t)pint + mmr_base() + mmr_off);
 
   HW_TRACE_WRITE ();
-
-  /* XXX: The hardware allows 16 or 32 bit accesses ...  */
-  dv_bfin_mmr_require_32 (me, addr, nr_bytes, true);
 
   switch (mmr_off)
     {
@@ -103,7 +106,7 @@ bfin_pint_io_write_buffer (struct hw *me, const void *source, int space,
       break;
     default:
       dv_bfin_mmr_invalid (me, addr, nr_bytes, true);
-      break;
+      return 0;
     }
 
 #if 0
@@ -134,13 +137,15 @@ bfin_pint_io_read_buffer (struct hw *me, void *dest, int space,
   bu32 mmr_off;
   bu32 *valuep;
 
+  /* Invalid access mode is higher priority than missing register.  */
+  /* XXX: The hardware allows 16 or 32 bit accesses ...  */
+  if (!dv_bfin_mmr_require_32 (me, addr, nr_bytes, false))
+    return 0;
+
   mmr_off = addr - pint->base;
-  valuep = (void *)((unsigned long)pint + mmr_base() + mmr_off);
+  valuep = (void *)((uintptr_t)pint + mmr_base() + mmr_off);
 
   HW_TRACE_READ ();
-
-  /* XXX: The hardware allows 16 or 32 bit accesses ...  */
-  dv_bfin_mmr_require_32 (me, addr, nr_bytes, false);
 
   switch (mmr_off)
     {
@@ -164,7 +169,7 @@ bfin_pint_io_read_buffer (struct hw *me, void *dest, int space,
       break;
     default:
       dv_bfin_mmr_invalid (me, addr, nr_bytes, false);
-      break;
+      return 0;
     }
 
   return nr_bytes;

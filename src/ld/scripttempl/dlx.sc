@@ -1,4 +1,16 @@
+# Copyright (C) 2014-2023 Free Software Foundation, Inc.
+#
+# Copying and distribution of this file, with or without modification,
+# are permitted in any medium without royalty provided the copyright
+# notice and this notice are preserved.
+
 cat <<EOF
+/* Copyright (C) 2014-2023 Free Software Foundation, Inc.
+
+   Copying and distribution of this script, with or without modification,
+   are permitted in any medium without royalty provided the copyright
+   notice and this notice are preserved.  */
+
 OUTPUT_FORMAT("${OUTPUT_FORMAT}", "${BIG_OUTPUT_FORMAT}",
 	      "${LITTLE_OUTPUT_FORMAT}")
 OUTPUT_ARCH(${ARCH})
@@ -9,7 +21,7 @@ SECTIONS
   ${RELOCATING+. = ${TEXT_START_ADDR};}
   .text :
   {
-    CREATE_OBJECT_SYMBOLS
+    ${RELOCATING+CREATE_OBJECT_SYMBOLS}
     *(.text)
     ${RELOCATING+etext = ${DATA_ALIGNMENT};}
   }
@@ -23,8 +35,8 @@ SECTIONS
   .bss :
   {
    *(.bss)
-   *(COMMON)
-   ${RELOCATING+end = . };
+   ${RELOCATING+*(COMMON)}
+   ${RELOCATING+end = .;}
   }
 }
 EOF

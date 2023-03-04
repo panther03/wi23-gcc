@@ -1,10 +1,10 @@
+/* DO NOT EDIT!  -*- buffer-read-only: t -*- vi:set ro:  */
 /* Instruction building/extraction support for mep. -*- C -*-
 
    THIS FILE IS MACHINE GENERATED WITH CGEN: Cpu tools GENerator.
    - the resultant file is machine generated, cgen-ibld.in isn't
 
-   Copyright 1996, 1997, 1998, 1999, 2000, 2001, 2005, 2006, 2007,
-   2008, 2010  Free Software Foundation, Inc.
+   Copyright (C) 1996-2023 Free Software Foundation, Inc.
 
    This file is part of libopcodes.
 
@@ -85,20 +85,20 @@ insert_1 (CGEN_CPU_DESC cd,
 	  int word_length,
 	  unsigned char *bufp)
 {
-  unsigned long x,mask;
+  unsigned long x, mask;
   int shift;
 
-  x = cgen_get_insn_value (cd, bufp, word_length);
+  x = cgen_get_insn_value (cd, bufp, word_length, cd->endian);
 
   /* Written this way to avoid undefined behaviour.  */
-  mask = (((1L << (length - 1)) - 1) << 1) | 1;
+  mask = (1UL << (length - 1) << 1) - 1;
   if (CGEN_INSN_LSB0_P)
     shift = (start + 1) - length;
   else
     shift = (word_length - (start + length));
   x = (x & ~(mask << shift)) | ((value & mask) << shift);
 
-  cgen_put_insn_value (cd, bufp, word_length, (bfd_vma) x);
+  cgen_put_insn_value (cd, bufp, word_length, (bfd_vma) x, cd->endian);
 }
 
 #endif /* ! CGEN_INT_INSN_P */
@@ -131,12 +131,14 @@ insert_normal (CGEN_CPU_DESC cd,
 	       CGEN_INSN_BYTES_PTR buffer)
 {
   static char errbuf[100];
-  /* Written this way to avoid undefined behaviour.  */
-  unsigned long mask = (((1L << (length - 1)) - 1) << 1) | 1;
+  unsigned long mask;
 
   /* If LENGTH is zero, this operand doesn't contribute to the value.  */
   if (length == 0)
     return NULL;
+
+  /* Written this way to avoid undefined behaviour.  */
+  mask = (1UL << (length - 1) << 1) - 1;
 
   if (word_length > 8 * sizeof (CGEN_INSN_INT))
     abort ();
@@ -153,9 +155,9 @@ insert_normal (CGEN_CPU_DESC cd,
   /* Ensure VALUE will fit.  */
   if (CGEN_BOOL_ATTR (attrs, CGEN_IFLD_SIGN_OPT))
     {
-      long minval = - (1L << (length - 1));
+      long minval = - (1UL << (length - 1));
       unsigned long maxval = mask;
-      
+
       if ((value > 0 && (unsigned long) value > maxval)
 	  || value < minval)
 	{
@@ -191,9 +193,9 @@ insert_normal (CGEN_CPU_DESC cd,
     {
       if (! cgen_signed_overflow_ok_p (cd))
 	{
-	  long minval = - (1L << (length - 1));
-	  long maxval =   (1L << (length - 1)) - 1;
-	  
+	  long minval = - (1UL << (length - 1));
+	  long maxval =   (1UL << (length - 1)) - 1;
+
 	  if (value < minval || value > maxval)
 	    {
 	      sprintf
@@ -208,12 +210,19 @@ insert_normal (CGEN_CPU_DESC cd,
 #if CGEN_INT_INSN_P
 
   {
-    int shift;
+    int shift_within_word, shift_to_word, shift;
 
+    /* How to shift the value to BIT0 of the word.  */
+    shift_to_word = total_length - (word_offset + word_length);
+
+    /* How to shift the value to the field within the word.  */
     if (CGEN_INSN_LSB0_P)
-      shift = (word_offset + start + 1) - length;
+      shift_within_word = start + 1 - length;
     else
-      shift = total_length - (word_offset + start + length);
+      shift_within_word = word_length - start - length;
+
+    /* The total SHIFT, then mask in the value.  */
+    shift = shift_to_word + shift_within_word;
     *buffer = (*buffer & ~(mask << shift)) | ((value & mask) << shift);
   }
 
@@ -262,8 +271,8 @@ insert_insn_normal (CGEN_CPU_DESC cd,
 #else
 
   cgen_put_insn_value (cd, buffer, min ((unsigned) cd->base_insn_bitsize,
-					(unsigned) CGEN_FIELDS_BITSIZE (fields)),
-		       value);
+                                        (unsigned) CGEN_FIELDS_BITSIZE (fields)),
+		       value, cd->insn_endian);
 
 #endif /* ! CGEN_INT_INSN_P */
 
@@ -307,7 +316,7 @@ put_insn_int_value (CGEN_CPU_DESC cd ATTRIBUTE_UNUSED,
     {
       int shift = insn_length - length;
       /* Written this way to avoid undefined behaviour.  */
-      CGEN_INSN_INT mask = (((1L << (length - 1)) - 1) << 1) | 1;
+      CGEN_INSN_INT mask = length == 0 ? 0 : (1UL << (length - 1) << 1) - 1;
 
       *buf = (*buf & ~(mask << shift)) | ((value & mask) << shift);
     }
@@ -380,7 +389,7 @@ extract_1 (CGEN_CPU_DESC cd,
   unsigned long x;
   int shift;
 
-  x = cgen_get_insn_value (cd, bufp, word_length);
+  x = cgen_get_insn_value (cd, bufp, word_length, cd->endian);
 
   if (CGEN_INSN_LSB0_P)
     shift = (start + 1) - length;
@@ -473,7 +482,10 @@ extract_normal (CGEN_CPU_DESC cd,
 	abort ();
 
       if (fill_cache (cd, ex_info, word_offset / 8, word_length / 8, pc) == 0)
-	return 0;
+	{
+	  *valuep = 0;
+	  return 0;
+	}
 
       value = extract_1 (cd, ex_info, start, length, word_length, bufp, pc);
     }
@@ -481,12 +493,12 @@ extract_normal (CGEN_CPU_DESC cd,
 #endif /* ! CGEN_INT_INSN_P */
 
   /* Written this way to avoid undefined behaviour.  */
-  mask = (((1L << (length - 1)) - 1) << 1) | 1;
+  mask = (1UL << (length - 1) << 1) - 1;
 
   value &= mask;
   /* sign extend? */
   if (CGEN_BOOL_ATTR (attrs, CGEN_IFLD_SIGNED)
-      && (value & (1L << (length - 1))))
+      && (value & (1UL << (length - 1))))
     value |= ~mask;
 
   *valuep = value;
@@ -1202,8 +1214,9 @@ mep_cgen_insert_operand (CGEN_CPU_DESC cd,
 
     default :
       /* xgettext:c-format */
-      fprintf (stderr, _("Unrecognized field %d while building insn.\n"),
-	       opindex);
+      opcodes_error_handler
+	(_("internal error: unrecognized field %d while building insn"),
+	 opindex);
       abort ();
   }
 
@@ -1611,7 +1624,7 @@ mep_cgen_extract_operand (CGEN_CPU_DESC cd,
       {
         long value;
         length = extract_normal (cd, ex_info, insn_value, 0|(1<<CGEN_IFLD_SIGNED)|(1<<CGEN_IFLD_PCREL_ADDR), 0, 4, 11, 32, total_length, pc, & value);
-        value = ((((value) << (1))) + (pc));
+        value = ((((value) * (2))) + (pc));
         fields->f_12s4a2 = value;
       }
       break;
@@ -1619,7 +1632,7 @@ mep_cgen_extract_operand (CGEN_CPU_DESC cd,
       {
         long value;
         length = extract_normal (cd, ex_info, insn_value, 0|(1<<CGEN_IFLD_SIGNED)|(1<<CGEN_IFLD_PCREL_ADDR), 0, 16, 16, 32, total_length, pc, & value);
-        value = ((((value) << (1))) + (pc));
+        value = ((((value) * (2))) + (pc));
         fields->f_17s16a2 = value;
       }
       break;
@@ -1629,14 +1642,14 @@ mep_cgen_extract_operand (CGEN_CPU_DESC cd,
         if (length <= 0) break;
         length = extract_normal (cd, ex_info, insn_value, 0|(1<<CGEN_IFLD_PCREL_ADDR), 0, 5, 7, 32, total_length, pc, & fields->f_24s5a2n_lo);
         if (length <= 0) break;
-  FLD (f_24s5a2n) = ((((((FLD (f_24s5a2n_hi)) << (8))) | (((FLD (f_24s5a2n_lo)) << (1))))) + (pc));
+  FLD (f_24s5a2n) = ((((((FLD (f_24s5a2n_hi)) * (256))) | (((FLD (f_24s5a2n_lo)) << (1))))) + (pc));
       }
       break;
     case MEP_OPERAND_PCREL8A2 :
       {
         long value;
         length = extract_normal (cd, ex_info, insn_value, 0|(1<<CGEN_IFLD_SIGNED)|(1<<CGEN_IFLD_PCREL_ADDR), 0, 8, 7, 32, total_length, pc, & value);
-        value = ((((value) << (1))) + (pc));
+        value = ((((value) * (2))) + (pc));
         fields->f_8s8a2 = value;
       }
       break;
@@ -1752,7 +1765,7 @@ mep_cgen_extract_operand (CGEN_CPU_DESC cd,
       {
         long value;
         length = extract_normal (cd, ex_info, insn_value, 0, 0, 9, 6, 32, total_length, pc, & value);
-        value = ((value) << (1));
+        value = ((value) * (2));
         fields->f_7u9a2 = value;
       }
       break;
@@ -1801,20 +1814,21 @@ mep_cgen_extract_operand (CGEN_CPU_DESC cd,
 
     default :
       /* xgettext:c-format */
-      fprintf (stderr, _("Unrecognized field %d while decoding insn.\n"),
-	       opindex);
+      opcodes_error_handler
+	(_("internal error: unrecognized field %d while decoding insn"),
+	 opindex);
       abort ();
     }
 
   return length;
 }
 
-cgen_insert_fn * const mep_cgen_insert_handlers[] = 
+cgen_insert_fn * const mep_cgen_insert_handlers[] =
 {
   insert_insn_normal,
 };
 
-cgen_extract_fn * const mep_cgen_extract_handlers[] = 
+cgen_extract_fn * const mep_cgen_extract_handlers[] =
 {
   extract_insn_normal,
 };
@@ -2271,8 +2285,9 @@ mep_cgen_get_int_operand (CGEN_CPU_DESC cd ATTRIBUTE_UNUSED,
 
     default :
       /* xgettext:c-format */
-      fprintf (stderr, _("Unrecognized field %d while getting int operand.\n"),
-		       opindex);
+      opcodes_error_handler
+	(_("internal error: unrecognized field %d while getting int operand"),
+	 opindex);
       abort ();
   }
 
@@ -2723,8 +2738,9 @@ mep_cgen_get_vma_operand (CGEN_CPU_DESC cd ATTRIBUTE_UNUSED,
 
     default :
       /* xgettext:c-format */
-      fprintf (stderr, _("Unrecognized field %d while getting vma operand.\n"),
-		       opindex);
+      opcodes_error_handler
+	(_("internal error: unrecognized field %d while getting vma operand"),
+	 opindex);
       abort ();
   }
 
@@ -3136,8 +3152,9 @@ mep_cgen_set_int_operand (CGEN_CPU_DESC cd ATTRIBUTE_UNUSED,
 
     default :
       /* xgettext:c-format */
-      fprintf (stderr, _("Unrecognized field %d while setting int operand.\n"),
-		       opindex);
+      opcodes_error_handler
+	(_("internal error: unrecognized field %d while setting int operand"),
+	 opindex);
       abort ();
   }
 }
@@ -3539,8 +3556,9 @@ mep_cgen_set_vma_operand (CGEN_CPU_DESC cd ATTRIBUTE_UNUSED,
 
     default :
       /* xgettext:c-format */
-      fprintf (stderr, _("Unrecognized field %d while setting vma operand.\n"),
-		       opindex);
+      opcodes_error_handler
+	(_("internal error: unrecognized field %d while setting vma operand"),
+	 opindex);
       abort ();
   }
 }

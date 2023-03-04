@@ -1,6 +1,6 @@
 /* This testcase is part of GDB, the GNU debugger.
 
-   Copyright 2012-2013 Free Software Foundation, Inc.
+   Copyright 2012-2023 Free Software Foundation, Inc.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -15,7 +15,9 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#if USE_PROBES
+#include "../lib/attributes.h"
+
+#if USE_SEMAPHORES
 
 #define _SDT_HAS_SEMAPHORES
 __extension__ unsigned short test_user_semaphore __attribute__ ((unused)) __attribute__ ((section (".probes")));
@@ -29,7 +31,11 @@ __extension__ unsigned short test_m4_semaphore __attribute__ ((unused)) __attrib
 __extension__ unsigned short test_pstr_semaphore __attribute__ ((unused)) __attribute__ ((section (".probes")));
 
 __extension__ unsigned short test_ps_semaphore __attribute__ ((unused)) __attribute__ ((section (".probes")));
+
+__extension__ unsigned short test_xmmreg_semaphore __attribute__ ((unused)) __attribute__ ((section (".probes")));
 #else
+
+int relocation_marker __attribute__ ((unused));
 
 #define TEST 1
 #define TEST2 1
@@ -53,8 +59,13 @@ struct funcs
 static void
 m1 (void)
 {
+  /* m1 and m2 are equivalent, but because of some compiler
+     optimizations we have to make each of them unique.  This is why
+     we have this dummy variable here.  */
+  volatile int dummy = 0;
+
   if (TEST2)
-    STAP_PROBE (test, two);
+    STAP_PROBE1 (test, two, dummy);
 }
 
 static void
@@ -83,6 +94,24 @@ pstr (int val)
   return val == 0 ? a : b;
 }
 
+#ifdef __SSE2__
+static const char * __attribute__((noinline))
+use_xmm_reg (int val)
+{
+  volatile register int val_in_reg asm ("xmm0") = val;
+
+  STAP_PROBE1 (test, xmmreg, val_in_reg);
+
+  return val == 0 ? "xxx" : "yyy";
+}
+#else
+static const char * __attribute__((noinline)) ATTRIBUTE_NOCLONE
+use_xmm_reg (int val)
+{
+  /* Nothing.  */
+}
+#endif /* __SSE2__ */
+
 static void
 m4 (const struct funcs *fs, int v)
 {
@@ -103,6 +132,8 @@ main()
 
   m4 (&fs, 0);
   m4 (&fs, 1);
+
+  use_xmm_reg (0x1234);
 
   return 0; /* last break here */
 }

@@ -1,5 +1,5 @@
 /* Header for GDB line completion.
-   Copyright (C) 2000-2013 Free Software Foundation, Inc.
+   Copyright (C) 2000-2023 Free Software Foundation, Inc.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -19,7 +19,7 @@
 
 struct symtab;
 
-#include "vec.h"
+#include "location.h"
 
 /* Flags to pass to decode_line_1 and decode_line_full.  */
 
@@ -39,72 +39,61 @@ enum decode_line_flags
 
 struct linespec_sals
 {
-  /* This is the linespec corresponding to the sals contained in this
+  /* This is the location corresponding to the sals contained in this
      object.  It can be passed as the FILTER argument to future calls
-     to decode_line_full.  This is freed by
-     destroy_linespec_result.  */
+     to decode_line_full.  This is freed by the linespec_result
+     destructor.  */
   char *canonical;
 
-  /* Sals.  The 'sals' field is destroyed by
-     destroy_linespec_result.  */
-  struct symtabs_and_lines sals;
+  /* Sals.  */
+  std::vector<symtab_and_line> sals;
 };
 
-typedef struct linespec_sals linespec_sals;
-DEF_VEC_O (linespec_sals);
-
 /* An instance of this may be filled in by decode_line_1.  The caller
-   must call init_linespec_result to initialize it and
-   destroy_linespec_result to destroy it.  The caller must make copies
-   of any data that it needs to keep.  */
+   must make copies of any data that it needs to keep.  */
 
 struct linespec_result
 {
-  /* If non-zero, the linespec should be displayed to the user.  This
+  linespec_result () = default;
+  ~linespec_result ();
+
+  DISABLE_COPY_AND_ASSIGN (linespec_result);
+
+  /* If true, the linespec should be displayed to the user.  This
      is used by "unusual" linespecs where the ordinary `info break'
      display mechanism would do the wrong thing.  */
-  int special_display;
+  bool special_display = false;
 
-  /* If non-zero, the linespec result should be considered to be a
+  /* If true, the linespec result should be considered to be a
      "pre-expanded" multi-location linespec.  A pre-expanded linespec
      holds all matching locations in a single linespec_sals
      object.  */
-  int pre_expanded;
+  bool pre_expanded = false;
 
-  /* If PRE_EXPANDED is non-zero, this is set to the linespec entered
-     by the user.  This will be freed by destroy_linespec_result.  */
-  char *addr_string;
+  /* If PRE_EXPANDED is true, this is set to the location spec
+     entered by the user.  */
+  location_spec_up locspec;
 
-  /* The sals.  The vector will be freed by
-     destroy_linespec_result.  */
-  VEC (linespec_sals) *sals;
+  /* The sals.  The vector will be freed by the destructor.  */
+  std::vector<linespec_sals> lsals;
 };
-
-/* Initialize a linespec_result.  */
-
-extern void init_linespec_result (struct linespec_result *);
-
-/* Destroy a linespec_result.  */
-
-extern void destroy_linespec_result (struct linespec_result *);
-
-/* Return a cleanup that destroys a linespec_result.  */
-
-extern struct cleanup *
-        make_cleanup_destroy_linespec_result (struct linespec_result *);
 
 /* Decode a linespec using the provided default symtab and line.  */
 
-extern struct symtabs_and_lines
-	decode_line_1 (char **argptr, int flags,
+extern std::vector<symtab_and_line>
+	decode_line_1 (const location_spec *locspec, int flags,
+		       struct program_space *search_pspace,
 		       struct symtab *default_symtab, int default_line);
 
-/* Parse *ARGPTR as a linespec and return results.  This is the "full"
+/* Parse LOCSPEC and return results.  This is the "full"
    interface to this module, which handles multiple results
    properly.
 
    For FLAGS, see decode_line_flags.  DECODE_LINE_LIST_MODE is not
    valid for this function.
+
+   If SEARCH_PSPACE is not NULL, symbol search is restricted to just
+   that program space.
 
    DEFAULT_SYMTAB and DEFAULT_LINE describe the default location.
    DEFAULT_SYMTAB can be NULL, in which case the current symtab and
@@ -135,7 +124,8 @@ extern struct symtabs_and_lines
    strcmp sense) to FILTER will be returned; all others will be
    filtered out.  */
 
-extern void decode_line_full (char **argptr, int flags,
+extern void decode_line_full (struct location_spec *locspec, int flags,
+			      struct program_space *search_pspace,
 			      struct symtab *default_symtab, int default_line,
 			      struct linespec_result *canonical,
 			      const char *select_mode,
@@ -145,11 +135,70 @@ extern void decode_line_full (char **argptr, int flags,
    source symtab and line as defaults.
    This is for commands like "list" and "breakpoint".  */
 
-extern struct symtabs_and_lines decode_line_with_current_source (char *, int);
+extern std::vector<symtab_and_line> decode_line_with_current_source
+    (const char *, int);
 
 /* Given a string, return the line specified by it, using the last displayed
    codepoint's values as defaults, or nothing if they aren't valid.  */
 
-extern struct symtabs_and_lines decode_line_with_last_displayed (char *, int);
+extern std::vector<symtab_and_line> decode_line_with_last_displayed
+    (const char *, int);
 
+/* Does P represent one of the keywords?  If so, return
+   the keyword.  If not, return NULL.  */
+
+extern const char *linespec_lexer_lex_keyword (const char *p);
+
+/* Parse a line offset from STRING.  */
+
+extern struct line_offset linespec_parse_line_offset (const char *string);
+
+/* Return the quote characters permitted by the linespec parser.  */
+
+extern const char *get_gdb_linespec_parser_quote_characters (void);
+
+/* Does STRING represent an Ada operator?  If so, return the length
+   of the decoded operator name.  If not, return 0.  */
+
+extern int is_ada_operator (const char *string);
+
+/* Find the end of the (first) linespec pointed to by *STRINGP.
+   STRINGP will be advanced to this point.  */
+
+extern void linespec_lex_to_end (const char **stringp);
+
+extern const char * const linespec_keywords[];
+
+/* Complete a linespec.  */
+
+extern void linespec_complete (completion_tracker &tracker,
+			       const char *text,
+			       symbol_name_match_type match_type);
+
+/* Complete a function symbol, in linespec mode, according to
+   FUNC_MATCH_TYPE.  If SOURCE_FILENAME is non-NULL, limits completion
+   to the list of functions defined in source files that match
+   SOURCE_FILENAME.  */
+
+extern void linespec_complete_function (completion_tracker &tracker,
+					const char *function,
+					symbol_name_match_type func_match_type,
+					const char *source_filename);
+
+/* Complete a label symbol, in linespec mode.  Only labels of
+   functions named FUNCTION_NAME are considered.  If SOURCE_FILENAME
+   is non-NULL, limits completion to labels of functions defined in
+   source files that match SOURCE_FILENAME.  */
+
+extern void linespec_complete_label (completion_tracker &tracker,
+				     const struct language_defn *language,
+				     const char *source_filename,
+				     const char *function_name,
+				     symbol_name_match_type name_match_type,
+				     const char *label_name);
+
+/* Evaluate the expression pointed to by EXP_PTR into a CORE_ADDR,
+   advancing EXP_PTR past any parsed text.  */
+
+extern CORE_ADDR linespec_expression_to_pc (const char **exp_ptr);
 #endif /* defined (LINESPEC_H) */

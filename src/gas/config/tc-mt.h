@@ -1,5 +1,5 @@
 /* tc-mt.h -- Header file for tc-mt.c.
-   Copyright (C) 2005, 2007 Free Software Foundation, Inc.
+   Copyright (C) 2005-2023 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -14,9 +14,9 @@
    GNU General Public License for more details.
 
    You should have received a copy of the GNU General Public License
-   along with GAS; see the file COPYING.  If not, write to
-   the Free Software Foundation, 59 Temple Place - Suite 330,
-   Boston, MA 02111-1307, USA. */
+   along with this program; if not, write to the Free Software
+   Foundation, Inc., 51 Franklin Street - Fifth Floor, Boston,
+   MA 02110-1301, USA.  */
 
 #define TC_MT
 
@@ -41,18 +41,13 @@
 /* All mt instructions are multiples of 32 bits.  */
 #define DWARF2_LINE_MIN_INSN_LENGTH 4
 
-#define LITERAL_PREFIXDOLLAR_HEX
 #define LITERAL_PREFIXPERCENT_BIN
 
 #define md_apply_fix mt_apply_fix
-extern void mt_apply_fix (struct fix *, valueT *, segT); 
+extern void mt_apply_fix (struct fix *, valueT *, segT);
 
 /* Call md_pcrel_from_section(), not md_pcrel_from().  */
 #define MD_PCREL_FROM_SECTION(FIXP, SEC) md_pcrel_from_section (FIXP, SEC)
-extern long md_pcrel_from_section (struct fix *, segT);
-
-#define obj_fix_adjustable(fixP) iq2000_fix_adjustable (fixP)
-extern bfd_boolean mt_fix_adjustable (struct fix *);
 
 /* Values passed to md_apply_fix don't include the symbol value.  */
 #define MD_APPLY_SYM_VALUE(FIX) 0
@@ -66,5 +61,5 @@ extern void gas_cgen_md_operand (expressionS *);
 extern int mt_force_relocation (struct fix *);
 
 #define tc_fix_adjustable(fixP) mt_fix_adjustable (fixP)
-extern bfd_boolean mt_fix_adjustable (struct fix *);
+extern bool mt_fix_adjustable (struct fix *);
 

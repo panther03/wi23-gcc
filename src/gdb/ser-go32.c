@@ -1,5 +1,5 @@
 /* Remote serial interface for local (hardwired) serial ports for GO32.
-   Copyright (C) 1992-2013 Free Software Foundation, Inc.
+   Copyright (C) 1992-2023 Free Software Foundation, Inc.
 
    Contributed by Nigel Stephens, Algorithmics Ltd. (nigel@algor.co.uk).
 
@@ -24,9 +24,6 @@
 #include "defs.h"
 #include "gdbcmd.h"
 #include "serial.h"
-#include "gdb_string.h"
-
-
 /*
  * NS16550 UART registers
  */
@@ -587,18 +584,35 @@ dos_close (struct serial *scb)
   /* Check for overflow errors.  */
   if (port->oflo)
     {
-      fprintf_unfiltered (gdb_stderr,
-			  "Serial input overruns occurred.\n");
-      fprintf_unfiltered (gdb_stderr, "This system %s handle %d baud.\n",
-			  port->fifo ? "cannot" : "needs a 16550 to",
-			  port->baudrate);
+      gdb_printf (gdb_stderr,
+		  "Serial input overruns occurred.\n");
+      gdb_printf (gdb_stderr, "This system %s handle %d baud.\n",
+		  port->fifo ? "cannot" : "needs a 16550 to",
+		  port->baudrate);
     }
 }
 
 
+/* Implementation of the serial_ops flush_output method.  */
 
 static int
-dos_noop (struct serial *scb)
+dos_flush_output (struct serial *scb)
+{
+  return 0;
+}
+
+/* Implementation of the serial_ops setparity method.  */
+
+static int
+dos_setparity (struct serial *scb, int parity)
+{
+  return 0;
+}
+
+/* Implementation of the serial_ops drain_output method.  */
+
+static int
+dos_drain_output (struct serial *scb)
 {
   return 0;
 }
@@ -619,6 +633,8 @@ dos_readchar (struct serial *scb, int timeout)
   then = rawclock () + (timeout * RAWHZ);
   while ((c = dos_getc (port)) < 0)
     {
+      QUIT;
+
       if (timeout >= 0 && (rawclock () - then) >= 0)
 	return SERIAL_TIMEOUT;
     }
@@ -639,14 +655,14 @@ dos_get_tty_state (struct serial *scb)
       /* We've never heard about this port.  We should fail this call,
 	 unless they are asking about one of the 3 standard handles,
 	 in which case we pretend the handle was open by us if it is
-	 connected to a terminal device.  This is beacuse Unix
+	 connected to a terminal device.  This is because Unix
 	 terminals use the serial interface, so GDB expects the
 	 standard handles to go through here.  */
       if (scb->fd >= 3 || !isatty (scb->fd))
 	return NULL;
     }
 
-  state = (struct dos_ttystate *) xmalloc (sizeof *state);
+  state = XNEW (struct dos_ttystate);
   *state = *port;
   return (serial_ttystate) state;
 }
@@ -656,7 +672,7 @@ dos_copy_tty_state (struct serial *scb, serial_ttystate ttystate)
 {
   struct dos_ttystate *state;
 
-  state = (struct dos_ttystate *) xmalloc (sizeof *state);
+  state = XNEW (struct dos_ttystate);
   *state = *(struct dos_ttystate *) ttystate;
 
   return (serial_ttystate) state;
@@ -668,17 +684,6 @@ dos_set_tty_state (struct serial *scb, serial_ttystate ttystate)
   struct dos_ttystate *state;
 
   state = (struct dos_ttystate *) ttystate;
-  dos_setbaudrate (scb, state->baudrate);
-  return 0;
-}
-
-static int
-dos_noflush_set_tty_state (struct serial *scb, serial_ttystate new_ttystate,
-			   serial_ttystate old_ttystate)
-{
-  struct dos_ttystate *state;
-
-  state = (struct dos_ttystate *) new_ttystate;
   dos_setbaudrate (scb, state->baudrate);
   return 0;
 }
@@ -740,7 +745,7 @@ dos_setbaudrate (struct serial *scb, int rate)
       x = dos_baudconv (rate);
       if (x <= 0)
 	{
-	  fprintf_unfiltered (gdb_stderr, "%d: impossible baudrate\n", rate);
+	  gdb_printf (gdb_stderr, "%d: impossible baudrate\n", rate);
 	  errno = EINVAL;
 	  return -1;
 	}
@@ -793,10 +798,12 @@ dos_write (struct serial *scb, const void *buf, size_t count)
   size_t fifosize = port->fifo ? 16 : 1;
   long then;
   size_t cnt;
-  const char *str = buf;
+  const char *str = (const char *) buf;
 
   while (count > 0)
     {
+      QUIT;
+
       /* Send the data, fifosize bytes at a time.  */
       cnt = fifosize > count ? count : fifosize;
       port->txbusy = 1;
@@ -848,16 +855,15 @@ dos_sendbreak (struct serial *scb)
 }
 
 
-static struct serial_ops dos_ops =
+static const struct serial_ops dos_ops =
 {
   "hardwire",
-  0,
   dos_open,
   dos_close,
   NULL,				/* fdopen, not implemented */
   dos_readchar,
   dos_write,
-  dos_noop,			/* flush output */
+  dos_flush_output,
   dos_flush_input,
   dos_sendbreak,
   dos_raw,
@@ -865,10 +871,10 @@ static struct serial_ops dos_ops =
   dos_copy_tty_state,
   dos_set_tty_state,
   dos_print_tty_state,
-  dos_noflush_set_tty_state,
   dos_setbaudrate,
   dos_setstopbits,
-  dos_noop,			/* Wait for output to drain.  */
+  dos_setparity,
+  dos_drain_output,
   (void (*)(struct serial *, int))NULL	/* Change into async mode.  */
 };
 
@@ -881,7 +887,7 @@ gdb_pipe (int pdes[2])
 }
 
 static void
-dos_info (char *arg, int from_tty)
+info_serial_command (const char *arg, int from_tty)
 {
   struct dos_ttystate *port;
 #ifdef DOS_STATS
@@ -892,28 +898,26 @@ dos_info (char *arg, int from_tty)
     {
       if (port->baudrate == 0)
 	continue;
-      printf_filtered ("Port:\tCOM%ld (%sactive)\n", (long)(port - ports) + 1,
-		       port->intrupt ? "" : "not ");
-      printf_filtered ("Addr:\t0x%03x (irq %d)\n", port->base, port->irq);
-      printf_filtered ("16550:\t%s\n", port->fifo ? "yes" : "no");
-      printf_filtered ("Speed:\t%d baud\n", port->baudrate);
-      printf_filtered ("Errs:\tframing %d parity %d overflow %d\n\n",
-		       port->ferr, port->perr, port->oflo);
+      gdb_printf ("Port:\tCOM%ld (%sactive)\n", (long)(port - ports) + 1,
+		  port->intrupt ? "" : "not ");
+      gdb_printf ("Addr:\t0x%03x (irq %d)\n", port->base, port->irq);
+      gdb_printf ("16550:\t%s\n", port->fifo ? "yes" : "no");
+      gdb_printf ("Speed:\t%d baud\n", port->baudrate);
+      gdb_printf ("Errs:\tframing %d parity %d overflow %d\n\n",
+		  port->ferr, port->perr, port->oflo);
     }
 
 #ifdef DOS_STATS
-  printf_filtered ("\nTotal interrupts: %d\n", intrcnt);
+  gdb_printf ("\nTotal interrupts: %d\n", intrcnt);
   for (i = 0; i < NCNT; i++)
     if (cnts[i])
-      printf_filtered ("%s:\t%lu\n", cntnames[i], (unsigned long) cnts[i]);
+      gdb_printf ("%s:\t%lu\n", cntnames[i], (unsigned long) cnts[i]);
 #endif
 }
 
-/* -Wmissing-prototypes */
-extern initialize_file_ftype _initialize_ser_dos;
-
+void _initialize_ser_dos ();
 void
-_initialize_ser_dos (void)
+_initialize_ser_dos ()
 {
   serial_add_interface (&dos_ops);
 
@@ -981,6 +985,6 @@ Show COM4 interrupt request."), NULL,
 			    NULL, /* FIXME: i18n: */
 			    &setlist, &showlist);
 
-  add_info ("serial", dos_info,
+  add_info ("serial", info_serial_command,
 	    _("Print DOS serial port status."));
 }

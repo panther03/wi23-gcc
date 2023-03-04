@@ -1,4 +1,4 @@
-# Copyright 2011-2013 Free Software Foundation, Inc.
+# Copyright 2011-2023 Free Software Foundation, Inc.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -15,6 +15,8 @@
 
 load_lib "ada.exp"
 
+require allow_ada_tests
+
 standard_ada_testfile foo
 
 if {[gdb_compile_ada "${srcfile}" "${binfile}" executable [list debug optimize=-O1]] != "" } {
@@ -23,8 +25,7 @@ if {[gdb_compile_ada "${srcfile}" "${binfile}" executable [list debug optimize=-
 
 clean_restart ${testfile}
 
-if ![runto main] then {
-  perror "Couldn't run ${testfile}"
+if {![runto_main]} {
   return
 }
 
@@ -33,7 +34,7 @@ gdb_breakpoint "call_me"
 # Continue until we hit the breakpoint inside `Call_Me'.  We verify
 # that the parameter value is correct.
 gdb_test "continue" \
-    "Breakpoint .*, pck\\.call_me \\(w=(w@entry=)?50\\) at .*/pck.adb:.*" \
+    "Breakpoint .*, pck\\.call_me \\(w=(w@entry=)?50\\) at (.*/)?pck.adb:.*" \
     "continue to call_me"
 
 # And just to make sure, we also verify that the parameter value

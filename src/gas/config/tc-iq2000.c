@@ -1,6 +1,5 @@
 /* tc-iq2000.c -- Assembler for the Sitera IQ2000.
-   Copyright (C) 2003, 2004, 2005, 2006, 2007, 2009, 2010
-   Free Software Foundation. Inc.
+   Copyright (C) 2003-2023 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -28,7 +27,6 @@
 #include "cgen.h"
 #include "elf/common.h"
 #include "elf/iq2000.h"
-#include "libbfd.h"
 #include "sb.h"
 #include "macro.h"
 
@@ -108,7 +106,7 @@ struct iq2000_hi_fixup
 static struct iq2000_hi_fixup * iq2000_hi_fixup_list;
 
 /* Macro hash table, which we will add to.  */
-extern struct hash_control *macro_hash;
+extern struct htab *macro_hash;
 
 const char *md_shortopts = "";
 struct option md_longopts[] =
@@ -119,7 +117,7 @@ size_t md_longopts_size = sizeof (md_longopts);
 
 int
 md_parse_option (int c ATTRIBUTE_UNUSED,
-		 char * arg ATTRIBUTE_UNUSED)
+		 const char * arg ATTRIBUTE_UNUSED)
 {
   return 0;
 }
@@ -231,15 +229,14 @@ iq2000_add_macro (const char *  name,
 		  const char ** arguments)
 {
   macro_entry *macro;
-  sb macro_name;
-  const char *namestr;
 
-  macro = xmalloc (sizeof (macro_entry));
+  macro = XNEW (macro_entry);
+  macro->name = xstrdup (name);
   sb_new (& macro->sub);
-  sb_new (& macro_name);
-
   macro->formal_count = 0;
   macro->formals = 0;
+  macro->formal_hash = str_htab_create ();
+  macro->file = as_where (&macro->line);
 
   sb_add_string (& macro->sub, semantics);
 
@@ -247,14 +244,11 @@ iq2000_add_macro (const char *  name,
     {
       formal_entry ** p = &macro->formals;
 
-      macro->formal_count = 0;
-      macro->formal_hash = hash_new ();
-
       while (*arguments != NULL)
 	{
 	  formal_entry *formal;
 
-	  formal = xmalloc (sizeof (formal_entry));
+	  formal = XNEW (formal_entry);
 
 	  sb_new (& formal->name);
 	  sb_new (& formal->def);
@@ -263,7 +257,7 @@ iq2000_add_macro (const char *  name,
 	  /* chlm: Added the following to allow defaulted args.  */
 	  if (strchr (*arguments,'='))
 	    {
-	      char * tt_args = strdup (*arguments);
+	      char * tt_args = xstrdup (*arguments);
 	      char * tt_dflt = strchr (tt_args,'=');
 
 	      *tt_dflt = 0;
@@ -274,8 +268,8 @@ iq2000_add_macro (const char *  name,
 	    sb_add_string (& formal->name, *arguments);
 
 	  /* Add to macro's hash table.  */
-	  hash_jam (macro->formal_hash, sb_terminate (& formal->name), formal);
-
+	  str_hash_insert (macro->formal_hash,
+			   sb_terminate (&formal->name), formal, 1);
 	  formal->index = macro->formal_count;
 	  macro->formal_count++;
 	  *p = formal;
@@ -285,9 +279,7 @@ iq2000_add_macro (const char *  name,
 	}
     }
 
-  sb_add_string (&macro_name, name);
-  namestr = sb_terminate (&macro_name);
-  hash_jam (macro_hash, namestr, macro);
+  str_hash_insert (macro_hash, macro->name, macro, 1);
 
   macro_defined = 1;
 }
@@ -432,8 +424,8 @@ md_assemble (char * str)
 valueT
 md_section_align (segT segment, valueT size)
 {
-  int align = bfd_get_section_alignment (stdoutput, segment);
-  return ((size + (1 << align) - 1) & (-1 << align));
+  int align = bfd_section_alignment (segment);
+  return ((size + (1 << align) - 1) & -(1 << align));
 }
 
 symbolS *
@@ -536,7 +528,7 @@ iq2000_record_hi16 (int    reloc_type,
 
   gas_assert (reloc_type == BFD_RELOC_HI16);
 
-  hi_fixup = xmalloc (sizeof * hi_fixup);
+  hi_fixup = XNEW (struct iq2000_hi_fixup);
   hi_fixup->fixp = fixP;
   hi_fixup->seg  = now_seg;
   hi_fixup->next = iq2000_hi_fixup_list;
@@ -725,13 +717,13 @@ md_operand (expressionS * exp)
     gas_cgen_md_operand (exp);
 }
 
-char *
+const char *
 md_atof (int type, char * litP, int * sizeP)
 {
-  return ieee_md_atof (type, litP, sizeP, TRUE);
+  return ieee_md_atof (type, litP, sizeP, true);
 }
 
-bfd_boolean
+bool
 iq2000_fix_adjustable (fixS * fixP)
 {
   bfd_reloc_code_real_type reloc_type;
@@ -748,21 +740,21 @@ iq2000_fix_adjustable (fixS * fixP)
     reloc_type = fixP->fx_r_type;
 
   if (fixP->fx_addsy == NULL)
-    return TRUE;
+    return true;
 
   /* Prevent all adjustments to global symbols.  */
   if (S_IS_EXTERNAL (fixP->fx_addsy))
-    return FALSE;
+    return false;
 
   if (S_IS_WEAK (fixP->fx_addsy))
-    return FALSE;
+    return false;
 
   /* We need the symbol name for the VTABLE entries.  */
   if (   reloc_type == BFD_RELOC_VTABLE_INHERIT
       || reloc_type == BFD_RELOC_VTABLE_ENTRY)
-    return FALSE;
+    return false;
 
-  return TRUE;
+  return true;
 }
 
 static void
@@ -797,10 +789,9 @@ get_symbol (void)
   char *name;
   symbolS *p;
 
-  name = input_line_pointer;
-  c = get_symbol_end ();
+  c = get_symbol_name (&name);
   p = (symbolS *) symbol_find_or_make (name);
-  *input_line_pointer = c;
+  (void) restore_line_pointer (c);
   return p;
 }
 
@@ -820,7 +811,7 @@ s_iq2000_end (int x ATTRIBUTE_UNUSED)
   else
     p = NULL;
 
-  if ((bfd_get_section_flags (stdoutput, now_seg) & SEC_CODE) != 0)
+  if ((bfd_section_flags (now_seg) & SEC_CODE) != 0)
     maybe_text = 1;
   else
     maybe_text = 0;
@@ -919,7 +910,7 @@ s_iq2000_ent (int aent)
   if (ISDIGIT (*input_line_pointer) || *input_line_pointer == '-')
     get_number ();
 
-  if ((bfd_get_section_flags (stdoutput, now_seg) & SEC_CODE) != 0)
+  if ((bfd_section_flags (now_seg) & SEC_CODE) != 0)
     maybe_text = 1;
   else
     maybe_text = 0;

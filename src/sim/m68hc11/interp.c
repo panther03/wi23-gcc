@@ -1,5 +1,5 @@
 /* interp.c -- Simulator for Motorola 68HC11/68HC12
-   Copyright (C) 1999-2013 Free Software Foundation, Inc.
+   Copyright (C) 1999-2023 Free Software Foundation, Inc.
    Written by Stephane Carrez (stcarrez@nerim.fr)
 
 This file is part of GDB, the GNU debugger.
@@ -17,6 +17,11 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
+/* This must come before any other includes.  */
+#include "defs.h"
+
+#include "bfd.h"
+
 #include "sim-main.h"
 #include "sim-assert.h"
 #include "sim-hw.h"
@@ -24,7 +29,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 #include "hw-tree.h"
 #include "hw-device.h"
 #include "hw-ports.h"
-#include "elf32-m68hc1x.h"
+#include "bfd/elf32-m68hc1x.h"
+
+#include "m68hc11-sim.h"
 
 #ifndef MONITOR_BASE
 # define MONITOR_BASE (0x0C000)
@@ -32,22 +39,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 #endif
 
 static void sim_get_info (SIM_DESC sd, char *cmd);
-
-
-char *interrupt_names[] = {
-  "reset",
-  "nmi",
-  "int",
-  NULL
-};
-
-#ifndef INLINE
-#if defined(__GNUC__) && defined(__OPTIMIZE__)
-#define INLINE __inline__
-#else
-#define INLINE
-#endif
-#endif
 
 struct sim_info_list
 {
@@ -116,7 +107,7 @@ sim_get_info (SIM_DESC sd, char *cmd)
 	  sim_io_eprintf (sd, "Valid devices: cpu timer sio eeprom\n");
 	  return;
 	}
-      hw_dev = sim_hw_parse (sd, dev_list[i].device);
+      hw_dev = sim_hw_parse (sd, "%s", dev_list[i].device);
       if (hw_dev == 0)
 	{
 	  sim_io_eprintf (sd, "Device '%s' not found\n", dev_list[i].device);
@@ -127,7 +118,7 @@ sim_get_info (SIM_DESC sd, char *cmd)
     }
 
   cpu_info (sd, cpu);
-  interrupts_info (sd, &cpu->cpu_interrupts);
+  interrupts_info (sd, &M68HC11_SIM_CPU (cpu)->cpu_interrupts);
 }
 
 
@@ -136,25 +127,27 @@ sim_board_reset (SIM_DESC sd)
 {
   struct hw *hw_cpu;
   sim_cpu *cpu;
+  struct m68hc11_sim_cpu *m68hc11_cpu;
   const struct bfd_arch_info *arch;
   const char *cpu_type;
 
   cpu = STATE_CPU (sd, 0);
+  m68hc11_cpu = M68HC11_SIM_CPU (cpu);
   arch = STATE_ARCHITECTURE (sd);
 
   /*  hw_cpu = sim_hw_parse (sd, "/"); */
   if (arch->arch == bfd_arch_m68hc11)
     {
-      cpu->cpu_type = CPU_M6811;
+      m68hc11_cpu->cpu_type = CPU_M6811;
       cpu_type = "/m68hc11";
     }
   else
     {
-      cpu->cpu_type = CPU_M6812;
+      m68hc11_cpu->cpu_type = CPU_M6812;
       cpu_type = "/m68hc12";
     }
   
-  hw_cpu = sim_hw_parse (sd, cpu_type);
+  hw_cpu = sim_hw_parse (sd, "%s", cpu_type);
   if (hw_cpu == 0)
     {
       sim_io_eprintf (sd, "%s cpu not found in device tree.", cpu_type);
@@ -172,38 +165,40 @@ sim_hw_configure (SIM_DESC sd)
   const struct bfd_arch_info *arch;
   struct hw *device_tree;
   sim_cpu *cpu;
+  struct m68hc11_sim_cpu *m68hc11_cpu;
   
   arch = STATE_ARCHITECTURE (sd);
   if (arch == 0)
     return 0;
 
   cpu = STATE_CPU (sd, 0);
-  cpu->cpu_configured_arch = arch;
+  m68hc11_cpu = M68HC11_SIM_CPU (cpu);
+  m68hc11_cpu->cpu_configured_arch = arch;
   device_tree = sim_hw_parse (sd, "/");
   if (arch->arch == bfd_arch_m68hc11)
     {
-      cpu->cpu_interpretor = cpu_interp_m6811;
+      m68hc11_cpu->cpu_interpretor = cpu_interp_m6811;
       if (hw_tree_find_property (device_tree, "/m68hc11/reg") == 0)
 	{
 	  /* Allocate core managed memory */
 
 	  /* the monitor  */
-	  sim_do_commandf (sd, "memory region 0x%lx@%d,0x%lx",
+	  sim_do_commandf (sd, "memory region 0x%x@%d,0x%x",
 			   /* MONITOR_BASE, MONITOR_SIZE */
 			   0x8000, M6811_RAM_LEVEL, 0x8000);
 	  sim_do_commandf (sd, "memory region 0x000@%d,0x8000",
 			   M6811_RAM_LEVEL);
 	  sim_hw_parse (sd, "/m68hc11/reg 0x1000 0x03F");
-          if (cpu->bank_start < cpu->bank_end)
+          if (m68hc11_cpu->bank_start < m68hc11_cpu->bank_end)
             {
-              sim_do_commandf (sd, "memory region 0x%lx@%d,0x100000",
-                               cpu->bank_virtual, M6811_RAM_LEVEL);
+              sim_do_commandf (sd, "memory region 0x%x@%d,0x100000",
+                               m68hc11_cpu->bank_virtual, M6811_RAM_LEVEL);
               sim_hw_parse (sd, "/m68hc11/use_bank 1");
             }
 	}
-      if (cpu->cpu_start_mode)
+      if (m68hc11_cpu->cpu_start_mode)
         {
-          sim_hw_parse (sd, "/m68hc11/mode %s", cpu->cpu_start_mode);
+          sim_hw_parse (sd, "/m68hc11/mode %s", m68hc11_cpu->cpu_start_mode);
         }
       if (hw_tree_find_property (device_tree, "/m68hc11/m68hc11sio/reg") == 0)
 	{
@@ -242,22 +237,22 @@ sim_hw_configure (SIM_DESC sd)
       sim_hw_parse (sd, "/m68hc11 > port-b cpu-write-port /m68hc11");
       sim_hw_parse (sd, "/m68hc11 > port-c cpu-write-port /m68hc11");
       sim_hw_parse (sd, "/m68hc11 > port-d cpu-write-port /m68hc11");
-      cpu->hw_cpu = sim_hw_parse (sd, "/m68hc11");
+      m68hc11_cpu->hw_cpu = sim_hw_parse (sd, "/m68hc11");
     }
   else
     {
-      cpu->cpu_interpretor = cpu_interp_m6812;
+      m68hc11_cpu->cpu_interpretor = cpu_interp_m6812;
       if (hw_tree_find_property (device_tree, "/m68hc12/reg") == 0)
 	{
 	  /* Allocate core external memory.  */
-	  sim_do_commandf (sd, "memory region 0x%lx@%d,0x%lx",
+	  sim_do_commandf (sd, "memory region 0x%x@%d,0x%x",
 			   0x8000, M6811_RAM_LEVEL, 0x8000);
 	  sim_do_commandf (sd, "memory region 0x000@%d,0x8000",
 			   M6811_RAM_LEVEL);
-          if (cpu->bank_start < cpu->bank_end)
+          if (m68hc11_cpu->bank_start < m68hc11_cpu->bank_end)
             {
-              sim_do_commandf (sd, "memory region 0x%lx@%d,0x100000",
-                               cpu->bank_virtual, M6811_RAM_LEVEL);
+              sim_do_commandf (sd, "memory region 0x%x@%d,0x100000",
+                               m68hc11_cpu->bank_virtual, M6811_RAM_LEVEL);
               sim_hw_parse (sd, "/m68hc12/use_bank 1");
             }
 	  sim_hw_parse (sd, "/m68hc12/reg 0x0 0x3FF");
@@ -300,7 +295,7 @@ sim_hw_configure (SIM_DESC sd)
       sim_hw_parse (sd, "/m68hc12 > port-b cpu-write-port /m68hc12");
       sim_hw_parse (sd, "/m68hc12 > port-c cpu-write-port /m68hc12");
       sim_hw_parse (sd, "/m68hc12 > port-d cpu-write-port /m68hc12");
-      cpu->hw_cpu = sim_hw_parse (sd, "/m68hc12");
+      m68hc11_cpu->hw_cpu = sim_hw_parse (sd, "/m68hc12");
     }
   return 1;
 }
@@ -308,55 +303,32 @@ sim_hw_configure (SIM_DESC sd)
 /* Get the memory bank parameters by looking at the global symbols
    defined by the linker.  */
 static int
-sim_get_bank_parameters (SIM_DESC sd, bfd* abfd)
+sim_get_bank_parameters (SIM_DESC sd)
 {
   sim_cpu *cpu;
-  long symsize;
-  long symbol_count, i;
+  struct m68hc11_sim_cpu *m68hc11_cpu;
   unsigned size;
-  asymbol** asymbols;
-  asymbol** current;
+  bfd_vma addr;
 
   cpu = STATE_CPU (sd, 0);
+  m68hc11_cpu = M68HC11_SIM_CPU (cpu);
 
-  symsize = bfd_get_symtab_upper_bound (abfd);
-  if (symsize < 0)
-    {
-      sim_io_eprintf (sd, "Cannot read symbols of program");
-      return 0;
-    }
-  asymbols = (asymbol **) xmalloc (symsize);
-  symbol_count = bfd_canonicalize_symtab (abfd, asymbols);
-  if (symbol_count < 0)
-    {
-      sim_io_eprintf (sd, "Cannot read symbols of program");
-      return 0;
-    }
+  addr = trace_sym_value (sd, BFD_M68HC11_BANK_START_NAME);
+  if (addr != -1)
+    m68hc11_cpu->bank_start = addr;
 
-  size = 0;
-  for (i = 0, current = asymbols; i < symbol_count; i++, current++)
-    {
-      const char* name = bfd_asymbol_name (*current);
+  size = trace_sym_value (sd, BFD_M68HC11_BANK_SIZE_NAME);
+  if (size == -1)
+    size = 0;
 
-      if (strcmp (name, BFD_M68HC11_BANK_START_NAME) == 0)
-        {
-          cpu->bank_start = bfd_asymbol_value (*current);
-        }
-      else if (strcmp (name, BFD_M68HC11_BANK_SIZE_NAME) == 0)
-        {
-          size = bfd_asymbol_value (*current);
-        }
-      else if (strcmp (name, BFD_M68HC11_BANK_VIRTUAL_NAME) == 0)
-        {
-          cpu->bank_virtual = bfd_asymbol_value (*current);
-        }
-    }
-  free (asymbols);
+  addr = trace_sym_value (sd, BFD_M68HC11_BANK_VIRTUAL_NAME);
+  if (addr != -1)
+    m68hc11_cpu->bank_virtual = addr;
 
-  cpu->bank_end = cpu->bank_start + size;
-  cpu->bank_shift = 0;
+  m68hc11_cpu->bank_end = m68hc11_cpu->bank_start + size;
+  m68hc11_cpu->bank_shift = 0;
   for (; size > 1; size >>= 1)
-    cpu->bank_shift++;
+    m68hc11_cpu->bank_shift++;
 
   return 0;
 }
@@ -365,9 +337,11 @@ static int
 sim_prepare_for_program (SIM_DESC sd, bfd* abfd)
 {
   sim_cpu *cpu;
+  struct m68hc11_sim_cpu *m68hc11_cpu;
   int elf_flags = 0;
 
   cpu = STATE_CPU (sd, 0);
+  m68hc11_cpu = M68HC11_SIM_CPU (cpu);
 
   if (abfd != NULL)
     {
@@ -376,34 +350,34 @@ sim_prepare_for_program (SIM_DESC sd, bfd* abfd)
       if (bfd_get_flavour (abfd) == bfd_target_elf_flavour)
         elf_flags = elf_elfheader (abfd)->e_flags;
 
-      cpu->cpu_elf_start = bfd_get_start_address (abfd);
+      m68hc11_cpu->cpu_elf_start = bfd_get_start_address (abfd);
       /* See if any section sets the reset address */
-      cpu->cpu_use_elf_start = 1;
-      for (s = abfd->sections; s && cpu->cpu_use_elf_start; s = s->next) 
+      m68hc11_cpu->cpu_use_elf_start = 1;
+      for (s = abfd->sections; s && m68hc11_cpu->cpu_use_elf_start; s = s->next)
         {
           if (s->flags & SEC_LOAD)
             {
               bfd_size_type size;
 
-              size = bfd_get_section_size (s);
+	      size = bfd_section_size (s);
               if (size > 0)
                 {
                   bfd_vma lma;
 
                   if (STATE_LOAD_AT_LMA_P (sd))
-                    lma = bfd_section_lma (abfd, s);
+		    lma = bfd_section_lma (s);
                   else
-                    lma = bfd_section_vma (abfd, s);
+		    lma = bfd_section_vma (s);
 
                   if (lma <= 0xFFFE && lma+size >= 0x10000)
-                    cpu->cpu_use_elf_start = 0;
+                    m68hc11_cpu->cpu_use_elf_start = 0;
                 }
             }
         }
 
       if (elf_flags & E_M68HC12_BANKS)
         {
-          if (sim_get_bank_parameters (sd, abfd) != 0)
+          if (sim_get_bank_parameters (sd) != 0)
             sim_io_eprintf (sd, "Memory bank parameters are not initialized\n");
         }
     }
@@ -417,21 +391,45 @@ sim_prepare_for_program (SIM_DESC sd, bfd* abfd)
   return SIM_RC_OK;
 }
 
+static sim_cia
+m68hc11_pc_get (sim_cpu *cpu)
+{
+  return cpu_get_pc (cpu);
+}
+
+static void
+m68hc11_pc_set (sim_cpu *cpu, sim_cia pc)
+{
+  cpu_set_pc (cpu, pc);
+}
+
+static int m68hc11_reg_fetch (SIM_CPU *, int, void *, int);
+static int m68hc11_reg_store (SIM_CPU *, int, const void *, int);
+
 SIM_DESC
 sim_open (SIM_OPEN_KIND kind, host_callback *callback,
-          bfd *abfd, char **argv)
+	  bfd *abfd, char * const *argv)
 {
+  int i;
   SIM_DESC sd;
   sim_cpu *cpu;
 
   sd = sim_state_alloc (kind, callback);
-  cpu = STATE_CPU (sd, 0);
 
   SIM_ASSERT (STATE_MAGIC (sd) == SIM_MAGIC_NUMBER);
 
-  /* for compatibility */
-  current_alignment = NONSTRICT_ALIGNMENT;
-  current_target_byte_order = BIG_ENDIAN;
+  /* Set default options before parsing user options.  */
+  current_target_byte_order = BFD_ENDIAN_BIG;
+
+  /* The cpu data is kept in a separately allocated chunk of memory.  */
+  if (sim_cpu_alloc_all_extra (sd, 0, sizeof (struct m68hc11_sim_cpu))
+      != SIM_RC_OK)
+    {
+      free_state (sd);
+      return 0;
+    }
+
+  cpu = STATE_CPU (sd, 0);
 
   cpu_initialize (sd, cpu);
 
@@ -441,9 +439,7 @@ sim_open (SIM_OPEN_KIND kind, host_callback *callback,
       return 0;
     }
 
-  /* getopt will print the error message so we just have to exit if this fails.
-     FIXME: Hmmm...  in the case of gdb we need getopt to call
-     print_filtered.  */
+  /* The parser will print an error message for us, so we silently return.  */
   if (sim_parse_args (sd, argv) != SIM_RC_OK)
     {
       /* Uninstall the modules to avoid memory leaks,
@@ -453,10 +449,7 @@ sim_open (SIM_OPEN_KIND kind, host_callback *callback,
     }
 
   /* Check for/establish the a reference program image.  */
-  if (sim_analyze_program (sd,
-			   (STATE_PROG_ARGV (sd) != NULL
-			    ? *STATE_PROG_ARGV (sd)
-			    : NULL), abfd) != SIM_RC_OK)
+  if (sim_analyze_program (sd, STATE_PROG_FILE (sd), abfd) != SIM_RC_OK)
     {
       free_state (sd);
       return 0;
@@ -482,34 +475,18 @@ sim_open (SIM_OPEN_KIND kind, host_callback *callback,
       return 0;
     }      
 
-  /* Fudge our descriptor.  */
+  /* CPU specific initialization.  */
+  for (i = 0; i < MAX_NR_PROCESSORS; ++i)
+    {
+      SIM_CPU *cpu = STATE_CPU (sd, i);
+
+      CPU_REG_FETCH (cpu) = m68hc11_reg_fetch;
+      CPU_REG_STORE (cpu) = m68hc11_reg_store;
+      CPU_PC_FETCH (cpu) = m68hc11_pc_get;
+      CPU_PC_STORE (cpu) = m68hc11_pc_set;
+    }
+
   return sd;
-}
-
-
-void
-sim_close (SIM_DESC sd, int quitting)
-{
-  /* shut down modules */
-  sim_module_uninstall (sd);
-
-  /* Ensure that any resources allocated through the callback
-     mechanism are released: */
-  sim_io_shutdown (sd);
-
-  /* FIXME - free SD */
-  sim_state_free (sd);
-  return;
-}
-
-void
-sim_set_profile (int n)
-{
-}
-
-void
-sim_set_profile_size (int n)
-{
 }
 
 /* Generic implementation of sim_engine_run that works within the
@@ -530,22 +507,15 @@ sim_engine_run (SIM_DESC sd,
       cpu_single_step (cpu);
 
       /* process any events */
-      if (sim_events_tickn (sd, cpu->cpu_current_cycle))
+      if (sim_events_tickn (sd, M68HC11_SIM_CPU (cpu)->cpu_current_cycle))
 	{
 	  sim_events_process (sd);
 	}
     }
 }
 
-int
-sim_trace (SIM_DESC sd)
-{
-  sim_resume (sd, 0, 0);
-  return 1;
-}
-
 void
-sim_info (SIM_DESC sd, int verbose)
+sim_info (SIM_DESC sd, bool verbose)
 {
   const char *cpu_type;
   const struct bfd_arch_info *arch;
@@ -568,27 +538,18 @@ sim_info (SIM_DESC sd, int verbose)
 
 SIM_RC
 sim_create_inferior (SIM_DESC sd, struct bfd *abfd,
-                     char **argv, char **env)
+                     char * const *argv, char * const *env)
 {
   return sim_prepare_for_program (sd, abfd);
 }
 
-
-void
-sim_set_callbacks (host_callback *p)
+static int
+m68hc11_reg_fetch (SIM_CPU *cpu, int rn, void *buf, int length)
 {
-  /*  m6811_callback = p; */
-}
-
-
-int
-sim_fetch_register (SIM_DESC sd, int rn, unsigned char *memory, int length)
-{
-  sim_cpu *cpu;
-  uint16 val;
+  unsigned char *memory = buf;
+  uint16_t val;
   int size = 2;
 
-  cpu = STATE_CPU (sd, 0);
   switch (rn)
     {
     case A_REGNUM:
@@ -647,13 +608,11 @@ sim_fetch_register (SIM_DESC sd, int rn, unsigned char *memory, int length)
   return size;
 }
 
-int
-sim_store_register (SIM_DESC sd, int rn, unsigned char *memory, int length)
+static int
+m68hc11_reg_store (SIM_CPU *cpu, int rn, const void *buf, int length)
 {
-  uint16 val;
-  sim_cpu *cpu;
-
-  cpu = STATE_CPU (sd, 0);
+  const unsigned char *memory = buf;
+  uint16_t val;
 
   val = *memory++;
   if (length == 2)
@@ -702,86 +661,4 @@ sim_store_register (SIM_DESC sd, int rn, unsigned char *memory, int length)
     }
 
   return 2;
-}
-
-void
-sim_size (int s)
-{
-  ;
-}
-
-/* Halt the simulator after just one instruction */
-
-static void
-has_stepped (SIM_DESC sd,
-	     void *data)
-{
-  ASSERT (STATE_MAGIC (sd) == SIM_MAGIC_NUMBER);
-  sim_engine_halt (sd, NULL, NULL, NULL_CIA, sim_stopped, SIM_SIGTRAP);
-}
-
-
-/* Generic resume - assumes the existance of sim_engine_run */
-
-void
-sim_resume (SIM_DESC sd,
-	    int step,
-	    int siggnal)
-{
-  sim_engine *engine = STATE_ENGINE (sd);
-  jmp_buf buf;
-  int jmpval;
-
-  ASSERT (STATE_MAGIC (sd) == SIM_MAGIC_NUMBER);
-
-  /* we only want to be single stepping the simulator once */
-  if (engine->stepper != NULL)
-    {
-      sim_events_deschedule (sd, engine->stepper);
-      engine->stepper = NULL;
-    }
-  sim_module_resume (sd);
-
-  /* run/resume the simulator */
-  engine->jmpbuf = &buf;
-  jmpval = setjmp (buf);
-  if (jmpval == sim_engine_start_jmpval
-      || jmpval == sim_engine_restart_jmpval)
-    {
-      int last_cpu_nr = sim_engine_last_cpu_nr (sd);
-      int next_cpu_nr = sim_engine_next_cpu_nr (sd);
-      int nr_cpus = sim_engine_nr_cpus (sd);
-
-      sim_events_preprocess (sd, last_cpu_nr >= nr_cpus, next_cpu_nr >= nr_cpus);
-      if (next_cpu_nr >= nr_cpus)
-	next_cpu_nr = 0;
-
-      /* Only deliver the siggnal ]sic] the first time through - don't
-         re-deliver any siggnal during a restart. */
-      if (jmpval == sim_engine_restart_jmpval)
-	siggnal = 0;
-
-      /* Install the stepping event after having processed some
-         pending events.  This is necessary for HC11/HC12 simulator
-         because the tick counter is incremented by the number of cycles
-         the instruction took.  Some pending ticks to process can still
-         be recorded internally by the simulator and sim_events_preprocess
-         will handle them.  If the stepping event is inserted before,
-         these pending ticks will raise the event and the simulator will
-         stop without having executed any instruction.  */
-      if (step)
-        engine->stepper = sim_events_schedule (sd, 0, has_stepped, sd);
-
-#ifdef SIM_CPU_EXCEPTION_RESUME
-      {
-	sim_cpu* cpu = STATE_CPU (sd, next_cpu_nr);
-	SIM_CPU_EXCEPTION_RESUME(sd, cpu, siggnal);
-      }
-#endif
-
-      sim_engine_run (sd, next_cpu_nr, nr_cpus, siggnal);
-    }
-  engine->jmpbuf = NULL;
-
-  sim_module_suspend (sd);
 }

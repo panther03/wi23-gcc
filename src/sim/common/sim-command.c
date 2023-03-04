@@ -1,6 +1,6 @@
 /* Miscellaneous simulator utilities.
 
-   Copyright (C) 2005-2013 Free Software Foundation, Inc.
+   Copyright (C) 2005-2023 Free Software Foundation, Inc.
    Contributed by Analog Devices, Inc.
 
    This file is part of simulators.
@@ -18,6 +18,9 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
+/* This must come before any other includes.  */
+#include "defs.h"
+
 #include "sim-main.h"
 #include "sim-options.h"
 #include "sim-utils.h"
@@ -26,7 +29,7 @@
    which add custom options via sim_add_option_table().  */
 
 void
-sim_do_command (SIM_DESC sd, char *cmd)
+sim_do_command (SIM_DESC sd, const char *cmd)
 {
   if (sim_args_command (sd, cmd) != SIM_RC_OK)
     sim_io_eprintf (sd, "Unknown sim command: \"%s\".  Try \"sim help\".\n",

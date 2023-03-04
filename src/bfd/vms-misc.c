@@ -1,7 +1,6 @@
 /* vms-misc.c -- BFD back-end for VMS/VAX (openVMS/VAX) and
    EVAX (openVMS/Alpha) files.
-   Copyright 1996, 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2005,
-   2007, 2008, 2009, 2010  Free Software Foundation, Inc.
+   Copyright (C) 1996-2023 Free Software Foundation, Inc.
 
    Miscellaneous functions.
 
@@ -136,31 +135,42 @@ _bfd_hexdump (int level, unsigned char *ptr, int size, int offset)
 #endif
 
 
-/* Copy sized string (string with fixed size) to new allocated area
-   size is string size (size of record)  */
+/* Copy sized string (string with fixed size) to new allocated area.
+   Size is string size (size of record).  */
 
 char *
-_bfd_vms_save_sized_string (unsigned char *str, int size)
+_bfd_vms_save_sized_string (bfd *abfd, unsigned char *str, size_t size)
 {
-  char *newstr = bfd_malloc ((bfd_size_type) size + 1);
+  char *newstr;
 
+  if (size == (size_t) -1)
+    {
+      bfd_set_error (bfd_error_no_memory);
+      return NULL;
+    }
+  newstr = bfd_alloc (abfd, size + 1);
   if (newstr == NULL)
     return NULL;
-  memcpy (newstr, (char *) str, (size_t) size);
+  memcpy (newstr, str, size);
   newstr[size] = 0;
 
   return newstr;
 }
 
-/* Copy counted string (string with size at first byte) to new allocated area
-   ptr points to size byte on entry  */
+/* Copy counted string (string with size at first byte) to new allocated area.
+   PTR points to size byte on entry.  */
 
 char *
-_bfd_vms_save_counted_string (unsigned char *ptr)
+_bfd_vms_save_counted_string (bfd *abfd, unsigned char *ptr, size_t maxlen)
 {
-  int len = *ptr++;
+  unsigned int len;
 
-  return _bfd_vms_save_sized_string (ptr, len);
+  if (maxlen == 0)
+    return NULL;
+  len = *ptr++;
+  if (len >  maxlen - 1)
+    return NULL;
+  return _bfd_vms_save_sized_string (abfd, ptr, len);
 }
 
 /* Object output routines.   */
@@ -251,7 +261,7 @@ _bfd_vms_output_end_subrec (struct vms_rec_wr *recwr)
 
   /* Put length to buffer.  */
   bfd_putl16 ((bfd_vma) (recwr->size - recwr->subrec_offset),
-              recwr->buf + recwr->subrec_offset + 2);
+	      recwr->buf + recwr->subrec_offset + 2);
 
   /* Close the subrecord.  */
   recwr->subrec_offset = 0;
@@ -357,12 +367,12 @@ _bfd_vms_output_counted (struct vms_rec_wr *recwr, const char *value)
   len = strlen (value);
   if (len == 0)
     {
-      (*_bfd_error_handler) (_("_bfd_vms_output_counted called with zero bytes"));
+      _bfd_error_handler (_("_bfd_vms_output_counted called with zero bytes"));
       return;
     }
   if (len > 255)
     {
-      (*_bfd_error_handler) (_("_bfd_vms_output_counted called with too many bytes"));
+      _bfd_error_handler (_("_bfd_vms_output_counted called with too many bytes"));
       return;
     }
   _bfd_vms_output_byte (recwr, (unsigned int) len & 0xff);
@@ -424,9 +434,9 @@ static int
 vms_convert_to_var_1 (char *filename, int type)
 {
   if (type != DECC$K_FILE)
-    return FALSE;
+    return false;
   vms_convert_to_var (filename);
-  return TRUE;
+  return true;
 }
 
 /* Convert the file to variable record length format. This is done
@@ -437,8 +447,8 @@ int
 _bfd_vms_convert_to_var_unix_filename (const char *unix_filename)
 {
   if (decc$to_vms (unix_filename, &vms_convert_to_var_1, 0, 1) != 1)
-    return FALSE;
-  return TRUE;
+    return false;
+  return true;
 }
 #endif /* VMS */
 
@@ -446,9 +456,8 @@ _bfd_vms_convert_to_var_unix_filename (const char *unix_filename)
    stolen from obj-vms.c.  */
 
 unsigned char *
-get_vms_time_string (void)
+get_vms_time_string (unsigned char *tbuf)
 {
-  static unsigned char tbuf[18];
 #ifndef VMS
   char *pnt;
   time_t timeb;
@@ -483,7 +492,7 @@ get_vms_time_string (void)
    The result has to be free().  */
 
 char *
-vms_get_module_name (const char *filename, bfd_boolean upcase)
+vms_get_module_name (const char *filename, bool upcase)
 {
   char *fname, *fptr;
   const char *fout;
@@ -515,12 +524,12 @@ vms_get_module_name (const char *filename, bfd_boolean upcase)
   for (fptr = fname; *fptr != 0; fptr++)
     {
       if (*fptr == ';' || (fptr - fname) >= 31)
-        {
-          *fptr = 0;
-          break;
-        }
+	{
+	  *fptr = 0;
+	  break;
+	}
       if (upcase)
-        *fptr = TOUPPER (*fptr);
+	*fptr = TOUPPER (*fptr);
     }
   return fname;
 }
@@ -585,8 +594,8 @@ vms_time_to_time_t (unsigned int hi, unsigned int lo)
 void
 vms_time_t_to_vms_time (time_t ut, unsigned int *hi, unsigned int *lo)
 {
-  unsigned short val[4];
-  unsigned short tmp[4];
+  unsigned int val[4];
+  unsigned int tmp[4];
   unsigned int carry;
   int i;
 

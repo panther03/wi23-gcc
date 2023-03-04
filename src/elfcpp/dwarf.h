@@ -1,6 +1,6 @@
 // dwarf.h -- DWARF2 constants  -*- C++ -*-
 
-// Copyright 2006, 2007, 2008, 2011, 2012 Free Software Foundation, Inc.
+// Copyright (C) 2006-2023 Free Software Foundation, Inc.
 // Written by Ian Lance Taylor <iant@google.com>.
 
 // This file is part of elfcpp.
@@ -72,7 +72,19 @@ namespace elfcpp
 #define DW_FIRST_CFA(name, value) enum DW_CFA { \
   name = value
 #define DW_CFA(name, value) , name = value
+#define DW_CFA_DUP(name, value) , name = value
 #define DW_END_CFA };
+
+#define DW_FIRST_IDX(name, value) enum dwarf_name_index_attribute { \
+  name = value
+#define DW_IDX(name, value) , name = value
+#define DW_IDX_DUP(name, value) , name = value
+#define DW_END_IDX };
+
+#define DW_FIRST_UT(name, value) enum dwarf_unit_type { \
+  name = value
+#define DW_UT(name, value) , name = value
+#define DW_END_UT };
 
 #include "dwarf2.def"
 
@@ -101,8 +113,18 @@ namespace elfcpp
 #undef DW_END_ATE
 
 #undef DW_FIRST_CFA
+#undef DW_CFA_DUP
 #undef DW_CFA
 #undef DW_END_CFA
+
+#undef DW_FIRST_IDX
+#undef DW_IDX
+#undef DW_IDX_DUP
+#undef DW_END_IDX
+
+#undef DW_FIRST_UT
+#undef DW_UT
+#undef DW_END_UT
 
 // Frame unwind information.
 
@@ -130,35 +152,48 @@ enum DW_EH_PE
   DW_EH_PE_indirect = 0x80
 };
 
+// Line number table content type codes.
+
+enum DW_LNCT
+{
+  DW_LNCT_path            = 0x1,
+  DW_LNCT_directory_index = 0x2,
+  DW_LNCT_timestamp       = 0x3,
+  DW_LNCT_size            = 0x4,
+  DW_LNCT_MD5             = 0x5,
+  DW_LNCT_lo_user         = 0x2000,
+  DW_LNCT_hi_user         = 0x3fff
+};
+
 // Line number opcodes.
 
 enum DW_LINE_OPS
 {
-  DW_LNS_extended_op = 0,
-  DW_LNS_copy = 1,
-  DW_LNS_advance_pc = 2,
-  DW_LNS_advance_line = 3,
-  DW_LNS_set_file = 4,
-  DW_LNS_set_column = 5,
-  DW_LNS_negate_stmt = 6,
-  DW_LNS_set_basic_block = 7,
-  DW_LNS_const_add_pc = 8,
-  DW_LNS_fixed_advance_pc = 9,
+  DW_LNS_extended_op        = 0x00,
+  DW_LNS_copy               = 0x01,
+  DW_LNS_advance_pc         = 0x02,
+  DW_LNS_advance_line       = 0x03,
+  DW_LNS_set_file           = 0x04,
+  DW_LNS_set_column         = 0x05,
+  DW_LNS_negate_stmt        = 0x06,
+  DW_LNS_set_basic_block    = 0x07,
+  DW_LNS_const_add_pc       = 0x08,
+  DW_LNS_fixed_advance_pc   = 0x09,
   // DWARF 3.
-  DW_LNS_set_prologue_end = 10,
-  DW_LNS_set_epilogue_begin = 11,
-  DW_LNS_set_isa = 12
+  DW_LNS_set_prologue_end   = 0x0a,
+  DW_LNS_set_epilogue_begin = 0x0b,
+  DW_LNS_set_isa            = 0x0c
 };
 
 // Line number extended opcodes.
 
 enum DW_LINE_EXTENDED_OPS
 {
-  DW_LNE_end_sequence = 1,
-  DW_LNE_set_address = 2,
-  DW_LNE_define_file = 3,
+  DW_LNE_end_sequence                = 0x01,
+  DW_LNE_set_address                 = 0x02,
+  DW_LNE_define_file                 = 0x03,
   // DWARF4.
-  DW_LNE_set_discriminator = 4,
+  DW_LNE_set_discriminator           = 0x04,
   // HP extensions.
   DW_LNE_HP_negate_is_UV_update      = 0x11,
   DW_LNE_HP_push_context             = 0x12,
@@ -169,13 +204,15 @@ enum DW_LINE_EXTENDED_OPS
   DW_LNE_HP_negate_post_semantics    = 0x17,
   DW_LNE_HP_negate_function_exit     = 0x18,
   DW_LNE_HP_negate_front_end_logical = 0x19,
-  DW_LNE_HP_define_proc              = 0x20
+  DW_LNE_HP_define_proc              = 0x20,
+  DW_LNE_lo_user                     = 0x80,
+  DW_LNE_hi_user                     = 0xff
 };
 
 enum DW_CHILDREN
 {
-  DW_CHILDREN_no		     =0x00,
-  DW_CHILDREN_yes		     =0x01
+  DW_CHILDREN_no  = 0,
+  DW_CHILDREN_yes = 1
 };
 
 // Source language names and codes.
@@ -205,6 +242,12 @@ enum DW_LANG
   DW_LANG_Python = 0x0014,
   // DWARF 5.
   DW_LANG_Go = 0x0016,
+  DW_LANG_C_plus_plus_11 = 0x001a,
+  DW_LANG_C11 = 0x001d,
+  DW_LANG_C_plus_plus_14 = 0x0021,
+  DW_LANG_Fortran03 = 0x0022,
+  DW_LANG_Fortran08 = 0x0023,
+
   DW_LANG_lo_user = 0x8000,	// Implementation-defined range start.
   DW_LANG_hi_user = 0xffff,	// Implementation-defined range start.
   // MIPS.
@@ -219,20 +262,38 @@ enum DW_LANG
   DW_LANG_HP_Assembler = 0x8007
 };
 
+// Range list entry kinds in .debug_rnglists* section.
+
+enum DW_RLE
+{
+  DW_RLE_end_of_list   = 0x00,
+  DW_RLE_base_addressx = 0x01,
+  DW_RLE_startx_endx   = 0x02,
+  DW_RLE_startx_length = 0x03,
+  DW_RLE_offset_pair   = 0x04,
+  DW_RLE_base_address  = 0x05,
+  DW_RLE_start_end     = 0x06,
+  DW_RLE_start_length  = 0x07
+};
+
 // DWARF section identifiers used in the package format.
 // Extensions for Fission.  See http://gcc.gnu.org/wiki/DebugFissionDWP.
+// Added (with changes) in DWARF 5.
 
 enum DW_SECT
 {
-  DW_SECT_INFO = 1,
-  DW_SECT_TYPES = 2,
-  DW_SECT_ABBREV = 3,
-  DW_SECT_LINE = 4,
-  DW_SECT_LOC = 5,
+  DW_SECT_INFO        = 1,
+  DW_SECT_ABBREV      = 3,
+  DW_SECT_LINE        = 4,
+  DW_SECT_LOCLISTS    = 5,
   DW_SECT_STR_OFFSETS = 6,
-  DW_SECT_MACINFO = 7,
-  DW_SECT_MACRO = 8,
-  DW_SECT_MAX = DW_SECT_MACRO,
+  DW_SECT_MACINFO     = 7,
+  DW_SECT_RNGLISTS    = 8,
+  DW_SECT_MAX = DW_SECT_RNGLISTS,
+  // These were used only for the experimental Fission support in DWARF 4.
+  DW_SECT_TYPES       = 2,
+  DW_SECT_LOC         = 5,
+  DW_SECT_MACRO       = 8
 };
 
 } // End namespace elfcpp.

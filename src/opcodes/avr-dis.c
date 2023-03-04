@@ -1,6 +1,5 @@
 /* Disassemble AVR instructions.
-   Copyright 1999, 2000, 2002, 2004, 2005, 2006, 2007, 2008, 2012
-   Free Software Foundation, Inc.
+   Copyright (C) 1999-2023 Free Software Foundation, Inc.
 
    Contributed by Denis Chertykov <denisc@overta.ru>
 
@@ -23,9 +22,10 @@
 
 #include "sysdep.h"
 #include <assert.h>
-#include "dis-asm.h"
+#include "disassemble.h"
 #include "opintl.h"
 #include "libiberty.h"
+#include <stdint.h>
 
 struct avr_opcodes_s
 {
@@ -49,8 +49,18 @@ const struct avr_opcodes_s avr_opcodes[] =
 static const char * comment_start = "0x";
 
 static int
-avr_operand (unsigned int insn, unsigned int insn2, unsigned int pc, int constraint,
-             char *opcode_str, char *buf, char *comment, int regs, int *sym, bfd_vma *sym_addr)
+avr_operand (unsigned int        insn,
+	     unsigned int        insn2,
+	     unsigned int        pc,
+	     int                 constraint,
+             char *              opcode_str,
+	     char *              buf,
+	     char *              comment,
+	     enum disassembler_style *  style,
+	     int                 regs,
+	     int *               sym,
+	     bfd_vma *           sym_addr,
+	     disassemble_info *  info)
 {
   int ok = 1;
   *sym = 0;
@@ -63,8 +73,9 @@ avr_operand (unsigned int insn, unsigned int insn2, unsigned int pc, int constra
 	insn = (insn & 0xf) | ((insn & 0x0200) >> 5); /* Source register.  */
       else
 	insn = (insn & 0x01f0) >> 4; /* Destination register.  */
-      
+
       sprintf (buf, "r%d", insn);
+      *style = dis_style_register;
       break;
 
     case 'd':
@@ -72,17 +83,20 @@ avr_operand (unsigned int insn, unsigned int insn2, unsigned int pc, int constra
 	sprintf (buf, "r%d", 16 + (insn & 0xf));
       else
 	sprintf (buf, "r%d", 16 + ((insn & 0xf0) >> 4));
+      *style = dis_style_register;
       break;
-      
+
     case 'w':
       sprintf (buf, "r%d", 24 + ((insn & 0x30) >> 3));
+      *style = dis_style_register;
       break;
-      
+
     case 'a':
       if (regs)
 	sprintf (buf, "r%d", 16 + (insn & 7));
       else
 	sprintf (buf, "r%d", 16 + ((insn >> 4) & 7));
+      *style = dis_style_register;
       break;
 
     case 'v':
@@ -90,6 +104,7 @@ avr_operand (unsigned int insn, unsigned int insn2, unsigned int pc, int constra
 	sprintf (buf, "r%d", (insn & 0xf) * 2);
       else
 	sprintf (buf, "r%d", ((insn & 0xf0) >> 3));
+      *style = dis_style_register;
       break;
 
     case 'e':
@@ -114,6 +129,7 @@ avr_operand (unsigned int insn, unsigned int insn2, unsigned int pc, int constra
 	if (AVR_UNDEF_P (insn))
 	  sprintf (comment, _("undefined"));
       }
+      *style = dis_style_register;
       break;
 
     case 'z':
@@ -134,35 +150,41 @@ avr_operand (unsigned int insn, unsigned int insn2, unsigned int pc, int constra
       *buf = '\0';
       if (AVR_UNDEF_P (insn))
 	sprintf (comment, _("undefined"));
+      *style = dis_style_register;
       break;
 
     case 'b':
       {
 	unsigned int x;
-	
+
 	x = (insn & 7);
 	x |= (insn >> 7) & (3 << 3);
 	x |= (insn >> 8) & (1 << 5);
-	
+
 	if (insn & 0x8)
 	  *buf++ = 'Y';
 	else
 	  *buf++ = 'Z';
 	sprintf (buf, "+%d", x);
 	sprintf (comment, "0x%02x", x);
+	*style = dis_style_register;
       }
       break;
-      
+
     case 'h':
       *sym = 1;
       *sym_addr = ((((insn & 1) | ((insn & 0x1f0) >> 3)) << 16) | insn2) * 2;
       /* See PR binutils/2454.  Ideally we would like to display the hex
 	 value of the address only once, but this would mean recoding
 	 objdump_print_address() which would affect many targets.  */
-      sprintf (buf, "%#lx", (unsigned long) *sym_addr);      
+      sprintf (buf, "%#lx", (unsigned long) *sym_addr);
       strcpy (comment, comment_start);
+      info->insn_info_valid = 1;
+      info->insn_type = dis_jsr;
+      info->target = *sym_addr;
+      *style = dis_style_address;
       break;
-      
+
     case 'L':
       {
 	int rel_addr = (((insn & 0xfff) ^ 0x800) - 0x800) * 2;
@@ -170,6 +192,10 @@ avr_operand (unsigned int insn, unsigned int insn2, unsigned int pc, int constra
         *sym = 1;
         *sym_addr = pc + 2 + rel_addr;
 	strcpy (comment, comment_start);
+        info->insn_info_valid = 1;
+        info->insn_type = dis_branch;
+        info->target = *sym_addr;
+	*style = dis_style_address_offset;
       }
       break;
 
@@ -181,24 +207,52 @@ avr_operand (unsigned int insn, unsigned int insn2, unsigned int pc, int constra
         *sym = 1;
         *sym_addr = pc + 2 + rel_addr;
 	strcpy (comment, comment_start);
+        info->insn_info_valid = 1;
+        info->insn_type = dis_condbranch;
+        info->target = *sym_addr;
+	*style = dis_style_address_offset;
       }
       break;
 
     case 'i':
-      sprintf (buf, "0x%04X", insn2);
+      {
+        unsigned int val = insn2 | 0x800000;
+        *sym = 1;
+        *sym_addr = val;
+        sprintf (buf, "0x%04X", insn2);
+        strcpy (comment, comment_start);
+	*style = dis_style_immediate;
+      }
       break;
-      
+
+    case 'j':
+      {
+        unsigned int val = ((insn & 0xf) | ((insn & 0x600) >> 5)
+                                         | ((insn & 0x100) >> 2));
+	if ((insn & 0x100) == 0)
+	  val |= 0x80;
+        *sym = 1;
+        *sym_addr = val | 0x800000;
+        sprintf (buf, "0x%02x", val);
+        strcpy (comment, comment_start);
+	*style = dis_style_immediate;
+      }
+      break;
+
     case 'M':
       sprintf (buf, "0x%02X", ((insn & 0xf00) >> 4) | (insn & 0xf));
       sprintf (comment, "%d", ((insn & 0xf00) >> 4) | (insn & 0xf));
+      *style = dis_style_immediate;
       break;
 
     case 'n':
       sprintf (buf, "??");
-      fprintf (stderr, _("Internal disassembler error"));
+      /* xgettext:c-format */
+      opcodes_error_handler (_("internal disassembler error"));
       ok = 0;
+      *style = dis_style_immediate;
       break;
-      
+
     case 'K':
       {
 	unsigned int x;
@@ -206,17 +260,20 @@ avr_operand (unsigned int insn, unsigned int insn2, unsigned int pc, int constra
 	x = (insn & 0xf) | ((insn >> 2) & 0x30);
 	sprintf (buf, "0x%02x", x);
 	sprintf (comment, "%d", x);
+	*style = dis_style_immediate;
       }
       break;
-      
+
     case 's':
       sprintf (buf, "%d", insn & 7);
+      *style = dis_style_immediate;
       break;
-      
+
     case 'S':
       sprintf (buf, "%d", (insn >> 4) & 7);
+      *style = dis_style_immediate;
       break;
-      
+
     case 'P':
       {
 	unsigned int x;
@@ -225,38 +282,45 @@ avr_operand (unsigned int insn, unsigned int insn2, unsigned int pc, int constra
 	x |= (insn >> 5) & 0x30;
 	sprintf (buf, "0x%02x", x);
 	sprintf (comment, "%d", x);
+	*style = dis_style_address;
       }
       break;
 
     case 'p':
       {
 	unsigned int x;
-	
+
 	x = (insn >> 3) & 0x1f;
 	sprintf (buf, "0x%02x", x);
 	sprintf (comment, "%d", x);
+	*style = dis_style_address;
       }
       break;
-      
+
     case 'E':
       sprintf (buf, "%d", (insn >> 4) & 15);
+      *style = dis_style_immediate;
       break;
-      
+
     case '?':
       *buf = '\0';
       break;
-      
+
     default:
       sprintf (buf, "??");
-      fprintf (stderr, _("unknown constraint `%c'"), constraint);
+      /* xgettext:c-format */
+      opcodes_error_handler (_("unknown constraint `%c'"), constraint);
       ok = 0;
     }
 
     return ok;
 }
 
-static unsigned short
-avrdis_opcode (bfd_vma addr, disassemble_info *info)
+/* Read the opcode from ADDR.  Return 0 in success and save opcode
+   in *INSN, otherwise, return -1.  */
+
+static int
+avrdis_opcode (bfd_vma addr, disassemble_info *info, uint16_t *insn)
 {
   bfd_byte buffer[2];
   int status;
@@ -264,7 +328,10 @@ avrdis_opcode (bfd_vma addr, disassemble_info *info)
   status = info->read_memory_func (addr, buffer, 2, info);
 
   if (status == 0)
-    return bfd_getl16 (buffer);
+    {
+      *insn = bfd_getl16 (buffer);
+      return 0;
+    }
 
   info->memory_error_func (status, addr, info);
   return -1;
@@ -274,19 +341,27 @@ avrdis_opcode (bfd_vma addr, disassemble_info *info)
 int
 print_insn_avr (bfd_vma addr, disassemble_info *info)
 {
-  unsigned int insn, insn2;
+  uint16_t insn, insn2;
   const struct avr_opcodes_s *opcode;
   static unsigned int *maskptr;
   void *stream = info->stream;
-  fprintf_ftype prin = info->fprintf_func;
+  fprintf_styled_ftype prin = info->fprintf_styled_func;
   static unsigned int *avr_bin_masks;
   static int initialized;
   int cmd_len = 2;
   int ok = 0;
   char op1[20], op2[20], comment1[40], comment2[40];
+  enum disassembler_style style_op1, style_op2;
   int sym_op1 = 0, sym_op2 = 0;
   bfd_vma sym_addr1, sym_addr2;
 
+  /* Clear instruction information field.  */
+  info->insn_info_valid = 0;
+  info->branch_delay_insns = 0;
+  info->data_size = 0;
+  info->insn_type = dis_noninsn;
+  info->target = 0;
+  info->target2 = 0;
 
   if (!initialized)
     {
@@ -299,7 +374,7 @@ print_insn_avr (bfd_vma addr, disassemble_info *info)
 	comment_start = " ";
 
       nopcodes = sizeof (avr_opcodes) / sizeof (struct avr_opcodes_s);
-      
+
       avr_bin_masks = xmalloc (nopcodes * sizeof (unsigned int));
 
       for (opcode = avr_opcodes, maskptr = avr_bin_masks;
@@ -309,7 +384,7 @@ print_insn_avr (bfd_vma addr, disassemble_info *info)
 	  char * s;
 	  unsigned int bin = 0;
 	  unsigned int mask = 0;
-	
+
 	  for (s = opcode->opcode; *s; ++s)
 	    {
 	      bin <<= 1;
@@ -325,14 +400,19 @@ print_insn_avr (bfd_vma addr, disassemble_info *info)
       initialized = 1;
     }
 
-  insn = avrdis_opcode (addr, info);
-  
+  if (avrdis_opcode (addr, info, &insn)  != 0)
+    return -1;
+
   for (opcode = avr_opcodes, maskptr = avr_bin_masks;
        opcode->name;
        opcode++, maskptr++)
-    if ((insn & *maskptr) == opcode->bin_opcode)
-      break;
-  
+    {
+      if ((opcode->isa == AVR_ISA_TINY) && (info->mach != bfd_mach_avrtiny))
+        continue;
+      if ((insn & *maskptr) == opcode->bin_opcode)
+        break;
+    }
+
   /* Special case: disassemble `ldd r,b+0' as `ld r,b', and
      `std b+0,r' as `st b,r' (next entry in the table).  */
 
@@ -343,6 +423,8 @@ print_insn_avr (bfd_vma addr, disassemble_info *info)
   op2[0] = 0;
   comment1[0] = 0;
   comment2[0] = 0;
+  style_op1 = dis_style_text;
+  style_op2 = dis_style_text;
 
   if (opcode->name)
     {
@@ -354,7 +436,8 @@ print_insn_avr (bfd_vma addr, disassemble_info *info)
 
       if (opcode->insn_size > 1)
 	{
-	  insn2 = avrdis_opcode (addr + 2, info);
+	  if (avrdis_opcode (addr + 2, info, &insn2) != 0)
+	    return -1;
 	  cmd_len = 4;
 	}
 
@@ -362,11 +445,15 @@ print_insn_avr (bfd_vma addr, disassemble_info *info)
 	{
 	  int regs = REGISTER_P (*constraints);
 
-	  ok = avr_operand (insn, insn2, addr, *constraints, opcode_str, op1, comment1, 0, &sym_op1, &sym_addr1);
+	  ok = avr_operand (insn, insn2, addr, *constraints, opcode_str, op1,
+			    comment1, &style_op1, 0, &sym_op1, &sym_addr1,
+			    info);
 
 	  if (ok && *(++constraints) == ',')
-	    ok = avr_operand (insn, insn2, addr, *(++constraints), opcode_str, op2,
-			      *comment1 ? comment2 : comment1, regs, &sym_op2, &sym_addr2);
+	    ok = avr_operand (insn, insn2, addr, *(++constraints), opcode_str,
+			      op2, *comment1 ? comment2 : comment1,
+			      &style_op2, regs, &sym_op2, &sym_addr2,
+			      info);
 	}
     }
 
@@ -379,22 +466,26 @@ print_insn_avr (bfd_vma addr, disassemble_info *info)
       comment2[0] = 0;
     }
 
-  (*prin) (stream, "%s", ok ? opcode->name : ".word");
-
+  (*prin) (stream, ok ? dis_style_mnemonic : dis_style_assembler_directive,
+	   "%s", ok ? opcode->name : ".word");
+  
   if (*op1)
-      (*prin) (stream, "\t%s", op1);
+    (*prin) (stream, style_op1, "\t%s", op1);
 
   if (*op2)
-    (*prin) (stream, ", %s", op2);
+    {
+      (*prin) (stream, dis_style_text, ", ");
+      (*prin) (stream, style_op2, "%s", op2);
+    }
 
   if (*comment1)
-    (*prin) (stream, "\t; %s", comment1);
+    (*prin) (stream, dis_style_comment_start, "\t; %s", comment1);
 
   if (sym_op1)
     info->print_address_func (sym_addr1, info);
 
   if (*comment2)
-    (*prin) (stream, " %s", comment2);
+    (*prin) (stream, dis_style_comment_start, " %s", comment2);
 
   if (sym_op2)
     info->print_address_func (sym_addr2, info);

@@ -1,4 +1,4 @@
-#   Copyright 2009-2013 Free Software Foundation, Inc.
+#   Copyright 2009-2023 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -18,14 +18,7 @@ if [target_info exists gdb,nosignals] {
     return
 }
 
-if ![supports_reverse] {
-    return
-}
-
-
-gdb_exit
-gdb_start
-gdb_reinitialize_dir $srcdir/$subdir
+require supports_reverse
 
 standard_testfile sigall-reverse.c
 set precsave [standard_output_file sigall.precsave]
@@ -47,7 +40,7 @@ proc test_one_sig {nextsig} {
 
     set need_another_continue 1
     set missed_handler 0
-    if $this_sig_supported then {
+    if {$this_sig_supported} {
 	if { $thissig == "IO" } {
 	    setup_xfail "i*86-pc-linuxoldld-gnu" "i*86-pc-linuxaout-gnu"
 	}
@@ -65,19 +58,8 @@ proc test_one_sig {nextsig} {
 	    }
 	}
     }
-    if [ istarget "alpha-dec-osf3*" ] then {
-	# OSF/1-3.x is unable to continue with a job control stop signal.
-	# The inferior remains stopped without an event of interest
-	# and GDB waits forever for the inferior to stop on an event
-	# of interest. Work around the kernel bug.
-	if { $thissig == "TSTP" || $thissig == "TTIN" || $thissig == "TTOU" } {
-	    setup_xfail "alpha-dec-osf3*"
-	    fail "cannot continue from signal $thissig"
-	    set need_another_continue 0
-	}
-    }
 
-    if $need_another_continue then {
+    if {$need_another_continue} {
 	if { $thissig == "URG" } {
 	    setup_xfail "i*86-pc-linuxoldld-gnu" "i*86-pc-linuxaout-gnu"
 	}
@@ -97,7 +79,7 @@ proc test_one_sig {nextsig} {
 	}
     }
 
-    if { $missed_handler == "0" } then {
+    if {$missed_handler == "0"} {
 	set testmsg "advance to $nextsig"
         gdb_test_multiple "signal 0" $testmsg {
 	    -re "Breakpoint.*gen_$nextsig.*kill.*$gdb_prompt $" {
@@ -128,7 +110,7 @@ proc test_one_sig_reverse {prevsig} {
 	-re "Program received signal SIG$prevsig.*$gdb_prompt " {
 	    pass "reverse to signal event, $prevsig"
 
-	    set nested_testmsg "reverse signal delivered"
+	    set nested_testmsg "reverse signal $prevsig delivered"
 	    gdb_test_multiple "frame" $nested_testmsg {
 		-re ".*handle_$prevsig.*$gdb_prompt " {
 		    fail "$nested_testmsg (wrong location)"
@@ -143,14 +125,14 @@ proc test_one_sig_reverse {prevsig} {
 	    exp_continue
 	}
 	-re "Breakpoint.*kill.*$gdb_prompt " {
-	    if { $saw_signal } then {
+	    if {$saw_signal} {
 		pass "$testmsg (handled)"
 	    } else {
 		xfail "$testmsg (handled)"
 	    }
 	}
 	-re "No more reverse-execution history.*kill.*$gdb_prompt " {
-	    if { $saw_signal } then {
+	    if {$saw_signal} {
 		pass "$testmsg (handled)"
 	    } else {
 		xfail "$testmsg (handled)"
@@ -159,21 +141,21 @@ proc test_one_sig_reverse {prevsig} {
     }
 }
 
-gdb_load $binfile
+clean_restart $binfile
 
 runto gen_ABRT
 
 if [supports_process_record] {
     # Activate process record/replay
-    gdb_test_no_output "record" "Turn on process record"
+    gdb_test_no_output "record" "turn on process record"
 }
 
 # Run until end, then save execution log. 
 
 set breakloc [gdb_get_line_number "end of main" "$srcfile"]
 gdb_test "break $breakloc" \
-    "Breakpoint $decimal at .*/$srcfile, line $breakloc\." \
-    "BP at end of main"
+    "Breakpoint $decimal at .*$srcfile, line $breakloc\." \
+    "breakpoint at end of main"
 
 # Signal handlers must be disabled
 gdb_test "handle all nostop noprint"
@@ -269,13 +251,17 @@ foreach sig $signals {
     }
 }
 
-gdb_test_multiple "continue" "continue" {
-    -re "Breakpoint .* end of main .*$gdb_prompt $" {
-	pass "run to end of main"
+gdb_test_multiple "continue" "run to end of main" {
+    -wrap -re "Breakpoint .* end of main .*" {
+	pass $gdb_test_name
     }
-    -re "Breakpoint .* handle_.*$gdb_prompt $" {
+    -wrap -re "Breakpoint .* handle_.*" {
 	send_gdb "continue\n"
 	exp_continue
+    }
+    -wrap -re "Process record does not support instruction 0xfae64 at.*" {
+	kfail "gdb/25038" $gdb_test_name
+	return -1
     }
 }
 
@@ -285,11 +271,11 @@ gdb_test "record save $precsave" \
     "Saved core file $precsave with execution log\."  \
     "save process recfile"
 
-gdb_test "kill" "" "Kill process, prepare to debug log file" \
+gdb_test "kill" "" "kill process, prepare to debug log file" \
     "Kill the program being debugged\\? \\(y or n\\) " "y"
 
 gdb_test "record restore $precsave" \
-    "Program terminated with signal .*" \
+    "Restored records from core file .*" \
     "reload precord save file"
 
 # Signal handlers must be re-enabled
@@ -300,8 +286,10 @@ set sig_supported 1
 set thissig "ABRT"
 
 # test signal handling
-foreach sig [lrange $signals 1 end] {
-    test_one_sig $sig
+with_test_prefix "sig-test-1" {
+    foreach sig [lrange $signals 1 end] {
+	test_one_sig $sig
+    }
 }
 
 # The last signal (SIGTERM) gets handled slightly differently because
@@ -324,6 +312,8 @@ foreach sig [lreverse $signals] {
 set sig_supported 1
 set thissig "ABRT"
 
-foreach sig [lrange $signals 1 end] {
-    test_one_sig $sig
+with_test_prefix "sig-test-2" {
+    foreach sig [lrange $signals 1 end] {
+	test_one_sig $sig
+    }
 }

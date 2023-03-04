@@ -1,6 +1,5 @@
 /* Disassemble SH instructions.
-   Copyright 1993, 1994, 1995, 1997, 1998, 2000, 2001, 2002, 2003, 2004, 2005,
-   2006, 2007, 2012  Free Software Foundation, Inc.
+   Copyright (C) 1993-2023 Free Software Foundation, Inc.
 
    This file is part of the GNU opcodes library.
 
@@ -26,11 +25,7 @@
 #define DEFINE_TABLE
 
 #include "sh-opc.h"
-#include "dis-asm.h"
-
-#ifdef ARCH_all
-#define INCLUDE_SHMEDIA
-#endif
+#include "disassemble.h"
 
 static void
 print_movxy (const sh_opcode_info *op,
@@ -107,8 +102,7 @@ print_movxy (const sh_opcode_info *op,
 
 /* Print a double data transfer insn.  INSN is just the lower three
    nibbles of the insn, i.e. field a and the bit that indicates if
-   a parallel processing insn follows.
-   Return nonzero if a field b of a parallel processing insns follows.  */
+   a parallel processing insn follows.  */
 
 static void
 print_insn_ddt (int insn, struct disassemble_info *info)
@@ -118,7 +112,10 @@ print_insn_ddt (int insn, struct disassemble_info *info)
 
   /* If this is just a nop, make sure to emit something.  */
   if (insn == 0x000)
-    fprintf_fn (stream, "nopx\tnopy");
+    {
+      fprintf_fn (stream, "nopx\tnopy");
+      return;
+    }
 
   /* If a parallel processing insn was printed before,
      and we got a non-nop, emit a tab.  */
@@ -126,8 +123,8 @@ print_insn_ddt (int insn, struct disassemble_info *info)
     fprintf_fn (stream, "\t");
 
   /* Check if either the x or y part is invalid.  */
-  if (((insn & 0xc) == 0 && (insn & 0x2a0))
-      || ((insn & 3) == 0 && (insn & 0x150)))
+  if (((insn & 3) != 0 && (insn & 0xc) == 0 && (insn & 0x2a0))
+      || ((insn & 3) == 0 && (insn & 0xc) != 0 && (insn & 0x150)))
     if (info->mach != bfd_mach_sh_dsp
         && info->mach != bfd_mach_sh3_dsp)
       {
@@ -153,7 +150,7 @@ print_insn_ddt (int insn, struct disassemble_info *info)
 	while (op->nibbles[2] != (unsigned) ((insn >> 4) & 3)
 	       || op->nibbles[3] != (unsigned) (insn & 0xf))
 	  op++;
-	
+
 	print_movxy (op,
 		     (4 * ((insn & (is_movy ? 0x200 : 0x100)) == 0)
 		      + 2 * is_movy
@@ -162,7 +159,7 @@ print_insn_ddt (int insn, struct disassemble_info *info)
 		     fprintf_fn, stream);
       }
     else
-      fprintf_fn (stream, ".word 0x%x", insn);
+      fprintf_fn (stream, ".word 0x%x", insn | 0xf000);
   else
     {
       static const sh_opcode_info *first_movx, *first_movy;
@@ -194,6 +191,8 @@ print_insn_ddt (int insn, struct disassemble_info *info)
 	  print_movxy (opy, ((insn >> 8) & 1) + 6, (insn >> 6) & 1,
 		       fprintf_fn, stream);
 	}
+      if (!insn_x && !insn_y && ((insn & 0x3ff) != 0 || (insn & 0x800) == 0))
+	fprintf_fn (stream, ".word 0x%x", insn | 0xf000);
     }
 }
 
@@ -405,16 +404,6 @@ print_insn_sh (bfd_vma memaddr, struct disassemble_info *info)
 	  && bfd_asymbol_flavour(*info->symbols) == bfd_target_coff_flavour)
 	target_arch = arch_sh4;
       break;
-    case bfd_mach_sh5:
-#ifdef INCLUDE_SHMEDIA
-      status = print_insn_sh64 (memaddr, info);
-      if (status != -2)
-	return status;
-#endif
-      /* When we get here for sh64, it's because we want to disassemble
-	 SHcompact, i.e. arch_sh4.  */
-      target_arch = arch_sh4;
-      break;
     default:
       target_arch = sh_get_arch_from_bfd_mach (info->mach);
     }
@@ -608,13 +597,17 @@ print_insn_sh (bfd_vma memaddr, struct disassemble_info *info)
 	    case IMM1_4BY4:
 	      imm = nibs[3] << 2;
 	      goto ok;
-	    case IMM0_8:
+	    case IMM0_8S:
 	    case IMM1_8:
 	      imm = (nibs[2] << 4) | nibs[3];
 	      disp = imm;
 	      has_disp = 1;
 	      if (imm & 0x80)
 		imm -= 0x100;
+	      goto ok;
+	    case IMM0_8U:
+	      disp = imm = (nibs[2] << 4) | nibs[3];
+	      has_disp = 1;
 	      goto ok;
 	    case PCRELIMM_8BY2:
 	      imm = ((nibs[2] << 4) | nibs[3]) << 1;
@@ -652,6 +645,8 @@ print_insn_sh (bfd_vma memaddr, struct disassemble_info *info)
 	      rm = (nibs[n] & 0x3);
 	      break;
 	    case REG_B:
+	      if (!(nibs[n] & 0x08)) /* Must always be 1.  */
+		goto fail;
 	      rb = nibs[n] & 0x07;
 	      break;
 	    case SDT_REG_N:
@@ -837,6 +832,7 @@ print_insn_sh (bfd_vma memaddr, struct disassemble_info *info)
 		  fprintf_fn (stream, "xd%d", rn & ~1);
 		  break;
 		}
+	      /* Fall through.  */
 	    case D_REG_N:
 	      fprintf_fn (stream, "dr%d", rn);
 	      break;
@@ -846,6 +842,7 @@ print_insn_sh (bfd_vma memaddr, struct disassemble_info *info)
 		  fprintf_fn (stream, "xd%d", rm & ~1);
 		  break;
 		}
+	      /* Fall through.  */
 	    case D_REG_M:
 	      fprintf_fn (stream, "dr%d", rm);
 	      break;
@@ -906,6 +903,8 @@ print_insn_sh (bfd_vma memaddr, struct disassemble_info *info)
 	    size = 2;
 	  else
 	    size = 4;
+	  /* Not reading an instruction - disable stop_vma.  */
+	  info->stop_vma = 0;
 	  status = info->read_memory_func (disp_pc_addr, bytes, size, info);
 	  if (status == 0)
 	    {

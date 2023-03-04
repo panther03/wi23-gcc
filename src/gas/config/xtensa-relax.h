@@ -1,5 +1,5 @@
 /* Table of relaxations for Xtensa assembly.
-   Copyright 2003, 2004, 2005, 2007, 2008, 2009 Free Software Foundation, Inc.
+   Copyright (C) 2003-2023 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -85,16 +85,13 @@ struct req_option_list
 struct req_or_option_list
 {
   char *option_name;
-  bfd_boolean is_true;
+  bool is_true;
   ReqOrOptionList *next;
 };
 
 /* Operand types and constraints on operands:  */
 
-typedef enum op_type OpType;
-typedef enum cmp_op CmpOp;
-
-enum op_type
+typedef enum op_type
 {
   OP_CONSTANT,
   OP_OPERAND,
@@ -107,13 +104,13 @@ enum op_type
   OP_LITERAL,
   OP_FREEREG,
   OP_LABEL
-};
+} OpType;
 
-enum cmp_op
+typedef enum cmp_op
 {
   OP_EQUAL,
   OP_NOTEQUAL,
-};
+} CmpOp;
 
 struct precondition
 {
@@ -143,14 +140,13 @@ struct build_op
 };
 
 typedef struct build_instr BuildInstr;
-typedef enum instr_type InstrType;
 
-enum instr_type
+typedef enum instr_type
 {
   INSTR_INSTR,
   INSTR_LITERAL_DEF,
   INSTR_LABEL_DEF
-};
+} InstrType;
 
 struct build_instr
 {
@@ -174,7 +170,7 @@ typedef int (*transition_cmp_fn) (const TransitionRule *,
 extern TransitionTable *xg_build_simplify_table (transition_cmp_fn);
 extern TransitionTable *xg_build_widen_table (transition_cmp_fn);
 
-extern bfd_boolean xg_has_userdef_op_fn (OpType);
+extern bool xg_has_userdef_op_fn (OpType);
 extern long xg_apply_userdef_op_fn (OpType, long);
 
 enum flix_level

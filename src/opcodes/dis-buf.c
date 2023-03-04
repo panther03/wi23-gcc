@@ -1,6 +1,5 @@
 /* Disassemble from a buffer, for GNU.
-   Copyright 1993, 1994, 1996, 1997, 1998, 1999, 2000, 2001, 2003, 2005,
-   2007, 2009, 2010  Free Software Foundation, Inc.
+   Copyright (C) 1993-2023 Free Software Foundation, Inc.
 
    This file is part of the GNU opcodes library.
 
@@ -33,13 +32,15 @@ buffer_read_memory (bfd_vma memaddr,
 		    struct disassemble_info *info)
 {
   unsigned int opb = info->octets_per_byte;
-  unsigned int end_addr_offset = length / opb;
-  unsigned int max_addr_offset = info->buffer_length / opb; 
-  unsigned int octets = (memaddr - info->buffer_vma) * opb;
+  size_t end_addr_offset = length / opb;
+  size_t max_addr_offset = info->buffer_length / opb;
+  size_t octets = (memaddr - info->buffer_vma) * opb;
 
   if (memaddr < info->buffer_vma
       || memaddr - info->buffer_vma > max_addr_offset
-      || memaddr - info->buffer_vma + end_addr_offset > max_addr_offset)
+      || memaddr - info->buffer_vma + end_addr_offset > max_addr_offset
+      || (info->stop_vma && (memaddr >= info->stop_vma
+			     || memaddr + end_addr_offset > info->stop_vma)))
     /* Out of bounds.  Use EIO because GDB uses it.  */
     return EIO;
   memcpy (myaddr, info->buffer + octets, length);
@@ -60,13 +61,11 @@ perror_memory (int status,
     info->fprintf_func (info->stream, _("Unknown error %d\n"), status);
   else
     {
-      char buf[30];
-
       /* Actually, address between memaddr and memaddr + len was
 	 out of bounds.  */
-      sprintf_vma (buf, memaddr);
       info->fprintf_func (info->stream,
-			  _("Address 0x%s is out of bounds.\n"), buf);
+			  _("Address 0x%" PRIx64 " is out of bounds.\n"),
+			  (uint64_t) memaddr);
     }
 }
 
@@ -80,26 +79,23 @@ perror_memory (int status,
 void
 generic_print_address (bfd_vma addr, struct disassemble_info *info)
 {
-  char buf[30];
-
-  sprintf_vma (buf, addr);
-  (*info->fprintf_func) (info->stream, "0x%s", buf);
+  (*info->fprintf_func) (info->stream, "0x%08" PRIx64, (uint64_t) addr);
 }
 
-/* Just return true.  */
+/* Just return NULL.  */
 
-int
+asymbol *
 generic_symbol_at_address (bfd_vma addr ATTRIBUTE_UNUSED,
 			   struct disassemble_info *info ATTRIBUTE_UNUSED)
 {
-  return 1;
+  return NULL;
 }
 
 /* Just return TRUE.  */
 
-bfd_boolean
+bool
 generic_symbol_is_valid (asymbol * sym ATTRIBUTE_UNUSED,
 			 struct disassemble_info *info ATTRIBUTE_UNUSED)
 {
-  return TRUE;
+  return true;
 }

@@ -1,5 +1,5 @@
 /* tc-lm32.c - Lattice Mico32 assembler.
-   Copyright 2008, 2012   Free Software Foundation, Inc.
+   Copyright (C) 2008-2023 Free Software Foundation, Inc.
    Contributed by Jon Beniston <jon@beniston.com>
 
    This file is part of GAS, the GNU Assembler.
@@ -132,7 +132,7 @@ md_show_usage (FILE * fp)
 /* Parse command line options.  */
 
 int
-md_parse_option (int c, char * arg ATTRIBUTE_UNUSED)
+md_parse_option (int c, const char * arg ATTRIBUTE_UNUSED)
 {
   switch (c)
     {
@@ -214,7 +214,7 @@ md_number_to_chars (char * buf, valueT val, int n)
    of LITTLENUMS emitted is stored in *SIZEP.  An error message is
    returned, or NULL on OK.  */
 
-char *
+const char *
 md_atof (int type, char *litP, int *sizeP)
 {
   int i;
@@ -277,8 +277,8 @@ md_undefined_symbol (char * name ATTRIBUTE_UNUSED)
 valueT
 md_section_align (asection *seg, valueT addr)
 {
-  int align = bfd_get_section_alignment (stdoutput, seg);
-  return ((addr + (1 << align) - 1) & (-1 << align));
+  int align = bfd_section_alignment (seg);
+  return ((addr + (1 << align) - 1) & -(1 << align));
 }
 
 /* This function assembles the instructions. It emits the frags/bytes to the
@@ -380,15 +380,15 @@ md_pcrel_from_section (fixS * fixP, segT sec)
 
 /* Return true if we can partially resolve a relocation now.  */
 
-bfd_boolean
+bool
 lm32_fix_adjustable (fixS * fixP)
 {
   /* We need the symbol name for the VTABLE entries */
   if (fixP->fx_r_type == BFD_RELOC_VTABLE_INHERIT
       || fixP->fx_r_type == BFD_RELOC_VTABLE_ENTRY)
-    return FALSE;
+    return false;
 
-  return TRUE;
+  return true;
 }
 
 /* Relaxation isn't required/supported on this target.  */

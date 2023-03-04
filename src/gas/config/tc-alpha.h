@@ -1,7 +1,5 @@
 /* This file is tc-alpha.h
-   Copyright 1994, 1995, 1996, 1997, 1998, 1999, 2000, 2001, 2002, 2003
-   2005, 2006, 2007, 2009
-   Free Software Foundation, Inc.
+   Copyright (C) 1994-2023 Free Software Foundation, Inc.
    Written by Ken Raeburn <raeburn@cygnus.com>.
 
    This file is part of GAS, the GNU Assembler.
@@ -73,7 +71,8 @@ extern valueT alpha_gp_value;
 
 #define tc_canonicalize_symbol_name evax_shorten_name
 
-#define TC_CONS_FIX_NEW(FRAG,OFF,LEN,EXP) \
+#define TC_CONS_FIX_NEW(FRAG,OFF,LEN,EXP,RELOC)	\
+      (void) RELOC,				\
       fix_new_exp (FRAG, OFF, (int)LEN, EXP, 0, \
 	LEN == 2 ? BFD_RELOC_16 \
 	: LEN == 4 ? BFD_RELOC_32 \
@@ -117,13 +116,18 @@ extern void alpha_handle_align (struct frag *);
 #ifdef OBJ_ECOFF
 #define tc_frob_file_before_adjust() alpha_frob_file_before_adjust ()
 extern void alpha_frob_file_before_adjust (void);
+
+#define TC_VALIDATE_FIX_SUB(FIX, SEG) \
+  ((md_register_arithmetic || (SEG) != reg_section)	\
+   && ((FIX)->fx_r_type == BFD_RELOC_GPREL32		\
+       || (FIX)->fx_r_type == BFD_RELOC_GPREL16))
 #endif
 
 #define DIFF_EXPR_OK   /* foo-. gets turned into PC relative relocs.  */
 
 #ifdef OBJ_ELF
 #define md_elf_section_letter		alpha_elf_section_letter
-extern bfd_vma alpha_elf_section_letter (int, char **);
+extern bfd_vma alpha_elf_section_letter (int, const char **);
 #define md_elf_section_flags		alpha_elf_section_flags
 extern flagword alpha_elf_section_flags (flagword, bfd_vma, int);
 #endif
@@ -145,8 +149,8 @@ extern void alpha_before_fix (void);
 #endif
 
 #ifdef OBJ_ELF
-#define md_end  alpha_elf_md_end
-extern void alpha_elf_md_end (void);
+#define md_finish  alpha_elf_md_finish
+extern void alpha_elf_md_finish (void);
 #endif
 
 /* New fields for supporting explicit relocations (such as !literal to mark

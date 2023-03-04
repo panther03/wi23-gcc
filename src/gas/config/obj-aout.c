@@ -1,7 +1,5 @@
 /* a.out object file format
-   Copyright 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1999, 2000,
-   2001, 2002, 2003, 2004, 2005, 2007, 2009, 2010, 2012
-   Free Software Foundation, Inc.
+   Copyright (C) 1989-2023 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -25,7 +23,6 @@
 #include "as.h"
 #undef NO_RELOC
 #include "aout/aout64.h"
-#include "obstack.h"
 
 void
 obj_aout_frob_symbol (symbolS *sym, int *punt ATTRIBUTE_UNUSED)
@@ -116,22 +113,40 @@ obj_aout_frob_symbol (symbolS *sym, int *punt ATTRIBUTE_UNUSED)
 	    S_GET_NAME (sym));
 }
 
+/* Relocation processing may require knowing the VMAs of the sections.
+   Writing to a section will cause the BFD back end to compute the
+   VMAs.  This function also ensures that file size is large enough
+   to cover a_text and a_data should text or data be the last section
+   in the file.  */
+
 void
 obj_aout_frob_file_before_fix (void)
 {
-  /* Relocation processing may require knowing the VMAs of the sections.
-     Since writing to a section will cause the BFD back end to compute the
-     VMAs, fake it out here....  */
-  bfd_byte b = 0;
-  bfd_boolean x = TRUE;
-  if (bfd_section_size (stdoutput, text_section) != 0)
-    x = bfd_set_section_contents (stdoutput, text_section, &b, (file_ptr) 0,
-				  (bfd_size_type) 1);
-  else if (bfd_section_size (stdoutput, data_section) != 0)
-    x = bfd_set_section_contents (stdoutput, data_section, &b, (file_ptr) 0,
-				  (bfd_size_type) 1);
+  asection *sec;
+  bfd_vma *sizep = NULL;
+  if ((sec = data_section)->size != 0)
+    sizep = &exec_hdr (stdoutput)->a_data;
+  else if ((sec = text_section)->size != 0)
+    sizep = &exec_hdr (stdoutput)->a_text;
+  if (sizep)
+    {
+      bfd_size_type size = sec->size;
+      bfd_byte b = 0;
 
-  gas_assert (x);
+      gas_assert (bfd_set_section_contents (stdoutput, sec, &b, size - 1, 1));
+
+      /* We don't know the aligned size until after VMAs and sizes are
+	 set on the bfd_set_section_contents call.  If that size is
+	 larger than the section then write again to ensure the file
+	 contents extend to cover the aligned size.  */
+      if (*sizep > size)
+	{
+	  file_ptr pos = sec->filepos + *sizep;
+
+	  gas_assert (bfd_seek (stdoutput, pos - 1, SEEK_SET) == 0
+		      && bfd_bwrite (&b, 1, stdoutput) == 1);
+	}
+    }
 }
 
 static void
@@ -155,10 +170,9 @@ obj_aout_weak (int ignore ATTRIBUTE_UNUSED)
 
   do
     {
-      name = input_line_pointer;
-      c = get_symbol_end ();
+      c = get_symbol_name (&name);
       symbolP = symbol_find_or_make (name);
-      *input_line_pointer = c;
+      (void) restore_line_pointer (c);
       SKIP_WHITESPACE ();
       S_SET_WEAK (symbolP);
       if (c == ',')
@@ -185,10 +199,9 @@ obj_aout_type (int ignore ATTRIBUTE_UNUSED)
   int c;
   symbolS *sym;
 
-  name = input_line_pointer;
-  c = get_symbol_end ();
+  c = get_symbol_name (&name);
   sym = symbol_find_or_make (name);
-  *input_line_pointer = c;
+  (void) restore_line_pointer (c);
   SKIP_WHITESPACE ();
   if (*input_line_pointer == ',')
     {
@@ -197,9 +210,9 @@ obj_aout_type (int ignore ATTRIBUTE_UNUSED)
       if (*input_line_pointer == '@')
 	{
 	  ++input_line_pointer;
-	  if (strncmp (input_line_pointer, "object", 6) == 0)
+	  if (startswith (input_line_pointer, "object"))
 	    S_SET_OTHER (sym, 1);
-	  else if (strncmp (input_line_pointer, "function", 8) == 0)
+	  else if (startswith (input_line_pointer, "function"))
 	    S_SET_OTHER (sym, 2);
 	}
     }
@@ -284,6 +297,7 @@ const struct format_ops aout_format_ops =
   1,	/* dfl_leading_underscore.  */
   0,	/* emit_section_symbols.  */
   0,	/* begin.  */
+  0,	/* end.  */
   0,	/* app_file.  */
   obj_aout_frob_symbol,
   0,	/* frob_file.  */

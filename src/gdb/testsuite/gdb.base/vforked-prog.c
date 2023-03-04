@@ -1,6 +1,6 @@
 /* This testcase is part of GDB, the GNU debugger.
 
-   Copyright 1997-2013 Free Software Foundation, Inc.
+   Copyright 1997-2023 Free Software Foundation, Inc.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -17,12 +17,8 @@
 
 #include <stdio.h>
 
-#ifdef PROTOTYPES
 int main (void)
-#else
-main()
-#endif
 {
-  printf("Hello from vforked-prog...\n");
+  const char *volatile s = "Hello from vforked-prog";
   return 0;
 }

@@ -1,6 +1,5 @@
 /* BFD back-end for i386 a.out binaries under LynxOS.
-   Copyright 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1999, 2001, 2002,
-   2003, 2005, 2007, 2009, 2010, 2012  Free Software Foundation, Inc.
+   Copyright (C) 1990-2023 Free Software Foundation, Inc.
 
    This file is part of BFD, the Binary File Descriptor library.
 
@@ -27,7 +26,7 @@
 /* Do not "beautify" the CONCAT* macro args.  Traditional C will not
    remove whitespace added here, and thus will fail to concatenate
    the tokens.  */
-#define MY(OP) CONCAT2 (i386lynx_aout_,OP)
+#define MY(OP) CONCAT2 (i386_aout_lynx_,OP)
 #define TARGETNAME "a.out-i386-lynx"
 
 #include "sysdep.h"
@@ -37,14 +36,12 @@
 #ifndef WRITE_HEADERS
 #define WRITE_HEADERS(abfd, execp)					      \
       {									      \
-	bfd_size_type text_size; /* dummy vars */			      \
-	file_ptr text_end;						      \
 	if (adata(abfd).magic == undecided_magic)			      \
-	  NAME(aout,adjust_sizes_and_vmas) (abfd, &text_size, &text_end);     \
-    									      \
+	  NAME(aout,adjust_sizes_and_vmas) (abfd);			      \
+									      \
 	execp->a_syms = bfd_get_symcount (abfd) * EXTERNAL_NLIST_SIZE;	      \
 	execp->a_entry = bfd_get_start_address (abfd);			      \
-    									      \
+									      \
 	execp->a_trsize = ((obj_textsec (abfd)->reloc_count) *		      \
 			   obj_reloc_entry_size (abfd));		      \
 	execp->a_drsize = ((obj_datasec (abfd)->reloc_count) *		      \
@@ -54,29 +51,29 @@
 	if (bfd_seek (abfd, (file_ptr) 0, SEEK_SET) != 0		      \
 	    || bfd_bwrite (&exec_bytes, (bfd_size_type) EXEC_BYTES_SIZE, \
 			  abfd) != EXEC_BYTES_SIZE)			      \
-	  return FALSE;							      \
+	  return false;							      \
 	/* Now write out reloc info, followed by syms and strings */	      \
-  									      \
-	if (bfd_get_symcount (abfd) != 0) 				      \
+									      \
+	if (bfd_get_symcount (abfd) != 0)				      \
 	    {								      \
-	      if (bfd_seek (abfd, (file_ptr) (N_SYMOFF(*execp)), SEEK_SET)    \
+	      if (bfd_seek (abfd, (file_ptr) (N_SYMOFF (execp)), SEEK_SET)    \
 		  != 0)							      \
-	        return FALSE;						      \
+		return false;						      \
 									      \
-	      if (! NAME(aout,write_syms) (abfd)) return FALSE;		      \
+	      if (! NAME(aout,write_syms) (abfd)) return false;		      \
 									      \
-	      if (bfd_seek (abfd, (file_ptr) (N_TRELOFF(*execp)), SEEK_SET)   \
+	      if (bfd_seek (abfd, (file_ptr) (N_TRELOFF (execp)), SEEK_SET)   \
 		  != 0)							      \
-	        return FALSE;						      \
+		return false;						      \
 									      \
 	      if (!NAME(lynx,squirt_out_relocs) (abfd, obj_textsec (abfd)))   \
-		return FALSE;						      \
-	      if (bfd_seek (abfd, (file_ptr) (N_DRELOFF(*execp)), SEEK_SET)   \
+		return false;						      \
+	      if (bfd_seek (abfd, (file_ptr) (N_DRELOFF (execp)), SEEK_SET)   \
 		  != 0)							      \
-	        return 0;						      \
+		return 0;						      \
 									      \
 	      if (!NAME(lynx,squirt_out_relocs) (abfd, obj_datasec (abfd)))   \
-		return FALSE;						      \
+		return false;						      \
 	    }								      \
       }
 #endif
@@ -89,8 +86,8 @@
 
 char *lynx_core_file_failing_command ();
 int lynx_core_file_failing_signal ();
-bfd_boolean lynx_core_file_matches_executable_p ();
-const bfd_target *lynx_core_file_p ();
+bool lynx_core_file_matches_executable_p ();
+bfd_cleanup lynx_core_file_p ();
 
 #define	MY_core_file_failing_command lynx_core_file_failing_command
 #define	MY_core_file_failing_signal lynx_core_file_failing_signal
@@ -123,7 +120,7 @@ NAME(lynx,swap_std_reloc_out) (bfd *abfd,
 
   PUT_WORD (abfd, g->address, natptr->r_address);
 
-  r_length = g->howto->size;	/* Size as a power of two */
+  r_length = bfd_log2 (bfd_get_reloc_size (g->howto));
   r_pcrel = (int) g->howto->pc_relative;	/* Relative to PC? */
   /* r_baserel, r_jmptable, r_relative???  FIXME-soon */
   r_baserel = 0;
@@ -282,41 +279,45 @@ NAME(lynx,swap_ext_reloc_out) (bfd *abfd,
    to give the true offset from the section */
 
 
-#define MOVE_ADDRESS(ad)       						\
+#define MOVE_ADDRESS(ad)						\
   if (r_extern)								\
     {									\
-   /* undefined symbol */						\
-     cache_ptr->sym_ptr_ptr = symbols + r_index;			\
-     cache_ptr->addend = ad;						\
+      /* undefined symbol */						\
+      if (symbols != NULL && r_index < bfd_get_symcount (abfd))		\
+	cache_ptr->sym_ptr_ptr = symbols + r_index;			\
+      else								\
+	cache_ptr->sym_ptr_ptr = bfd_abs_section_ptr->symbol_ptr_ptr;	\
+      cache_ptr->addend = ad;						\
     }									\
   else									\
     {									\
-    /* defined, section relative. replace symbol with pointer to    	\
-       symbol which points to section  */				\
-    switch (r_index) {							\
-    case N_TEXT:							\
-    case N_TEXT | N_EXT:						\
-      cache_ptr->sym_ptr_ptr  = obj_textsec(abfd)->symbol_ptr_ptr;	\
-      cache_ptr->addend = ad  - su->textsec->vma;			\
-      break;								\
-    case N_DATA:							\
-    case N_DATA | N_EXT:						\
-      cache_ptr->sym_ptr_ptr  = obj_datasec(abfd)->symbol_ptr_ptr;	\
-      cache_ptr->addend = ad - su->datasec->vma;			\
-      break;								\
-    case N_BSS:								\
-    case N_BSS | N_EXT:							\
-      cache_ptr->sym_ptr_ptr  = obj_bsssec(abfd)->symbol_ptr_ptr;	\
-      cache_ptr->addend = ad - su->bsssec->vma;				\
-      break;								\
-    default:								\
-    case N_ABS:								\
-    case N_ABS | N_EXT:							\
-     cache_ptr->sym_ptr_ptr = bfd_abs_section_ptr->symbol_ptr_ptr;	\
-      cache_ptr->addend = ad;						\
-      break;								\
+      /* defined, section relative. replace symbol with pointer to	\
+	 symbol which points to section  */				\
+      switch (r_index)							\
+	{								\
+	case N_TEXT:							\
+	case N_TEXT | N_EXT:						\
+	  cache_ptr->sym_ptr_ptr  = obj_textsec(abfd)->symbol_ptr_ptr;	\
+	  cache_ptr->addend = ad  - su->textsec->vma;			\
+	  break;							\
+	case N_DATA:							\
+	case N_DATA | N_EXT:						\
+	  cache_ptr->sym_ptr_ptr  = obj_datasec(abfd)->symbol_ptr_ptr;	\
+	  cache_ptr->addend = ad - su->datasec->vma;			\
+	  break;							\
+	case N_BSS:							\
+	case N_BSS | N_EXT:						\
+	  cache_ptr->sym_ptr_ptr  = obj_bsssec(abfd)->symbol_ptr_ptr;	\
+	  cache_ptr->addend = ad - su->bsssec->vma;			\
+	  break;							\
+	default:							\
+	case N_ABS:							\
+	case N_ABS | N_EXT:						\
+	  cache_ptr->sym_ptr_ptr = bfd_abs_section_ptr->symbol_ptr_ptr;	\
+	  cache_ptr->addend = ad;					\
+	  break;							\
+	}								\
     }									\
-  }     								\
 
 static void
 NAME(lynx,swap_ext_reloc_in) (bfd *abfd,
@@ -325,7 +326,7 @@ NAME(lynx,swap_ext_reloc_in) (bfd *abfd,
 			      asymbol **symbols,
 			      bfd_size_type symcount ATTRIBUTE_UNUSED)
 {
-  int r_index;
+  unsigned int r_index;
   int r_extern;
   unsigned int r_type;
   struct aoutdata *su = &(abfd->tdata.aout_data->a);
@@ -348,7 +349,7 @@ NAME(lynx,swap_std_reloc_in) (bfd *abfd,
 			      asymbol **symbols,
 			      bfd_size_type symcount ATTRIBUTE_UNUSED)
 {
-  int r_index;
+  unsigned int r_index;
   int r_extern;
   unsigned int r_length;
   int r_pcrel;
@@ -370,7 +371,7 @@ NAME(lynx,swap_std_reloc_in) (bfd *abfd,
 
 /* Reloc hackery */
 
-static bfd_boolean
+static bool
 NAME(lynx,slurp_reloc_table) (bfd *abfd,
 			      sec_ptr asect,
 			      asymbol **symbols)
@@ -382,10 +383,10 @@ NAME(lynx,slurp_reloc_table) (bfd *abfd,
   size_t each_size;
 
   if (asect->relocation)
-    return TRUE;
+    return true;
 
   if (asect->flags & SEC_CONSTRUCTOR)
-    return TRUE;
+    return true;
 
   if (asect == obj_datasec (abfd))
     {
@@ -400,11 +401,11 @@ NAME(lynx,slurp_reloc_table) (bfd *abfd,
     }
 
   bfd_set_error (bfd_error_invalid_operation);
-  return FALSE;
+  return false;
 
-doit:
+ doit:
   if (bfd_seek (abfd, asect->rel_filepos, SEEK_SET) != 0)
-    return FALSE;
+    return false;
   each_size = obj_reloc_entry_size (abfd);
 
   count = reloc_size / each_size;
@@ -412,20 +413,13 @@ doit:
 
   reloc_cache = (arelent *) bfd_zmalloc (count * sizeof (arelent));
   if (!reloc_cache && count != 0)
-    return FALSE;
+    return false;
 
-  relocs = bfd_alloc (abfd, reloc_size);
+  relocs = _bfd_alloc_and_read (abfd, reloc_size, reloc_size);
   if (!relocs && reloc_size != 0)
     {
       free (reloc_cache);
-      return FALSE;
-    }
-
-  if (bfd_bread (relocs, reloc_size, abfd) != reloc_size)
-    {
-      bfd_release (abfd, relocs);
-      free (reloc_cache);
-      return FALSE;
+      return false;
     }
 
   if (each_size == RELOC_EXT_SIZE)
@@ -457,14 +451,14 @@ doit:
   bfd_release (abfd, relocs);
   asect->relocation = reloc_cache;
   asect->reloc_count = count;
-  return TRUE;
+  return true;
 }
 
 
 
 /* Write out a relocation section into an object file.  */
 
-static bfd_boolean
+static bool
 NAME(lynx,squirt_out_relocs) (bfd *abfd, asection *section)
 {
   arelent **generic;
@@ -474,14 +468,14 @@ NAME(lynx,squirt_out_relocs) (bfd *abfd, asection *section)
   bfd_size_type natsize;
 
   if (count == 0)
-    return TRUE;
+    return true;
 
   each_size = obj_reloc_entry_size (abfd);
   natsize = count;
   natsize *= each_size;
   native = (unsigned char *) bfd_zalloc (abfd, natsize);
   if (!native)
-    return FALSE;
+    return false;
 
   generic = section->orelocation;
 
@@ -503,11 +497,11 @@ NAME(lynx,squirt_out_relocs) (bfd *abfd, asection *section)
   if (bfd_bwrite (native, natsize, abfd) != natsize)
     {
       bfd_release (abfd, native);
-      return FALSE;
+      return false;
     }
   bfd_release (abfd, native);
 
-  return TRUE;
+  return true;
 }
 
 /* This is stupid.  This function should be a boolean predicate */

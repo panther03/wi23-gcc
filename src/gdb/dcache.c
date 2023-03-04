@@ -1,6 +1,6 @@
 /* Caching code for GDB, the GNU debugger.
 
-   Copyright (C) 1992-2013 Free Software Foundation, Inc.
+   Copyright (C) 1992-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -20,11 +20,11 @@
 #include "defs.h"
 #include "dcache.h"
 #include "gdbcmd.h"
-#include "gdb_string.h"
 #include "gdbcore.h"
-#include "target.h"
+#include "target-dcache.h"
 #include "inferior.h"
 #include "splay-tree.h"
+#include "gdbarch.h"
 
 /* Commands with a prefix of `{set,show} dcache'.  */
 static struct cmd_list_element *dcache_set_list = NULL;
@@ -66,7 +66,7 @@ static struct cmd_list_element *dcache_show_list = NULL;
    is set, etc., then the chunk is skipped.  Those chunks are handled
    in target_xfer_memory() (or target_xfer_memory_partial()).
 
-   This doesn't occur very often.  The most common occurance is when
+   This doesn't occur very often.  The most common occurrence is when
    the last bit of the .text segment and the first bit of the .data
    segment fall within the same dcache page with a ro/cacheable memory
    region defined for the .text segment and a rw/non-cacheable memory
@@ -116,6 +116,10 @@ struct dcache_struct
 
   /* The ptid of last inferior to use cache or null_ptid.  */
   ptid_t ptid;
+
+  /* The process target of last inferior to use the cache or
+     nullptr.  */
+  process_stratum_target *proc_target;
 };
 
 typedef void (block_func) (struct dcache_block *block, void *param);
@@ -126,20 +130,14 @@ static int dcache_read_line (DCACHE *dcache, struct dcache_block *db);
 
 static struct dcache_block *dcache_alloc (DCACHE *dcache, CORE_ADDR addr);
 
-static void dcache_info (char *exp, int tty);
-
-void _initialize_dcache (void);
-
-static int dcache_enabled_p = 0; /* OBSOLETE */
+static bool dcache_enabled_p = false; /* OBSOLETE */
 
 static void
 show_dcache_enabled_p (struct ui_file *file, int from_tty,
 		       struct cmd_list_element *c, const char *value)
 {
-  fprintf_filtered (file, _("Deprecated remotecache flag is %s.\n"), value);
+  gdb_printf (file, _("Deprecated remotecache flag is %s.\n"), value);
 }
-
-static DCACHE *last_cache; /* Used by info dcache.  */
 
 /* Add BLOCK to circular block list BLIST, behind the block at *BLIST.
    *BLIST is not updated (unless it was previously NULL of course).
@@ -225,9 +223,6 @@ free_block (struct dcache_block *block, void *param)
 void
 dcache_free (DCACHE *dcache)
 {
-  if (last_cache == dcache)
-    last_cache = NULL;
-
   splay_tree_delete (dcache->tree);
   for_each_block (&dcache->oldest, free_block, NULL);
   for_each_block (&dcache->freelist, free_block, NULL);
@@ -258,6 +253,7 @@ dcache_invalidate (DCACHE *dcache)
   dcache->oldest = NULL;
   dcache->size = 0;
   dcache->ptid = null_ptid;
+  dcache->proc_target = nullptr;
 
   if (dcache->line_size != dcache_line_size)
     {
@@ -333,7 +329,7 @@ dcache_read_line (DCACHE *dcache, struct dcache_block *db)
 	reg_len = region->hi - memaddr;
 
       /* Skip non-readable regions.  The cache attribute can be ignored,
-         since we may be loading this for a stack access.  */
+	 since we may be loading this for a stack access.  */
       if (region->attrib.mode == MEM_WO)
 	{
 	  memaddr += reg_len;
@@ -341,15 +337,14 @@ dcache_read_line (DCACHE *dcache, struct dcache_block *db)
 	  len     -= reg_len;
 	  continue;
 	}
-      
-      res = target_read (&current_target, TARGET_OBJECT_RAW_MEMORY,
-			 NULL, myaddr, memaddr, reg_len);
-      if (res < reg_len)
+
+      res = target_read_raw_memory (memaddr, myaddr, reg_len);
+      if (res != 0)
 	return 0;
 
-      memaddr += res;
-      myaddr += res;
-      len -= res;
+      memaddr += reg_len;
+      myaddr += reg_len;
+      len -= reg_len;
     }
 
   return 1;
@@ -377,8 +372,9 @@ dcache_alloc (DCACHE *dcache, CORE_ADDR addr)
       if (db)
 	remove_block (&dcache->freelist, db);
       else
-	db = xmalloc (offsetof (struct dcache_block, data) +
-		      dcache->line_size);
+	db = ((struct dcache_block *)
+	      xmalloc (offsetof (struct dcache_block, data)
+		       + dcache->line_size));
 
       dcache->size++;
     }
@@ -410,7 +406,7 @@ dcache_peek_byte (DCACHE *dcache, CORE_ADDR addr, gdb_byte *ptr)
       db = dcache_alloc (dcache, addr);
 
       if (!dcache_read_line (dcache, db))
-         return 0;
+	 return 0;
     }
 
   *ptr = db->data[XFORM (dcache, addr)];
@@ -419,24 +415,20 @@ dcache_peek_byte (DCACHE *dcache, CORE_ADDR addr, gdb_byte *ptr)
 
 /* Write the byte at PTR into ADDR in the data cache.
 
-   The caller is responsible for also promptly writing the data
-   through to target memory.
+   The caller should have written the data through to target memory
+   already.
 
-   If addr is not in cache, this function does nothing; writing to
-   an area of memory which wasn't present in the cache doesn't cause
-   it to be loaded in.
+   If ADDR is not in cache, this function does nothing; writing to an
+   area of memory which wasn't present in the cache doesn't cause it
+   to be loaded in.  */
 
-   Always return 1 (meaning success) to simplify dcache_xfer_memory.  */
-
-static int
-dcache_poke_byte (DCACHE *dcache, CORE_ADDR addr, gdb_byte *ptr)
+static void
+dcache_poke_byte (DCACHE *dcache, CORE_ADDR addr, const gdb_byte *ptr)
 {
   struct dcache_block *db = dcache_hit (dcache, addr);
 
   if (db)
     db->data[XFORM (dcache, addr)] = *ptr;
-
-  return 1;
 }
 
 static int
@@ -455,9 +447,7 @@ dcache_splay_tree_compare (splay_tree_key a, splay_tree_key b)
 DCACHE *
 dcache_init (void)
 {
-  DCACHE *dcache;
-
-  dcache = (DCACHE *) xmalloc (sizeof (*dcache));
+  DCACHE *dcache = XNEW (DCACHE);
 
   dcache->tree = splay_tree_new (dcache_splay_tree_compare,
 				 NULL,
@@ -468,71 +458,58 @@ dcache_init (void)
   dcache->size = 0;
   dcache->line_size = dcache_line_size;
   dcache->ptid = null_ptid;
-  last_cache = dcache;
+  dcache->proc_target = nullptr;
 
   return dcache;
 }
 
 
-/* Read or write LEN bytes from inferior memory at MEMADDR, transferring
-   to or from debugger address MYADDR.  Write to inferior if SHOULD_WRITE is
-   nonzero. 
+/* Read LEN bytes from dcache memory at MEMADDR, transferring to
+   debugger address MYADDR.  If the data is presently cached, this
+   fills the cache.  Arguments/return are like the target_xfer_partial
+   interface.  */
 
-   Return the number of bytes actually transfered, or -1 if the
-   transfer is not supported or otherwise fails.  Return of a non-negative
-   value less than LEN indicates that no further transfer is possible.
-   NOTE: This is different than the to_xfer_partial interface, in which
-   positive values less than LEN mean further transfers may be possible.  */
-
-int
-dcache_xfer_memory (struct target_ops *ops, DCACHE *dcache,
-		    CORE_ADDR memaddr, gdb_byte *myaddr,
-		    int len, int should_write)
+enum target_xfer_status
+dcache_read_memory_partial (struct target_ops *ops, DCACHE *dcache,
+			    CORE_ADDR memaddr, gdb_byte *myaddr,
+			    ULONGEST len, ULONGEST *xfered_len)
 {
-  int i;
-  int res;
-  int (*xfunc) (DCACHE *dcache, CORE_ADDR addr, gdb_byte *ptr);
+  ULONGEST i;
 
-  xfunc = should_write ? dcache_poke_byte : dcache_peek_byte;
+  /* If this is a different thread from what we've recorded, flush the
+     cache.  */
 
-  /* If this is a different inferior from what we've recorded,
-     flush the cache.  */
-
-  if (! ptid_equal (inferior_ptid, dcache->ptid))
+  process_stratum_target *proc_target = current_inferior ()->process_target ();
+  if (proc_target != dcache->proc_target || inferior_ptid != dcache->ptid)
     {
       dcache_invalidate (dcache);
       dcache->ptid = inferior_ptid;
+      dcache->proc_target = proc_target;
     }
 
-  /* Do write-through first, so that if it fails, we don't write to
-     the cache at all.  */
-
-  if (should_write)
-    {
-      res = target_write (ops, TARGET_OBJECT_RAW_MEMORY,
-			  NULL, myaddr, memaddr, len);
-      if (res <= 0)
-	return res;
-      /* Update LEN to what was actually written.  */
-      len = res;
-    }
-      
   for (i = 0; i < len; i++)
     {
-      if (!xfunc (dcache, memaddr + i, myaddr + i))
+      if (!dcache_peek_byte (dcache, memaddr + i, myaddr + i))
 	{
 	  /* That failed.  Discard its cache line so we don't have a
 	     partially read line.  */
 	  dcache_invalidate_line (dcache, memaddr + i);
-	  /* If we're writing, we still wrote LEN bytes.  */
-	  if (should_write)
-	    return len;
-	  else
-	    return i;
+	  break;
 	}
     }
-    
-  return len;
+
+  if (i == 0)
+    {
+      /* Even though reading the whole line failed, we may be able to
+	 read a piece starting where the caller wanted.  */
+      return raw_memory_xfer_partial (ops, myaddr, NULL, memaddr, len,
+				      xfered_len);
+    }
+  else
+    {
+      *xfered_len = i;
+      return TARGET_XFER_OK;
+    }
 }
 
 /* FIXME: There would be some benefit to making the cache write-back and
@@ -544,65 +521,78 @@ dcache_xfer_memory (struct target_ops *ops, DCACHE *dcache,
    "logically" connected but not actually a single call to one of the
    memory transfer functions.  */
 
-/* Just update any cache lines which are already present.  This is called
-   by memory_xfer_partial in cases where the access would otherwise not go
-   through the cache.  */
+/* Just update any cache lines which are already present.  This is
+   called by the target_xfer_partial machinery when writing raw
+   memory.  */
 
 void
-dcache_update (DCACHE *dcache, CORE_ADDR memaddr, gdb_byte *myaddr, int len)
+dcache_update (DCACHE *dcache, enum target_xfer_status status,
+	       CORE_ADDR memaddr, const gdb_byte *myaddr,
+	       ULONGEST len)
 {
-  int i;
+  ULONGEST i;
 
   for (i = 0; i < len; i++)
-    dcache_poke_byte (dcache, memaddr + i, myaddr + i);
+    if (status == TARGET_XFER_OK)
+      dcache_poke_byte (dcache, memaddr + i, myaddr + i);
+    else
+      {
+	/* Discard the whole cache line so we don't have a partially
+	   valid line.  */
+	dcache_invalidate_line (dcache, memaddr + i);
+      }
 }
 
+/* Print DCACHE line INDEX.  */
+
 static void
-dcache_print_line (int index)
+dcache_print_line (DCACHE *dcache, int index)
 {
   splay_tree_node n;
   struct dcache_block *db;
   int i, j;
 
-  if (!last_cache)
+  if (dcache == NULL)
     {
-      printf_filtered (_("No data cache available.\n"));
+      gdb_printf (_("No data cache available.\n"));
       return;
     }
 
-  n = splay_tree_min (last_cache->tree);
+  n = splay_tree_min (dcache->tree);
 
   for (i = index; i > 0; --i)
     {
       if (!n)
 	break;
-      n = splay_tree_successor (last_cache->tree, n->key);
+      n = splay_tree_successor (dcache->tree, n->key);
     }
 
   if (!n)
     {
-      printf_filtered (_("No such cache line exists.\n"));
+      gdb_printf (_("No such cache line exists.\n"));
       return;
     }
     
   db = (struct dcache_block *) n->value;
 
-  printf_filtered (_("Line %d: address %s [%d hits]\n"),
-		   index, paddress (target_gdbarch (), db->addr), db->refs);
+  gdb_printf (_("Line %d: address %s [%d hits]\n"),
+	      index, paddress (target_gdbarch (), db->addr), db->refs);
 
-  for (j = 0; j < last_cache->line_size; j++)
+  for (j = 0; j < dcache->line_size; j++)
     {
-      printf_filtered ("%02x ", db->data[j]);
+      gdb_printf ("%02x ", db->data[j]);
 
       /* Print a newline every 16 bytes (48 characters).  */
-      if ((j % 16 == 15) && (j != last_cache->line_size - 1))
-	printf_filtered ("\n");
+      if ((j % 16 == 15) && (j != dcache->line_size - 1))
+	gdb_printf ("\n");
     }
-  printf_filtered ("\n");
+  gdb_printf ("\n");
 }
 
+/* Parse EXP and show the info about DCACHE.  */
+
 static void
-dcache_info (char *exp, int tty)
+dcache_info_1 (DCACHE *dcache, const char *exp)
 {
   splay_tree_node n;
   int i, refcount;
@@ -614,50 +604,56 @@ dcache_info (char *exp, int tty)
       i = strtol (exp, &linestart, 10);
       if (linestart == exp || i < 0)
 	{
-	  printf_filtered (_("Usage: info dcache [linenumber]\n"));
-          return;
+	  gdb_printf (_("Usage: info dcache [LINENUMBER]\n"));
+	  return;
 	}
 
-      dcache_print_line (i);
+      dcache_print_line (dcache, i);
       return;
     }
 
-  printf_filtered (_("Dcache %u lines of %u bytes each.\n"),
-		   dcache_size,
-		   last_cache ? (unsigned) last_cache->line_size
-		   : dcache_line_size);
+  gdb_printf (_("Dcache %u lines of %u bytes each.\n"),
+	      dcache_size,
+	      dcache ? (unsigned) dcache->line_size
+	      : dcache_line_size);
 
-  if (!last_cache || ptid_equal (last_cache->ptid, null_ptid))
+  if (dcache == NULL || dcache->ptid == null_ptid)
     {
-      printf_filtered (_("No data cache available.\n"));
+      gdb_printf (_("No data cache available.\n"));
       return;
     }
 
-  printf_filtered (_("Contains data for %s\n"),
-		   target_pid_to_str (last_cache->ptid));
+  gdb_printf (_("Contains data for %s\n"),
+	      target_pid_to_str (dcache->ptid).c_str ());
 
   refcount = 0;
 
-  n = splay_tree_min (last_cache->tree);
+  n = splay_tree_min (dcache->tree);
   i = 0;
 
   while (n)
     {
       struct dcache_block *db = (struct dcache_block *) n->value;
 
-      printf_filtered (_("Line %d: address %s [%d hits]\n"),
-		       i, paddress (target_gdbarch (), db->addr), db->refs);
+      gdb_printf (_("Line %d: address %s [%d hits]\n"),
+		  i, paddress (target_gdbarch (), db->addr), db->refs);
       i++;
       refcount += db->refs;
 
-      n = splay_tree_successor (last_cache->tree, n->key);
+      n = splay_tree_successor (dcache->tree, n->key);
     }
 
-  printf_filtered (_("Cache state: %d active lines, %d hits\n"), i, refcount);
+  gdb_printf (_("Cache state: %d active lines, %d hits\n"), i, refcount);
 }
 
 static void
-set_dcache_size (char *args, int from_tty,
+info_dcache_command (const char *exp, int tty)
+{
+  dcache_info_1 (target_dcache_get (), exp);
+}
+
+static void
+set_dcache_size (const char *args, int from_tty,
 		 struct cmd_list_element *c)
 {
   if (dcache_size == 0)
@@ -665,12 +661,11 @@ set_dcache_size (char *args, int from_tty,
       dcache_size = DCACHE_DEFAULT_SIZE;
       error (_("Dcache size must be greater than 0."));
     }
-  if (last_cache)
-    dcache_invalidate (last_cache);
+  target_dcache_invalidate ();
 }
 
 static void
-set_dcache_line_size (char *args, int from_tty,
+set_dcache_line_size (const char *args, int from_tty,
 		      struct cmd_list_element *c)
 {
   if (dcache_line_size < 2
@@ -680,26 +675,12 @@ set_dcache_line_size (char *args, int from_tty,
       dcache_line_size = DCACHE_DEFAULT_LINE_SIZE;
       error (_("Invalid dcache line size: %u (must be power of 2)."), d);
     }
-  if (last_cache)
-    dcache_invalidate (last_cache);
+  target_dcache_invalidate ();
 }
 
-static void
-set_dcache_command (char *arg, int from_tty)
-{
-  printf_unfiltered (
-     "\"set dcache\" must be followed by the name of a subcommand.\n");
-  help_list (dcache_set_list, "set dcache ", -1, gdb_stdout);
-}
-
-static void
-show_dcache_command (char *args, int from_tty)
-{
-  cmd_show_list (dcache_show_list, from_tty, "");
-}
-
+void _initialize_dcache ();
 void
-_initialize_dcache (void)
+_initialize_dcache ()
 {
   add_setshow_boolean_cmd ("remotecache", class_support,
 			   &dcache_enabled_p, _("\
@@ -713,19 +694,20 @@ exists only for compatibility reasons."),
 			   show_dcache_enabled_p,
 			   &setlist, &showlist);
 
-  add_info ("dcache", dcache_info,
+  add_info ("dcache", info_dcache_command,
 	    _("\
 Print information on the dcache performance.\n\
+Usage: info dcache [LINENUMBER]\n\
 With no arguments, this command prints the cache configuration and a\n\
-summary of each line in the cache.  Use \"info dcache <lineno> to dump\"\n\
-the contents of a given line."));
+summary of each line in the cache.  With an argument, dump\"\n\
+the contents of the given line."));
 
-  add_prefix_cmd ("dcache", class_obscure, set_dcache_command, _("\
+  add_setshow_prefix_cmd ("dcache", class_obscure,
+			  _("\
 Use this command to set number of lines in dcache and line-size."),
-		  &dcache_set_list, "set dcache ", /*allow_unknown*/0, &setlist);
-  add_prefix_cmd ("dcache", class_obscure, show_dcache_command, _("\
-Show dcachesettings."),
-		  &dcache_show_list, "show dcache ", /*allow_unknown*/0, &showlist);
+			  ("Show dcache settings."),
+			  &dcache_set_list, &dcache_show_list,
+			  &setlist, &showlist);
 
   add_setshow_zuinteger_cmd ("line-size", class_obscure,
 			     &dcache_line_size, _("\

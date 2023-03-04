@@ -4,9 +4,9 @@
 #objdump: -sj.got
 #target: sparc*-*-*
 
-.*: +file format elf64-sparc
+.*: +file format elf64-sparc.*
 
 Contents of section .got:
- 202308 0+ 0+202208 0+ 0+  .*
- 202318 0+ 0+ 0+ 0+  .*
- 202328 0+ 0+ +.*
+ 202338 0+ 0+202208 0+ 0+  .*
+ 202348 0+ 0+ 0+ 0+  .*
+ 202358 0+ 0+ +.*

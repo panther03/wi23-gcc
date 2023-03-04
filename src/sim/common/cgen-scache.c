@@ -1,5 +1,5 @@
 /* Simulator cache routines for CGEN simulators (and maybe others).
-   Copyright (C) 1996-2013 Free Software Foundation, Inc.
+   Copyright (C) 1996-2023 Free Software Foundation, Inc.
    Contributed by Cygnus Support.
 
 This file is part of GDB, the GNU debugger.
@@ -17,17 +17,18 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
+/* This must come before any other includes.  */
+#include "defs.h"
+
 #define SCACHE_DEFINE_INLINE
 
-#include "sim-main.h"
-#ifdef HAVE_STDLIB_H
 #include <stdlib.h>
-#endif
+
 #include "libiberty.h"
+
+#include "sim-main.h"
 #include "sim-options.h"
 #include "sim-io.h"
-
-#define MAX(a,b) ((a) > (b) ? (a) : (b))
 
 /* Unused address.  */
 #define UNUSED_ADDR 0xffffffff
@@ -123,24 +124,26 @@ scache_option_handler (SIM_DESC sd, sim_cpu *cpu, int opt,
 	{
 	  if (arg != NULL)
 	    {
-	      int n = strtol (arg, NULL, 0);
+	      unsigned int n = (unsigned int) strtoul (arg, NULL, 0);
 	      if (n < MIN_SCACHE_SIZE)
 		{
-		  sim_io_eprintf (sd, "invalid scache size `%d', must be at least 4", n);
+		  sim_io_eprintf (sd, "invalid scache size `%u', must be at least %u",
+				  n, MIN_SCACHE_SIZE);
 		  return SIM_RC_FAIL;
 		}
 	      /* Ensure it's a multiple of 2.  */
 	      if ((n & (n - 1)) != 0)
 		{
-		  sim_io_eprintf (sd, "scache size `%d' not a multiple of 2\n", n);
-		  {
-		    /* round up to nearest multiple of 2 */
-		    int i;
-		    for (i = 1; i < n; i <<= 1)
-		      continue;
-		    n = i;
-		  }
-		  sim_io_eprintf (sd, "rounding scache size up to %d\n", n);
+		  unsigned int i;
+		  sim_io_eprintf (sd, "scache size `%u' not a multiple of 2\n", n);
+		  /* Round up to nearest multiple of 2.  */
+		  for (i = 1; i && i < n; i <<= 1)
+		    continue;
+		  if (i)
+		    {
+		      n = i;
+		      sim_io_eprintf (sd, "rounding scache size up to %u\n", n);
+		    }
 		}
 	      if (cpu == NULL)
 		STATE_SCACHE_SIZE (sd) = n;
@@ -174,8 +177,12 @@ scache_option_handler (SIM_DESC sd, sim_cpu *cpu, int opt,
   return SIM_RC_OK;
 }
 
+/* Provide a prototype to silence -Wmissing-prototypes.  */
+SIM_RC sim_install_scache (SIM_DESC sd);
+
+/* Install the simulator cache into the simulator.  */
 SIM_RC
-scache_install (SIM_DESC sd)
+sim_install_scache (SIM_DESC sd)
 {
   sim_add_option_table (sd, NULL, scache_options);
   sim_module_add_init_fn (sd, scache_init);
@@ -212,7 +219,7 @@ scache_init (SIM_DESC sd)
 #if WITH_SCACHE_PBB
 	  CPU_SCACHE_MAX_CHAIN_LENGTH (cpu) = MAX_CHAIN_LENGTH;
 	  CPU_SCACHE_NUM_HASH_CHAIN_ENTRIES (cpu) = MAX_HASH_CHAIN_LENGTH;
-	  CPU_SCACHE_NUM_HASH_CHAINS (cpu) = MAX (MIN_HASH_CHAINS,
+	  CPU_SCACHE_NUM_HASH_CHAINS (cpu) = max (MIN_HASH_CHAINS,
 						  CPU_SCACHE_SIZE (cpu)
 						  / SCACHE_HASH_RATIO);
 	  CPU_SCACHE_HASH_TABLE (cpu) =
@@ -413,7 +420,7 @@ scache_lookup_or_alloc (SIM_CPU *cpu, IADDR pc, int n, SCACHE **bufp)
 /* Print cache access statics for CPU.  */
 
 void
-scache_print_profile (SIM_CPU *cpu, int verbose)
+scache_print_profile (SIM_CPU *cpu, bool verbose)
 {
   SIM_DESC sd = CPU_STATE (cpu);
   unsigned long hits = CPU_SCACHE_HITS (cpu);

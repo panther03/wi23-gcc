@@ -1,6 +1,6 @@
 /* Everything about signal catchpoints, for GDB.
 
-   Copyright (C) 2011-2013 Free Software Foundation, Inc.
+   Copyright (C) 2011-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -23,51 +23,62 @@
 #include "breakpoint.h"
 #include "gdbcmd.h"
 #include "inferior.h"
+#include "infrun.h"
 #include "annotate.h"
 #include "valprint.h"
 #include "cli/cli-utils.h"
 #include "completer.h"
-#include "gdb_obstack.h"
+#include "cli/cli-style.h"
+#include "cli/cli-decode.h"
+
+#include <string>
 
 #define INTERNAL_SIGNAL(x) ((x) == GDB_SIGNAL_TRAP || (x) == GDB_SIGNAL_INT)
 
-typedef enum gdb_signal gdb_signal_type;
+/* An instance of this type is used to represent a signal
+   catchpoint.  */
 
-DEF_VEC_I (gdb_signal_type);
-
-/* An instance of this type is used to represent a signal catchpoint.
-   It includes a "struct breakpoint" as a kind of base class; users
-   downcast to "struct breakpoint *" when needed.  A breakpoint is
-   really of this type iff its ops pointer points to
-   SIGNAL_CATCHPOINT_OPS.  */
-
-struct signal_catchpoint
+struct signal_catchpoint : public catchpoint
 {
-  /* The base class.  */
+  signal_catchpoint (struct gdbarch *gdbarch, bool temp,
+		     std::vector<gdb_signal> &&sigs,
+		     bool catch_all_)
+    : catchpoint (gdbarch, temp, nullptr),
+      signals_to_be_caught (std::move (sigs)),
+      catch_all (catch_all_)
+  {
+  }
 
-  struct breakpoint base;
+  int insert_location (struct bp_location *) override;
+  int remove_location (struct bp_location *,
+		       enum remove_bp_reason reason) override;
+  int breakpoint_hit (const struct bp_location *bl,
+		      const address_space *aspace,
+		      CORE_ADDR bp_addr,
+		      const target_waitstatus &ws) override;
+  enum print_stop_action print_it (const bpstat *bs) const override;
+  bool print_one (bp_location **) const override;
+  void print_mention () const override;
+  void print_recreate (struct ui_file *fp) const override;
+  bool explains_signal (enum gdb_signal) override;
 
   /* Signal numbers used for the 'catch signal' feature.  If no signal
-     has been specified for filtering, its value is NULL.  Otherwise,
+     has been specified for filtering, it is empty.  Otherwise,
      it holds a list of all signals to be caught.  */
 
-  VEC (gdb_signal_type) *signals_to_be_caught;
+  std::vector<gdb_signal> signals_to_be_caught;
 
-  /* If SIGNALS_TO_BE_CAUGHT is NULL, then all "ordinary" signals are
-     caught.  If CATCH_ALL is non-zero, then internal signals are
-     caught as well.  If SIGNALS_TO_BE_CAUGHT is non-NULL, then this
-     field is ignored.  */
+  /* If SIGNALS_TO_BE_CAUGHT is empty, then all "ordinary" signals are
+     caught.  If CATCH_ALL is true, then internal signals are caught
+     as well.  If SIGNALS_TO_BE_CAUGHT is not empty, then this field
+     is ignored.  */
 
-  int catch_all;
+  bool catch_all;
 };
-
-/* The breakpoint_ops structure to be used in signal catchpoints.  */
-
-static struct breakpoint_ops signal_catchpoint_ops;
 
 /* Count of each signal.  */
 
-static unsigned int *signal_catch_counts;
+static unsigned int signal_catch_counts[GDB_SIGNAL_LAST];
 
 
 
@@ -87,40 +98,21 @@ signal_to_name_or_int (enum gdb_signal sig)
 
 
 
-/* Implement the "dtor" breakpoint_ops method for signal
-   catchpoints.  */
+/* Implement the "insert_location" method for signal catchpoints.  */
 
-static void
-signal_catchpoint_dtor (struct breakpoint *b)
+int
+signal_catchpoint::insert_location (struct bp_location *bl)
 {
-  struct signal_catchpoint *c = (struct signal_catchpoint *) b;
+  struct signal_catchpoint *c = (struct signal_catchpoint *) bl->owner;
 
-  VEC_free (gdb_signal_type, c->signals_to_be_caught);
-
-  base_breakpoint_ops.dtor (b);
-}
-
-/* Implement the "insert_location" breakpoint_ops method for signal
-   catchpoints.  */
-
-static int
-signal_catchpoint_insert_location (struct bp_location *bl)
-{
-  struct signal_catchpoint *c = (void *) bl->owner;
-  int i;
-
-  if (c->signals_to_be_caught != NULL)
+  if (!c->signals_to_be_caught.empty ())
     {
-      gdb_signal_type iter;
-
-      for (i = 0;
-	   VEC_iterate (gdb_signal_type, c->signals_to_be_caught, i, iter);
-	   i++)
+      for (gdb_signal iter : c->signals_to_be_caught)
 	++signal_catch_counts[iter];
     }
   else
     {
-      for (i = 0; i < GDB_SIGNAL_LAST; ++i)
+      for (int i = 0; i < GDB_SIGNAL_LAST; ++i)
 	{
 	  if (c->catch_all || !INTERNAL_SIGNAL (i))
 	    ++signal_catch_counts[i];
@@ -132,22 +124,17 @@ signal_catchpoint_insert_location (struct bp_location *bl)
   return 0;
 }
 
-/* Implement the "remove_location" breakpoint_ops method for signal
-   catchpoints.  */
+/* Implement the "remove_location" method for signal catchpoints.  */
 
-static int
-signal_catchpoint_remove_location (struct bp_location *bl)
+int
+signal_catchpoint::remove_location (struct bp_location *bl,
+				    enum remove_bp_reason reason)
 {
-  struct signal_catchpoint *c = (void *) bl->owner;
-  int i;
+  struct signal_catchpoint *c = (struct signal_catchpoint *) bl->owner;
 
-  if (c->signals_to_be_caught != NULL)
+  if (!c->signals_to_be_caught.empty ())
     {
-      gdb_signal_type iter;
-
-      for (i = 0;
-	   VEC_iterate (gdb_signal_type, c->signals_to_be_caught, i, iter);
-	   i++)
+      for (gdb_signal iter : c->signals_to_be_caught)
 	{
 	  gdb_assert (signal_catch_counts[iter] > 0);
 	  --signal_catch_counts[iter];
@@ -155,7 +142,7 @@ signal_catchpoint_remove_location (struct bp_location *bl)
     }
   else
     {
-      for (i = 0; i < GDB_SIGNAL_LAST; ++i)
+      for (int i = 0; i < GDB_SIGNAL_LAST; ++i)
 	{
 	  if (c->catch_all || !INTERNAL_SIGNAL (i))
 	    {
@@ -170,74 +157,64 @@ signal_catchpoint_remove_location (struct bp_location *bl)
   return 0;
 }
 
-/* Implement the "breakpoint_hit" breakpoint_ops method for signal
-   catchpoints.  */
+/* Implement the "breakpoint_hit" method for signal catchpoints.  */
 
-static int
-signal_catchpoint_breakpoint_hit (const struct bp_location *bl,
-				  struct address_space *aspace,
-				  CORE_ADDR bp_addr,
-				  const struct target_waitstatus *ws)
+int
+signal_catchpoint::breakpoint_hit (const struct bp_location *bl,
+				   const address_space *aspace,
+				   CORE_ADDR bp_addr,
+				   const target_waitstatus &ws)
 {
-  const struct signal_catchpoint *c = (void *) bl->owner;
-  gdb_signal_type signal_number;
+  const struct signal_catchpoint *c
+    = (const struct signal_catchpoint *) bl->owner;
+  gdb_signal signal_number;
 
-  if (ws->kind != TARGET_WAITKIND_STOPPED)
+  if (ws.kind () != TARGET_WAITKIND_STOPPED)
     return 0;
 
-  signal_number = ws->value.sig;
+  signal_number = ws.sig ();
 
   /* If we are catching specific signals in this breakpoint, then we
      must guarantee that the called signal is the same signal we are
      catching.  */
-  if (c->signals_to_be_caught)
+  if (!c->signals_to_be_caught.empty ())
     {
-      int i;
-      gdb_signal_type iter;
-
-      for (i = 0;
-           VEC_iterate (gdb_signal_type, c->signals_to_be_caught, i, iter);
-           i++)
+      for (gdb_signal iter : c->signals_to_be_caught)
 	if (signal_number == iter)
 	  return 1;
       /* Not the same.  */
-      gdb_assert (!iter);
       return 0;
     }
   else
     return c->catch_all || !INTERNAL_SIGNAL (signal_number);
 }
 
-/* Implement the "print_it" breakpoint_ops method for signal
-   catchpoints.  */
+/* Implement the "print_it" method for signal catchpoints.  */
 
-static enum print_stop_action
-signal_catchpoint_print_it (bpstat bs)
+enum print_stop_action
+signal_catchpoint::print_it (const bpstat *bs) const
 {
-  struct breakpoint *b = bs->breakpoint_at;
-  ptid_t ptid;
   struct target_waitstatus last;
   const char *signal_name;
+  struct ui_out *uiout = current_uiout;
 
-  get_last_target_status (&ptid, &last);
+  get_last_target_status (nullptr, nullptr, &last);
 
-  signal_name = signal_to_name_or_int (last.value.sig);
+  signal_name = signal_to_name_or_int (last.sig ());
 
-  annotate_catchpoint (b->number);
+  annotate_catchpoint (number);
+  maybe_print_thread_hit_breakpoint (uiout);
 
-  printf_filtered (_("\nCatchpoint %d (signal %s), "), b->number, signal_name);
+  gdb_printf (_("Catchpoint %d (signal %s), "), number, signal_name);
 
   return PRINT_SRC_AND_LOC;
 }
 
-/* Implement the "print_one" breakpoint_ops method for signal
-   catchpoints.  */
+/* Implement the "print_one" method for signal catchpoints.  */
 
-static void
-signal_catchpoint_print_one (struct breakpoint *b,
-			     struct bp_location **last_loc)
+bool
+signal_catchpoint::print_one (bp_location **last_loc) const
 {
-  struct signal_catchpoint *c = (void *) b;
   struct value_print_options opts;
   struct ui_out *uiout = current_uiout;
 
@@ -247,205 +224,175 @@ signal_catchpoint_print_one (struct breakpoint *b,
      not line up too nicely with the headers, but the effect
      is relatively readable).  */
   if (opts.addressprint)
-    ui_out_field_skip (uiout, "addr");
+    uiout->field_skip ("addr");
   annotate_field (5);
 
-  if (c->signals_to_be_caught
-      && VEC_length (gdb_signal_type, c->signals_to_be_caught) > 1)
-    ui_out_text (uiout, "signals \"");
+  if (signals_to_be_caught.size () > 1)
+    uiout->text ("signals \"");
   else
-    ui_out_text (uiout, "signal \"");
+    uiout->text ("signal \"");
 
-  if (c->signals_to_be_caught)
+  if (!signals_to_be_caught.empty ())
     {
-      int i;
-      gdb_signal_type iter;
-      struct obstack text;
-      struct cleanup *cleanup;
+      std::string text;
 
-      obstack_init (&text);
-      cleanup = make_cleanup_obstack_free (&text);
-
-      for (i = 0;
-           VEC_iterate (gdb_signal_type, c->signals_to_be_caught, i, iter);
-           i++)
-        {
+      bool first = true;
+      for (gdb_signal iter : signals_to_be_caught)
+	{
 	  const char *name = signal_to_name_or_int (iter);
 
-	  if (i > 0)
-	    obstack_grow (&text, " ", 1);
-	  obstack_grow (&text, name, strlen (name));
-        }
-      obstack_grow (&text, "", 1);
-      ui_out_field_string (uiout, "what", obstack_base (&text));
-      do_cleanups (cleanup);
+	  if (!first)
+	    text += " ";
+	  first = false;
+
+	  text += name;
+	}
+      uiout->field_string ("what", text);
     }
   else
-    ui_out_field_string (uiout, "what",
-			 c->catch_all ? "<any signal>" : "<standard signals>");
-  ui_out_text (uiout, "\" ");
+    uiout->field_string ("what",
+			 catch_all ? "<any signal>" : "<standard signals>",
+			 metadata_style.style ());
+  uiout->text ("\" ");
 
-  if (ui_out_is_mi_like_p (uiout))
-    ui_out_field_string (uiout, "catch-type", "signal");
+  if (uiout->is_mi_like_p ())
+    uiout->field_string ("catch-type", "signal");
+
+  return true;
 }
 
-/* Implement the "print_mention" breakpoint_ops method for signal
-   catchpoints.  */
+/* Implement the "print_mention" method for signal catchpoints.  */
 
-static void
-signal_catchpoint_print_mention (struct breakpoint *b)
+void
+signal_catchpoint::print_mention () const
 {
-  struct signal_catchpoint *c = (void *) b;
-
-  if (c->signals_to_be_caught)
+  if (!signals_to_be_caught.empty ())
     {
-      int i;
-      gdb_signal_type iter;
-
-      if (VEC_length (gdb_signal_type, c->signals_to_be_caught) > 1)
-        printf_filtered (_("Catchpoint %d (signals"), b->number);
+      if (signals_to_be_caught.size () > 1)
+	gdb_printf (_("Catchpoint %d (signals"), number);
       else
-        printf_filtered (_("Catchpoint %d (signal"), b->number);
+	gdb_printf (_("Catchpoint %d (signal"), number);
 
-      for (i = 0;
-           VEC_iterate (gdb_signal_type, c->signals_to_be_caught, i, iter);
-           i++)
-        {
+      for (gdb_signal iter : signals_to_be_caught)
+	{
 	  const char *name = signal_to_name_or_int (iter);
 
-	  printf_filtered (" %s", name);
-        }
-      printf_filtered (")");
+	  gdb_printf (" %s", name);
+	}
+      gdb_printf (")");
     }
-  else if (c->catch_all)
-    printf_filtered (_("Catchpoint %d (any signal)"), b->number);
+  else if (catch_all)
+    gdb_printf (_("Catchpoint %d (any signal)"), number);
   else
-    printf_filtered (_("Catchpoint %d (standard signals)"), b->number);
+    gdb_printf (_("Catchpoint %d (standard signals)"), number);
 }
 
-/* Implement the "print_recreate" breakpoint_ops method for signal
-   catchpoints.  */
+/* Implement the "print_recreate" method for signal catchpoints.  */
 
-static void
-signal_catchpoint_print_recreate (struct breakpoint *b, struct ui_file *fp)
+void
+signal_catchpoint::print_recreate (struct ui_file *fp) const
 {
-  struct signal_catchpoint *c = (void *) b;
+  gdb_printf (fp, "catch signal");
 
-  fprintf_unfiltered (fp, "catch signal");
-
-  if (c->signals_to_be_caught)
+  if (!signals_to_be_caught.empty ())
     {
-      int i;
-      gdb_signal_type iter;
-
-      for (i = 0;
-           VEC_iterate (gdb_signal_type, c->signals_to_be_caught, i, iter);
-           i++)
-	fprintf_unfiltered (fp, " %s", signal_to_name_or_int (iter));
+      for (gdb_signal iter : signals_to_be_caught)
+	gdb_printf (fp, " %s", signal_to_name_or_int (iter));
     }
-  else if (c->catch_all)
-    fprintf_unfiltered (fp, " all");
+  else if (catch_all)
+    gdb_printf (fp, " all");
+  gdb_putc ('\n', fp);
 }
 
-/* Implement the "explains_signal" breakpoint_ops method for signal
-   catchpoints.  */
+/* Implement the "explains_signal" method for signal catchpoints.  */
 
-static enum bpstat_signal_value
-signal_catchpoint_explains_signal (struct breakpoint *b, enum gdb_signal sig)
+bool
+signal_catchpoint::explains_signal (enum gdb_signal sig)
 {
-  return BPSTAT_SIGNAL_PASS;
+  return true;
 }
 
 /* Create a new signal catchpoint.  TEMPFLAG is true if this should be
    a temporary catchpoint.  FILTER is the list of signals to catch; it
-   can be NULL, meaning all signals.  CATCH_ALL is a flag indicating
+   can be empty, meaning all signals.  CATCH_ALL is a flag indicating
    whether signals used internally by gdb should be caught; it is only
-   valid if FILTER is NULL.  If FILTER is NULL and CATCH_ALL is zero,
+   valid if FILTER is NULL.  If FILTER is empty and CATCH_ALL is zero,
    then internal signals like SIGTRAP are not caught.  */
 
 static void
-create_signal_catchpoint (int tempflag, VEC (gdb_signal_type) *filter,
-			  int catch_all)
+create_signal_catchpoint (int tempflag, std::vector<gdb_signal> &&filter,
+			  bool catch_all)
 {
-  struct signal_catchpoint *c;
   struct gdbarch *gdbarch = get_current_arch ();
 
-  c = XNEW (struct signal_catchpoint);
-  init_catchpoint (&c->base, gdbarch, tempflag, NULL, &signal_catchpoint_ops);
-  c->signals_to_be_caught = filter;
-  c->catch_all = catch_all;
+  std::unique_ptr<signal_catchpoint> c
+    (new signal_catchpoint (gdbarch, tempflag, std::move (filter), catch_all));
 
-  install_breakpoint (0, &c->base, 1);
+  install_breakpoint (0, std::move (c), 1);
 }
 
 
-/* Splits the argument using space as delimiter.  Returns an xmalloc'd
-   filter list, or NULL if no filtering is required.  */
+/* Splits the argument using space as delimiter.  Returns a filter
+   list, which is empty if no filtering is required.  */
 
-static VEC (gdb_signal_type) *
-catch_signal_split_args (char *arg, int *catch_all)
+static std::vector<gdb_signal>
+catch_signal_split_args (const char *arg, bool *catch_all)
 {
-  VEC (gdb_signal_type) *result = NULL;
-  struct cleanup *cleanup = make_cleanup (VEC_cleanup (gdb_signal_type),
-					  &result);
-  int first = 1;
+  std::vector<gdb_signal> result;
+  bool first = true;
 
   while (*arg != '\0')
     {
       int num;
-      gdb_signal_type signal_number;
-      char *one_arg, *endptr;
-      struct cleanup *inner_cleanup;
+      gdb_signal signal_number;
+      char *endptr;
 
-      one_arg = extract_arg (&arg);
-      if (one_arg == NULL)
+      std::string one_arg = extract_arg (&arg);
+      if (one_arg.empty ())
 	break;
-      inner_cleanup = make_cleanup (xfree, one_arg);
 
       /* Check for the special flag "all".  */
-      if (strcmp (one_arg, "all") == 0)
+      if (one_arg == "all")
 	{
 	  arg = skip_spaces (arg);
 	  if (*arg != '\0' || !first)
 	    error (_("'all' cannot be caught with other signals"));
-	  *catch_all = 1;
-	  gdb_assert (result == NULL);
-	  do_cleanups (inner_cleanup);
-	  discard_cleanups (cleanup);
-	  return NULL;
+	  *catch_all = true;
+	  gdb_assert (result.empty ());
+	  return result;
 	}
 
-      first = 0;
+      first = false;
 
       /* Check if the user provided a signal name or a number.  */
-      num = (int) strtol (one_arg, &endptr, 0);
+      num = (int) strtol (one_arg.c_str (), &endptr, 0);
       if (*endptr == '\0')
 	signal_number = gdb_signal_from_command (num);
       else
 	{
-	  signal_number = gdb_signal_from_name (one_arg);
+	  signal_number = gdb_signal_from_name (one_arg.c_str ());
 	  if (signal_number == GDB_SIGNAL_UNKNOWN)
-	    error (_("Unknown signal name '%s'."), one_arg);
+	    error (_("Unknown signal name '%s'."), one_arg.c_str ());
 	}
 
-      VEC_safe_push (gdb_signal_type, result, signal_number);
-      do_cleanups (inner_cleanup);
+      result.push_back (signal_number);
     }
 
-  discard_cleanups (cleanup);
+  result.shrink_to_fit ();
   return result;
 }
 
 /* Implement the "catch signal" command.  */
 
 static void
-catch_signal_command (char *arg, int from_tty,
+catch_signal_command (const char *arg, int from_tty,
 		      struct cmd_list_element *command)
 {
-  int tempflag, catch_all = 0;
-  VEC (gdb_signal_type) *filter;
+  int tempflag;
+  bool catch_all = false;
+  std::vector<gdb_signal> filter;
 
-  tempflag = get_cmd_context (command) == CATCH_TEMPORARY;
+  tempflag = command->context () == CATCH_TEMPORARY;
 
   arg = skip_spaces (arg);
 
@@ -457,41 +404,14 @@ catch_signal_command (char *arg, int from_tty,
 
   if (arg != NULL)
     filter = catch_signal_split_args (arg, &catch_all);
-  else
-    filter = NULL;
 
-  create_signal_catchpoint (tempflag, filter, catch_all);
+  create_signal_catchpoint (tempflag, std::move (filter), catch_all);
 }
 
-static void
-initialize_signal_catchpoint_ops (void)
-{
-  struct breakpoint_ops *ops;
-
-  initialize_breakpoint_ops ();
-
-  ops = &signal_catchpoint_ops;
-  *ops = base_breakpoint_ops;
-  ops->dtor = signal_catchpoint_dtor;
-  ops->insert_location = signal_catchpoint_insert_location;
-  ops->remove_location = signal_catchpoint_remove_location;
-  ops->breakpoint_hit = signal_catchpoint_breakpoint_hit;
-  ops->print_it = signal_catchpoint_print_it;
-  ops->print_one = signal_catchpoint_print_one;
-  ops->print_mention = signal_catchpoint_print_mention;
-  ops->print_recreate = signal_catchpoint_print_recreate;
-  ops->explains_signal = signal_catchpoint_explains_signal;
-}
-
-initialize_file_ftype _initialize_break_catch_sig;
-
+void _initialize_break_catch_sig ();
 void
-_initialize_break_catch_sig (void)
+_initialize_break_catch_sig ()
 {
-  initialize_signal_catchpoint_ops ();
-
-  signal_catch_counts = XCNEWVEC (unsigned int, GDB_SIGNAL_LAST);
-
   add_catch_command ("signal", _("\
 Catch signals by their names and/or numbers.\n\
 Usage: catch signal [[NAME|NUMBER] [NAME|NUMBER]...|all]\n\

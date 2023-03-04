@@ -19,89 +19,18 @@
 #ifndef SIM_MAIN_C
 #define SIM_MAIN_C
 
+/* This must come before any other includes.  */
+#include "defs.h"
+
 #include "sim-main.h"
 #include "sim-assert.h"
 
+#include <stdlib.h>
 
 /*---------------------------------------------------------------------------*/
 /*-- simulator engine -------------------------------------------------------*/
 /*---------------------------------------------------------------------------*/
 
-
-/* Description from page A-22 of the "MIPS IV Instruction Set" manual
-   (revision 3.1) */
-/* Translate a virtual address to a physical address and cache
-   coherence algorithm describing the mechanism used to resolve the
-   memory reference. Given the virtual address vAddr, and whether the
-   reference is to Instructions ot Data (IorD), find the corresponding
-   physical address (pAddr) and the cache coherence algorithm (CCA)
-   used to resolve the reference. If the virtual address is in one of
-   the unmapped address spaces the physical address and the CCA are
-   determined directly by the virtual address. If the virtual address
-   is in one of the mapped address spaces then the TLB is used to
-   determine the physical address and access type; if the required
-   translation is not present in the TLB or the desired access is not
-   permitted the function fails and an exception is taken.
-
-   NOTE: Normally (RAW == 0), when address translation fails, this
-   function raises an exception and does not return. */
-
-INLINE_SIM_MAIN
-(int)
-address_translation (SIM_DESC sd,
-		     sim_cpu * cpu,
-		     address_word cia,
-		     address_word vAddr,
-		     int IorD,
-		     int LorS,
-		     address_word * pAddr,
-		     int *CCA,
-		     int raw)
-{
-  int res = -1;			/* TRUE : Assume good return */
-
-#ifdef DEBUG
-  sim_io_printf (sd, "AddressTranslation(0x%s,%s,%s,...);\n", pr_addr (vAddr), (IorD ? "isDATA" : "isINSTRUCTION"), (LorS ? "iSTORE" : "isLOAD"));
-#endif
-
-  /* Check that the address is valid for this memory model */
-
-  /* For a simple (flat) memory model, we simply pass virtual
-     addressess through (mostly) unchanged. */
-  vAddr &= 0xFFFFFFFF;
-
-  *pAddr = vAddr;		/* default for isTARGET */
-  *CCA = Uncached;		/* not used for isHOST */
-
-  return (res);
-}
-
-
-
-/* Description from page A-23 of the "MIPS IV Instruction Set" manual
-   (revision 3.1) */
-/* Prefetch data from memory. Prefetch is an advisory instruction for
-   which an implementation specific action is taken. The action taken
-   may increase performance, but must not change the meaning of the
-   program, or alter architecturally-visible state. */
-
-INLINE_SIM_MAIN (void)
-prefetch (SIM_DESC sd,
-	  sim_cpu *cpu,
-	  address_word cia,
-	  int CCA,
-	  address_word pAddr,
-	  address_word vAddr,
-	  int DATA,
-	  int hint)
-{
-#ifdef DEBUG
-  sim_io_printf(sd,"Prefetch(%d,0x%s,0x%s,%d,%d);\n",CCA,pr_addr(pAddr),pr_addr(vAddr),DATA,hint);
-#endif /* DEBUG */
-
-  /* For our simple memory model we do nothing */
-  return;
-}
 
 /* Description from page A-22 of the "MIPS IV Instruction Set" manual
    (revision 3.1) */
@@ -152,10 +81,8 @@ load_memory (SIM_DESC SD,
 		    pr_addr (pAddr));
     }
 
-#if defined(TRACE)
   dotrace (SD, CPU, tracefh,((IorD == isDATA) ? 0 : 2),(unsigned int)(pAddr&0xFFFFFFFF),(AccessLength + 1),"load%s",((IorD == isDATA) ? "" : " instruction"));
-#endif /* TRACE */
-  
+
   /* Read the specified number of bytes from memory.  Adjust for
      host/target byte ordering/ Align the least significant byte
      read. */
@@ -196,12 +123,12 @@ load_memory (SIM_DESC SD,
     default:
       abort ();
     }
-  
+
 #ifdef DEBUG
   printf("DBG: LoadMemory() : (offset %d) : value = 0x%s%s\n",
 	 (int)(pAddr & LOADDRMASK),pr_uword64(value1),pr_uword64(value));
 #endif /* DEBUG */
-  
+
   /* See also store_memory. Position data in correct byte lanes. */
   if (AccessLength <= LOADDRMASK)
     {
@@ -214,12 +141,12 @@ load_memory (SIM_DESC SD,
 	   is already in the correct postition. */
 	value <<= ((pAddr & LOADDRMASK) * 8);
     }
-  
+
 #ifdef DEBUG
   printf("DBG: LoadMemory() : shifted value = 0x%s%s\n",
 	 pr_uword64(value1),pr_uword64(value));
 #endif /* DEBUG */
-  
+
   *memvalp = value;
   if (memval1p) *memval1p = value1;
 }
@@ -252,26 +179,24 @@ store_memory (SIM_DESC SD,
 #ifdef DEBUG
   sim_io_printf(sd,"DBG: StoreMemory(%d,%d,0x%s,0x%s,0x%s,0x%s)\n",CCA,AccessLength,pr_uword64(MemElem),pr_uword64(MemElem1),pr_addr(pAddr),pr_addr(vAddr));
 #endif /* DEBUG */
-  
+
 #if defined(WARN_MEM)
   if (CCA != uncached)
     sim_io_eprintf(sd,"StoreMemory CCA (%d) is not uncached (currently all accesses treated as cached)\n",CCA);
 #endif /* WARN_MEM */
-  
+
   if (((pAddr & LOADDRMASK) + AccessLength) > LOADDRMASK)
     sim_io_error (SD, "STORE AccessLength of %d would extend over %d bit aligned boundary for physical address 0x%s\n",
 		  AccessLength,
 		  (LOADDRMASK + 1) << 3,
 		  pr_addr(pAddr));
-  
-#if defined(TRACE)
+
   dotrace (SD, CPU, tracefh,1,(unsigned int)(pAddr&0xFFFFFFFF),(AccessLength + 1),"store");
-#endif /* TRACE */
-  
+
 #ifdef DEBUG
   printf("DBG: StoreMemory: offset = %d MemElem = 0x%s%s\n",(unsigned int)(pAddr & LOADDRMASK),pr_uword64(MemElem1),pr_uword64(MemElem));
 #endif /* DEBUG */
-  
+
   /* See also load_memory. Position data in correct byte lanes. */
   if (AccessLength <= LOADDRMASK)
     {
@@ -284,11 +209,11 @@ store_memory (SIM_DESC SD,
 	   is already in the correct postition. */
 	MemElem >>= ((pAddr & LOADDRMASK) * 8);
     }
-  
+
 #ifdef DEBUG
   printf("DBG: StoreMemory: shift = %d MemElem = 0x%s%s\n",shift,pr_uword64(MemElem1),pr_uword64(MemElem));
 #endif /* DEBUG */
-  
+
   switch (AccessLength)
     {
     case AccessLength_QUADWORD:
@@ -323,13 +248,13 @@ store_memory (SIM_DESC SD,
       break;
     default:
       abort ();
-    }	
-  
+    }
+
   return;
 }
 
 
-INLINE_SIM_MAIN (unsigned32)
+INLINE_SIM_MAIN (uint32_t)
 ifetch32 (SIM_DESC SD,
 	  sim_cpu *CPU,
 	  address_word cia,
@@ -341,21 +266,19 @@ ifetch32 (SIM_DESC SD,
   address_word reverseendian = (ReverseEndian ? (mask ^ access) : 0);
   address_word bigendiancpu = (BigEndianCPU ? (mask ^ access) : 0);
   unsigned int byte;
-  address_word paddr;
-  int uncached;
-  unsigned64 memval;
+  address_word paddr = vaddr;
+  uint64_t memval;
 
   if ((vaddr & access) != 0)
     SignalExceptionInstructionFetch ();
-  AddressTranslation (vaddr, isINSTRUCTION, isLOAD, &paddr, &uncached, isTARGET, isREAL);
   paddr = ((paddr & ~mask) | ((paddr & mask) ^ reverseendian));
-  LoadMemory (&memval, NULL, uncached, access, paddr, vaddr, isINSTRUCTION, isREAL);
+  LoadMemory (&memval, NULL, access, paddr, vaddr, isINSTRUCTION, isREAL);
   byte = ((vaddr & mask) ^ bigendiancpu);
   return (memval >> (8 * byte));
 }
 
 
-INLINE_SIM_MAIN (unsigned16)
+INLINE_SIM_MAIN (uint16_t)
 ifetch16 (SIM_DESC SD,
 	  sim_cpu *CPU,
 	  address_word cia,
@@ -367,15 +290,13 @@ ifetch16 (SIM_DESC SD,
   address_word reverseendian = (ReverseEndian ? (mask ^ access) : 0);
   address_word bigendiancpu = (BigEndianCPU ? (mask ^ access) : 0);
   unsigned int byte;
-  address_word paddr;
-  int uncached;
-  unsigned64 memval;
+  address_word paddr = vaddr;
+  uint64_t memval;
 
   if ((vaddr & access) != 0)
     SignalExceptionInstructionFetch ();
-  AddressTranslation (vaddr, isINSTRUCTION, isLOAD, &paddr, &uncached, isTARGET, isREAL);
   paddr = ((paddr & ~mask) | ((paddr & mask) ^ reverseendian));
-  LoadMemory (&memval, NULL, uncached, access, paddr, vaddr, isINSTRUCTION, isREAL);
+  LoadMemory (&memval, NULL, access, paddr, vaddr, isINSTRUCTION, isREAL);
   byte = ((vaddr & mask) ^ bigendiancpu);
   return (memval >> (8 * byte));
 }
@@ -454,7 +375,7 @@ cache_op (SIM_DESC SD,
         case 3: /* Create Dirty */
         case 4: /* Hit Invalidate */
         case 5: /* Hit Writeback Invalidate */
-        case 6: /* Hit Writeback */ 
+        case 6: /* Hit Writeback */
           if (!dcache_warning)
             {
               sim_io_eprintf(SD,"Data CACHE operation %d to be coded\n",(op >> 2));
@@ -482,81 +403,81 @@ pending_tick (SIM_DESC SD,
 	      sim_cpu *CPU,
 	      address_word cia)
 {
-  if (PENDING_TRACE)							
-    sim_io_eprintf (SD, "PENDING_DRAIN - 0x%lx - pending_in = %d, pending_out = %d, pending_total = %d\n", (unsigned long) cia, PENDING_IN, PENDING_OUT, PENDING_TOTAL); 
-  if (PENDING_OUT != PENDING_IN)					
-    {									
-      int loop;							
-      int index = PENDING_OUT;					
-      int total = PENDING_TOTAL;					
-      if (PENDING_TOTAL == 0)						
-	sim_engine_abort (SD, CPU, cia, "PENDING_DRAIN - Mis-match on pending update pointers\n"); 
+  if (PENDING_TRACE)
+    sim_io_eprintf (SD, "PENDING_DRAIN - 0x%lx - pending_in = %d, pending_out = %d, pending_total = %d\n", (unsigned long) cia, PENDING_IN, PENDING_OUT, PENDING_TOTAL);
+  if (PENDING_OUT != PENDING_IN)
+    {
+      int loop;
+      int index = PENDING_OUT;
+      int total = PENDING_TOTAL;
+      if (PENDING_TOTAL == 0)
+	sim_engine_abort (SD, CPU, cia, "PENDING_DRAIN - Mis-match on pending update pointers\n");
       for (loop = 0, index = PENDING_OUT;
 	   (loop < total);
 	   loop++, index = (index + 1) % PSLOTS)
-	{								
-	  if (PENDING_SLOT_DEST[index] != NULL)			
-	    {								
-	      PENDING_SLOT_DELAY[index] -= 1;				
-	      if (PENDING_SLOT_DELAY[index] == 0)			
-		{							
+	{
+	  if (PENDING_SLOT_DEST[index] != NULL)
+	    {
+	      PENDING_SLOT_DELAY[index] -= 1;
+	      if (PENDING_SLOT_DELAY[index] == 0)
+		{
 		  if (PENDING_TRACE)
-		    sim_io_eprintf (SD, "PENDING_DRAIN - drained - index %d, dest 0x%lx, bit %d, val 0x%lx, size %d\n",
+		    sim_io_eprintf (SD, "PENDING_DRAIN - drained - index %d, dest %p, bit %d, val %" PRIx64 ", size %d\n",
 				    index,
-				    (unsigned long) PENDING_SLOT_DEST[index],
+				    PENDING_SLOT_DEST[index],
 				    PENDING_SLOT_BIT[index],
-				    (unsigned long) PENDING_SLOT_VALUE[index],
+				    PENDING_SLOT_VALUE[index],
 				    PENDING_SLOT_SIZE[index]);
-		  if (PENDING_SLOT_BIT[index] >= 0)			
-		    switch (PENDING_SLOT_SIZE[index])                 
-		      {						
+		  if (PENDING_SLOT_BIT[index] >= 0)
+		    switch (PENDING_SLOT_SIZE[index])
+		      {
 		      case 4:
-			if (PENDING_SLOT_VALUE[index])		
-			  *(unsigned32*)PENDING_SLOT_DEST[index] |= 	
-			    BIT32 (PENDING_SLOT_BIT[index]);		
-			else						
-			  *(unsigned32*)PENDING_SLOT_DEST[index] &= 	
-			    BIT32 (PENDING_SLOT_BIT[index]);		
-			break;					
-		      case 8:					
-			if (PENDING_SLOT_VALUE[index])		
-			  *(unsigned64*)PENDING_SLOT_DEST[index] |= 	
-			    BIT64 (PENDING_SLOT_BIT[index]);		
-			else						
-			  *(unsigned64*)PENDING_SLOT_DEST[index] &= 	
-			    BIT64 (PENDING_SLOT_BIT[index]);		
-			break;					
+			if (PENDING_SLOT_VALUE[index])
+			  *(uint32_t*)PENDING_SLOT_DEST[index] |=
+			    BIT32 (PENDING_SLOT_BIT[index]);
+			else
+			  *(uint32_t*)PENDING_SLOT_DEST[index] &=
+			    BIT32 (PENDING_SLOT_BIT[index]);
+			break;
+		      case 8:
+			if (PENDING_SLOT_VALUE[index])
+			  *(uint64_t*)PENDING_SLOT_DEST[index] |=
+			    BIT64 (PENDING_SLOT_BIT[index]);
+			else
+			  *(uint64_t*)PENDING_SLOT_DEST[index] &=
+			    BIT64 (PENDING_SLOT_BIT[index]);
+			break;
 		      }
 		  else
-		    switch (PENDING_SLOT_SIZE[index])                 
-		      {						
-		      case 4:					
-			*(unsigned32*)PENDING_SLOT_DEST[index] = 	
-			  PENDING_SLOT_VALUE[index];			
-			break;					
-		      case 8:					
-			*(unsigned64*)PENDING_SLOT_DEST[index] = 	
-			  PENDING_SLOT_VALUE[index];			
-			break;					
-		      }							
+		    switch (PENDING_SLOT_SIZE[index])
+		      {
+		      case 4:
+			*(uint32_t*)PENDING_SLOT_DEST[index] =
+			  PENDING_SLOT_VALUE[index];
+			break;
+		      case 8:
+			*(uint64_t*)PENDING_SLOT_DEST[index] =
+			  PENDING_SLOT_VALUE[index];
+			break;
+		      }
 		  if (PENDING_OUT == index)
 		    {
 		      PENDING_SLOT_DEST[index] = NULL;
 		      PENDING_OUT = (PENDING_OUT + 1) % PSLOTS;
 		      PENDING_TOTAL--;
 		    }
-		}							
+		}
 	      else if (PENDING_TRACE && PENDING_SLOT_DELAY[index] > 0)
-		sim_io_eprintf (SD, "PENDING_DRAIN - queued - index %d, delay %d, dest 0x%lx, bit %d, val 0x%lx, size %d\n",
+		sim_io_eprintf (SD, "PENDING_DRAIN - queued - index %d, delay %d, dest %p, bit %d, val %" PRIx64 ", size %d\n",
 				index, PENDING_SLOT_DELAY[index],
-				(unsigned long) PENDING_SLOT_DEST[index],
+				PENDING_SLOT_DEST[index],
 				PENDING_SLOT_BIT[index],
-				(unsigned long) PENDING_SLOT_VALUE[index],
+				PENDING_SLOT_VALUE[index],
 				PENDING_SLOT_SIZE[index]);
 
-	    }								
-	}								
-    }									
+	    }
+	}
+    }
 }
 
 

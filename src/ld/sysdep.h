@@ -1,6 +1,5 @@
 /* sysdep.h -- handle host dependencies for the GNU linker
-   Copyright 1995, 1996, 1997, 1999, 2002, 2003, 2005, 2007, 2012
-   Free Software Foundation, Inc.
+   Copyright (C) 1995-2023 Free Software Foundation, Inc.
 
    This file is part of the GNU Binutils.
 
@@ -29,60 +28,23 @@
 #include "config.h"
 
 #include <stdio.h>
+#ifdef HAVE_SYS_TYPES_H
 #include <sys/types.h>
+#endif
+#ifdef HAVE_SYS_STAT_H
 #include <sys/stat.h>
-#include <stdarg.h>
-
-#ifdef STRING_WITH_STRINGS
-#include <string.h>
-#include <strings.h>
-#else
-#ifdef HAVE_STRING_H
-#include <string.h>
-#else
-#ifdef HAVE_STRINGS_H
-#include <strings.h>
-#else
-extern char *strchr ();
-extern char *strrchr ();
 #endif
-#endif
-#endif
-
-#ifdef HAVE_STDLIB_H
 #include <stdlib.h>
-#endif
-
+#include <string.h>
+#include <stdarg.h>
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
-#endif
-
-/* for PATH_MAX */
-#ifdef HAVE_LIMITS_H
-#include <limits.h>
-#endif
-/* for MAXPATHLEN */
-#ifdef HAVE_SYS_PARAM_H
-#include <sys/param.h>
-#endif
-#ifdef PATH_MAX
-# define LD_PATHMAX PATH_MAX
-#else
-# ifdef MAXPATHLEN
-#  define LD_PATHMAX MAXPATHLEN
-# else
-#  define LD_PATHMAX 1024
-# endif
 #endif
 
 #ifdef HAVE_REALPATH
 # define REALPATH(a,b) realpath (a, b)
 #else
 # define REALPATH(a,b) NULL
-#endif
-
-#ifdef HAVE_UNISTD_H
-#include <unistd.h>
 #endif
 
 #ifdef USE_BINARY_FOPEN
@@ -97,10 +59,6 @@ extern char *strrchr ();
 #ifdef HAVE_SYS_FILE_H
 #include <sys/file.h>
 #endif
-#endif
-
-#ifdef HAVE_DLFCN_H
-#include <dlfcn.h>
 #endif
 
 #ifndef O_RDONLY
@@ -130,20 +88,10 @@ extern char *strrchr ();
 #define SEEK_END 2
 #endif
 
-#if !HAVE_DECL_STRSTR
-extern char *strstr ();
-#endif
-
-#if !HAVE_DECL_FREE
-extern void free ();
-#endif
-
-#if !HAVE_DECL_GETENV
-extern char *getenv ();
-#endif
-
 #if !HAVE_DECL_ENVIRON
 extern char **environ;
 #endif
+
+#define POISON_BFD_BOOLEAN 1
 
 #endif /* ! defined (LD_SYSDEP_H) */

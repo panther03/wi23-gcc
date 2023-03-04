@@ -1,5 +1,5 @@
 /* tc-epiphany.c -- Assembler for the Adapteva EPIPHANY
-   Copyright 2009-2013 Free Software Foundation, Inc.
+   Copyright (C) 2009-2023 Free Software Foundation, Inc.
    Contributed by Embecosm on behalf of Adapteva, Inc.
 
    This file is part of GAS, the GNU Assembler.
@@ -28,7 +28,6 @@
 #include "elf/common.h"
 #include "elf/epiphany.h"
 #include "dwarf2dbg.h"
-#include "libbfd.h"
 
 /* Structure to hold all of the different components describing
    an individual instruction.  */
@@ -60,7 +59,7 @@ const char FLT_CHARS[]            = "fFdD";
 
 /* Flag to detect when switching to code section where insn alignment is
    implied.  */
-static bfd_boolean force_code_align = FALSE;
+static bool force_code_align = false;
 
 static void
 epiphany_elf_section_rtn (int i)
@@ -69,38 +68,18 @@ epiphany_elf_section_rtn (int i)
 
   if (force_code_align)
     {
-      /* The s_align_ptwo function expects that we are just after a .align
-	 directive and it will either try and read the align value or stop
-	 if end of line so we must fake it out so it thinks we are at the
-	 end of the line.  */
-      char *old_input_line_pointer = input_line_pointer;
-
-      input_line_pointer = "\n";
-      s_align_ptwo (1);
-      force_code_align = FALSE;
-
-      /* Restore.  */
-      input_line_pointer = old_input_line_pointer;
+      do_align (1, NULL, 0, 0);
+      force_code_align = false;
     }
 }
 
 static void
 epiphany_elf_section_text (int i)
 {
-  char *old_input_line_pointer;
-
   obj_elf_text (i);
 
-  /* The s_align_ptwo function expects that we are just after a .align
-     directive and it will either try and read the align value or stop if
-     end of line so we must fake it out so it thinks we are at the end of
-     the line.  */
-  old_input_line_pointer = input_line_pointer;
-  input_line_pointer = "\n";
-  s_align_ptwo (1);
-  force_code_align = FALSE;
-  /* Restore.  */
-  input_line_pointer = old_input_line_pointer;
+  do_align (1, NULL, 0, 0);
+  force_code_align = false;
 }
 
 /* The target specific pseudo-ops which we support.  */
@@ -136,7 +115,7 @@ size_t md_longopts_size = sizeof (md_longopts);
 const char * md_shortopts = "";
 
 int
-md_parse_option (int c ATTRIBUTE_UNUSED, char * arg ATTRIBUTE_UNUSED)
+md_parse_option (int c ATTRIBUTE_UNUSED, const char * arg ATTRIBUTE_UNUSED)
 {
   return 0;	/* No target-specific options.  */
 }
@@ -166,14 +145,16 @@ md_begin (void)
 
   /* Set the machine type.  */
   bfd_default_set_arch_mach (stdoutput, bfd_arch_epiphany, bfd_mach_epiphany32);
+
+  literal_prefix_dollar_hex = true;
 }
 
 valueT
 md_section_align (segT segment, valueT size)
 {
-  int align = bfd_get_section_alignment (stdoutput, segment);
+  int align = bfd_section_alignment (segment);
 
-  return ((size + (1 << align) - 1) & (-1 << align));
+  return ((size + (1 << align) - 1) & -(1 << align));
 }
 
 
@@ -203,7 +184,7 @@ epiphany_elf_section_flags (int flags,
      executable section specifier we set an internal flag to denote when
      word alignment should be forced.  */
   if (flags & SEC_CODE)
-    force_code_align = TRUE;
+    force_code_align = true;
 
   return flags;
 }
@@ -241,16 +222,16 @@ struct epiphany_hi_fixup
 #define GOT_NAME "_GLOBAL_OFFSET_TABLE_"
 static symbolS * GOT_symbol;
 
-static inline bfd_boolean
+static inline bool
 epiphany_PIC_related_p (symbolS *sym)
 {
   expressionS *exp;
 
   if (! sym)
-    return FALSE;
+    return false;
 
   if (sym == GOT_symbol)
-    return TRUE;
+    return true;
 
   exp = symbol_get_value_expression (sym);
 
@@ -309,7 +290,7 @@ epiphany_apply_fix (fixS *fixP, valueT *valP, segT seg)
 
 	case BFD_RELOC_EPIPHANY_HIGH:
 	  value >>= 16;
-	  /* fall thru */
+	  /* fallthru */
 	case BFD_RELOC_EPIPHANY_LOW:
 	  value = (((value & 0xff) << 5) | insn[0])
 	    | (insn[1] << 8)
@@ -361,7 +342,7 @@ epiphany_handle_align (fragS *fragp)
 }
 
 /* Read a comma separated incrementing list of register names
-   and form a bit mask of upto 15 registers 0..14.  */
+   and form a bit mask of up to 15 registers 0..14.  */
 
 static const char *
 parse_reglist (const char * s, int * mask)
@@ -405,71 +386,16 @@ parse_reglist (const char * s, int * mask)
 }
 
 
-void
-md_assemble (char *str)
-{
+/* Assemble an instruction,  push and pop pseudo instructions should have
+   already been expanded.  */
+
+static void
+epiphany_assemble (const char *str)
+    {
   epiphany_insn insn;
   char *errmsg = 0;
-  const char * pperr = 0;
-  int regmask=0, push=0, pop=0;
 
   memset (&insn, 0, sizeof (insn));
-
-  /* Special-case push/pop instruction macros.  */
-  if (0 == strncmp (str, "push {", 6))
-    {
-      char * s = str + 6;
-      push = 1;
-      pperr = parse_reglist (s, &regmask);
-    }
-  else if (0 == strncmp (str, "pop {", 5))
-    {
-      char * s = str + 5;
-      pop = 1;
-      pperr = parse_reglist (s, &regmask);
-    }
-
-  if (pperr)
-    {
-      as_bad ("%s", pperr);
-      return;
-    }
-
-  if (push && regmask)
-    {
-      char buff[20];
-      int i,p ATTRIBUTE_UNUSED;
-
-      md_assemble ("mov r15,4");
-      md_assemble ("sub sp,sp,r15");
-
-      for (i = 0, p = 1; i <= 15; ++i, regmask >>= 1)
-	{
-	  if (regmask == 1)
-	    sprintf (buff, "str r%d,[sp]", i); /* Last one.  */
-	  else if (regmask & 1)
-	    sprintf (buff, "str r%d,[sp],-r15", i);
-	  else
-	    continue;
-	  md_assemble (buff);
-	}
-      return;
-    }
-  else if (pop && regmask)
-    {
-      char buff[20];
-      int i,p;
-
-      md_assemble ("mov r15,4");
-
-      for (i = 15, p = 1 << 15; i >= 0; --i, p >>= 1)
-	if (regmask & p)
-	  {
-	    sprintf (buff, "ldr r%d,[sp],+r15", i);
-	    md_assemble (buff);
-	  }
-      return;
-    }
 
   /* Initialize GAS's cgen interface for a new instruction.  */
   gas_cgen_init_parse ();
@@ -505,7 +431,7 @@ md_assemble (char *str)
 #define DISPMOD _("destination register modified by displacement-post-modified address")
 #define LDSTODD _("ldrd/strd requires even:odd register pair")
 
-  /* Helper macros for spliting apart instruction fields.  */
+  /* Helper macros for splitting apart instruction fields.  */
 #define ADDR_POST_MODIFIED(i) (((i) >> 25) & 0x1)
 #define ADDR_SIZE(i)          (((i) >>  5) &   3)
 #define ADDR_LOADSTORE(i)     (((i) >>  4) & 0x1)
@@ -578,7 +504,7 @@ md_assemble (char *str)
 	    return;
 	  }
       }
-      /* fall-thru.  */
+      /* fallthru */
 
     case OP4_LDSTRX:
       {
@@ -594,6 +520,71 @@ md_assemble (char *str)
     default:
       break;
     }
+}
+
+void
+md_assemble (char *str)
+{
+  const char * pperr = 0;
+  int regmask=0, push=0, pop=0;
+
+  /* Special-case push/pop instruction macros.  */
+  if (startswith (str, "push {"))
+    {
+      char * s = str + 6;
+      push = 1;
+      pperr = parse_reglist (s, &regmask);
+    }
+  else if (startswith (str, "pop {"))
+    {
+      char * s = str + 5;
+      pop = 1;
+      pperr = parse_reglist (s, &regmask);
+    }
+
+  if (pperr)
+    {
+      as_bad ("%s", pperr);
+      return;
+    }
+
+  if (push && regmask)
+    {
+      char buff[32];
+      int i,p ATTRIBUTE_UNUSED;
+
+      epiphany_assemble ("mov r15,4");
+      epiphany_assemble ("sub sp,sp,r15");
+
+      for (i = 0, p = 1; i <= 15; ++i, regmask >>= 1)
+	{
+	  if (regmask == 1)
+	    sprintf (buff, "str r%d,[sp]", i); /* Last one.  */
+	  else if (regmask & 1)
+	    sprintf (buff, "str r%d,[sp],-r15", i);
+	  else
+	    continue;
+	  epiphany_assemble (buff);
+	}
+      return;
+    }
+  else if (pop && regmask)
+    {
+      char buff[32];
+      int i,p;
+
+      epiphany_assemble ("mov r15,4");
+
+      for (i = 15, p = 1 << 15; i >= 0; --i, p >>= 1)
+	if (regmask & p)
+	  {
+	    sprintf (buff, "ldr r%d,[sp],+r15", i);
+	    epiphany_assemble (buff);
+	  }
+      return;
+    }
+
+  epiphany_assemble (str);
 }
 
 /* The syntax in the manual says constants begin with '#'.
@@ -736,6 +727,8 @@ md_estimate_size_before_relax (fragS *fragP, segT segment)
 	 handling to md_convert_frag.  */
 
       EPIPHANY_RELAX_TYPES subtype;
+      const CGEN_INSN *insn;
+      int i;
       /* We haven't relaxed this at all, so the relaxation type may be
 	 completely wrong.  Set the subtype correctly.  */
       epiphany_relax_frag (segment, fragP, 0);
@@ -762,26 +755,29 @@ md_estimate_size_before_relax (fragS *fragP, segT segment)
 
       fragP->fr_subtype = subtype;
 
-      {
-	const CGEN_INSN *insn;
-	int i;
+      /* Update the recorded insn.  */
+      for (i = 0, insn = fragP->fr_cgen.insn; i < 4; i++, insn++)
+	{
+	  if (strcmp (CGEN_INSN_MNEMONIC (insn),
+		      CGEN_INSN_MNEMONIC (fragP->fr_cgen.insn)) == 0
+	      && CGEN_INSN_ATTR_VALUE (insn, CGEN_INSN_RELAXED))
+	    break;
+	}
 
-	/* Update the recorded insn.  */
+      if (i == 4)
+	abort ();
 
-	for (i = 0, insn = fragP->fr_cgen.insn; i < 4; i++, insn++)
-	  {
-	    if ((strcmp (CGEN_INSN_MNEMONIC (insn),
-			 CGEN_INSN_MNEMONIC (fragP->fr_cgen.insn))
-		 == 0)
-		&& CGEN_INSN_ATTR_VALUE (insn, CGEN_INSN_RELAXED))
-	      break;
-	  }
+      /* When changing from a 2-byte to 4-byte insn, don't leave
+	 opcode bytes uninitialised.  */
+      if (CGEN_INSN_BITSIZE (fragP->fr_cgen.insn) < CGEN_INSN_BITSIZE (insn))
+	{
+	  gas_assert (CGEN_INSN_BITSIZE (fragP->fr_cgen.insn) == 16);
+	  gas_assert (CGEN_INSN_BITSIZE (insn) == 32);
+	  fragP->fr_opcode[2] = 0;
+	  fragP->fr_opcode[3] = 0;
+	}
 
-	if (i == 4)
-	  abort ();
-
-	fragP->fr_cgen.insn = insn;
-      }
+      fragP->fr_cgen.insn = insn;
     }
 
   return md_relax_table[fragP->fr_subtype].rlx_length;
@@ -1005,7 +1001,7 @@ md_cgen_lookup_reloc (const CGEN_INSN *insn ATTRIBUTE_UNUSED,
 	return BFD_RELOC_EPIPHANY_LOW;
       else
 	as_bad ("unknown imm16 operand");
-      /* fall-thru */
+      /* fallthru */
 
     default:
       break;
@@ -1019,19 +1015,16 @@ md_cgen_lookup_reloc (const CGEN_INSN *insn ATTRIBUTE_UNUSED,
    of LITTLENUMS emitted is stored in *SIZEP.  An error message is
    returned, or NULL on OK.  */
 
-/* Equal to MAX_PRECISION in atof-ieee.c.  */
-#define MAX_LITTLENUMS 6
-
-char *
+const char *
 md_atof (int type, char *litP, int *sizeP)
 {
-  return ieee_md_atof (type, litP, sizeP, FALSE);
+  return ieee_md_atof (type, litP, sizeP, false);
 }
 
 /* Return true if can adjust the reloc to be relative to its section
    (such as .data) instead of relative to some symbol.  */
 
-bfd_boolean
+bool
 epiphany_fix_adjustable (fixS *fixP)
 {
  bfd_reloc_code_real_type reloc_type;
@@ -1049,28 +1042,28 @@ epiphany_fix_adjustable (fixS *fixP)
     reloc_type = fixP->fx_r_type;
 
   if (fixP->fx_addsy == NULL)
-    return TRUE;
+    return true;
 
   /* Prevent all adjustments to global symbols.  */
   if (S_IS_EXTERNAL (fixP->fx_addsy))
-    return FALSE;
+    return false;
 
   if (S_IS_WEAK (fixP->fx_addsy))
-    return FALSE;
+    return false;
 
   if (pic_code
       && (reloc_type == BFD_RELOC_EPIPHANY_SIMM24
 	  || reloc_type == BFD_RELOC_EPIPHANY_SIMM8
 	  || reloc_type == BFD_RELOC_EPIPHANY_HIGH
 	  || reloc_type == BFD_RELOC_EPIPHANY_LOW))
-    return FALSE;
+    return false;
 
   /* Since we don't use partial_inplace, we must not reduce symbols in
-     mergable sections to their section symbol.  */
+     mergeable sections to their section symbol.  */
   if ((S_GET_SEGMENT (fixP->fx_addsy)->flags & SEC_MERGE) != 0)
-    return FALSE;
+    return false;
 
-  return TRUE;
+  return true;
 }
 
 void

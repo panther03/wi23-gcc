@@ -1,7 +1,7 @@
 /* Lattice Mico32 simulator support code
    Contributed by Jon Beniston <jon@beniston.com>
 
-   Copyright (C) 2009-2013 Free Software Foundation, Inc.
+   Copyright (C) 2009-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -23,49 +23,18 @@
 #ifndef SIM_MAIN_H
 #define SIM_MAIN_H
 
-#define USING_SIM_BASE_H	/* FIXME: quick hack */
+#define WITH_SCACHE_PBB 1
 
-struct _sim_cpu;		/* FIXME: should be in sim-basics.h */
-typedef struct _sim_cpu SIM_CPU;
-
-#include "symcat.h"
 #include "sim-basics.h"
-#include "cgen-types.h"
-#include "lm32-desc.h"
-#include "lm32-opc.h"
+#include "opcodes/lm32-desc.h"
+#include "opcodes/lm32-opc.h"
 #include "arch.h"
-
-/* These must be defined before sim-base.h.  */
-typedef USI sim_cia;
-
-#define CIA_GET(cpu)     CPU_PC_GET (cpu)
-#define CIA_SET(cpu,val) CPU_PC_SET ((cpu), (val))
-
-#define SIM_ENGINE_HALT_HOOK(sd, cpu, cia) \
-do { \
-  if (cpu) /* null if ctrl-c */ \
-    sim_pc_set ((cpu), (cia)); \
-} while (0)
-#define SIM_ENGINE_RESTART_HOOK(sd, cpu, cia) \
-do { \
-  sim_pc_set ((cpu), (cia)); \
-} while (0)
-
 #include "sim-base.h"
 #include "cgen-sim.h"
 #include "lm32-sim.h"
-#include "opcode/cgen.h"
 
-/* The _sim_cpu struct.  */
-
-struct _sim_cpu
+struct lm32_sim_cpu
 {
-  /* sim/common cpu base.  */
-  sim_cpu_base base;
-
-  /* Static parts of cgen.  */
-  CGEN_CPU cgen_cpu;
-
   /* CPU specific parts go here.
      Note that in files that don't need to access these pieces WANT_CPU_FOO
      won't be defined and thus these parts won't appear.  This is ok in the
@@ -76,20 +45,8 @@ struct _sim_cpu
 #if defined (WANT_CPU_LM32BF)
   LM32BF_CPU_DATA cpu_data;
 #endif
-
 };
-
-/* The sim_state struct.  */
-
-struct sim_state
-{
-  sim_cpu *cpu;
-#define STATE_CPU(sd, n) (/*&*/ (sd)->cpu)
-
-  CGEN_STATE cgen_state;
-
-  sim_state_base base;
-};
+#define LM32_SIM_CPU(cpu) ((struct lm32_sim_cpu *) CPU_ARCH_DATA (cpu))
 
 /* Misc.  */
 

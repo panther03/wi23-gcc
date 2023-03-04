@@ -1,3 +1,4 @@
+#as: -O0
 #objdump: -Wf
 #name: CFI on x86-64
 #...
@@ -268,9 +269,5 @@ Contents of the .eh_frame section:
   DW_CFA_undefined: r124 \(k6\)
   DW_CFA_advance_loc: 1 to 0+00ae
   DW_CFA_undefined: r125 \(k7\)
-  DW_CFA_nop
-  DW_CFA_nop
-  DW_CFA_nop
-  DW_CFA_nop
   DW_CFA_nop
 #pass

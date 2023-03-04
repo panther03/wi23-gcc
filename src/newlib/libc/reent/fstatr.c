@@ -32,17 +32,10 @@ FUNCTION
 INDEX
 	_fstat_r
 
-ANSI_SYNOPSIS
+SYNOPSIS
 	#include <reent.h>
 	int _fstat_r(struct _reent *<[ptr]>,
 		     int <[fd]>, struct stat *<[pstat]>);
-
-TRAD_SYNOPSIS
-	#include <reent.h>
-	int _fstat_r(<[ptr]>, <[fd]>, <[pstat]>)
-	struct _reent *<[ptr]>;
-	int <[fd]>;
-	struct stat *<[pstat]>;
 
 DESCRIPTION
 	This is a reentrant version of <<fstat>>.  It
@@ -60,7 +53,7 @@ _fstat_r (ptr, fd, pstat)
 
   errno = 0;
   if ((ret = _fstat (fd, pstat)) == -1 && errno != 0)
-    ptr->_errno = errno;
+    _REENT_ERRNO(ptr) = errno;
   return ret;
 }
 

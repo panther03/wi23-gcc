@@ -1,4 +1,4 @@
-#   Copyright 1998-2013 Free Software Foundation, Inc.
+#   Copyright 1998-2023 Free Software Foundation, Inc.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -17,24 +17,18 @@
 
 load_lib "trace-support.exp"
 
-
-gdb_exit
-gdb_start
-
 standard_testfile actions.c
+require gdb_trace_common_supports_arch
 if { [gdb_compile "$srcdir/$subdir/$srcfile" $binfile \
-	  executable {debug nowarnings}] != "" } {
-    untested report.exp
+	  executable {debug nowarnings nopie}] != "" } {
+    untested "failed to compile"
     return -1
 }
-gdb_load $binfile
-gdb_test "tstop"       ".*" ""
-gdb_test "tfind none"  ".*" ""
+clean_restart $binfile
 runto_main
-gdb_reinitialize_dir $srcdir/$subdir
 
-if { ![gdb_target_supports_trace] } then {
-    unsupported "Current target does not support trace"
+if {![gdb_target_supports_trace]} {
+    unsupported "current target does not support trace"
     return 1
 
 }
@@ -64,7 +58,7 @@ set arg6 6
 
 set gdb_recursion_test_baseline [gdb_find_recursion_test_baseline $srcfile]
 if { $gdb_recursion_test_baseline == -1 } {
-    fail "Could not find gdb_recursion_test function"
+    fail "could not find gdb_recursion_test function"
     return
 }
 
@@ -97,19 +91,19 @@ gdb_test_multiple "list $gdb_recursion_test_baseline, +12" "" {
     }
     -re ".*$gdb_prompt $" {
 	if { ($testline1 == 0) || ($testline2 == 0) || ($testline3 == 0) || ($testline4 == 0) || ($testline5 == 0) || ($testline6 == 0) } {
-	    untested report.exp
+	    untested "unexpected testline values"
 	    set return_me 1
 all tests in this module will fail."
 	}
     }
     default {
-	    untested report.exp
+	    untested "couldn't match pattern"
 	    set return_me 1
 all tests in this module will fail."
     } 
 }
 
-if { $return_me == 1 } then {
+if {$return_me == 1} {
     return -1
 }
 
@@ -150,20 +144,6 @@ gdb_trace_setactions "9.x: setup TP to collect locals" \
 	"$tdp4" \
 	"collect \$locs" "^$"
 
-if [is_amd64_regs_target] {
-    set fpreg "rbp"
-    set spreg "rsp"
-    set pcreg "rip"
-} elseif [is_x86_like_target] {
-    set fpreg "ebp"
-    set spreg "esp"
-    set pcreg "eip"
-} else {
-    set fpreg "fp"
-    set spreg "sp"
-    set pcreg "pc"
-}
-
 gdb_trace_setactions "9.x: setup TP to collect stack memory" \
 	"$tdp5" \
 	"collect \$$fpreg, \*\(void \*\*\) \$$spreg @ 64" "^$"
@@ -174,7 +154,7 @@ gdb_trace_setactions "9.x: setup TP to collect expressions" \
 
 gdb_test "tstart" ".*" ""
 
-gdb_test "break end" ".*" ""
+gdb_breakpoint "end" qualified
 gdb_test "continue" \
     "Continuing.*Breakpoint $decimal, end.*" \
     "run trace experiment"
@@ -197,7 +177,7 @@ proc use_collected_data { data_source } {
 	global tdp1 tdp2 tdp3 tdp4 tdp5 tdp6
 	global testline1 testline2 testline3 testline4 testline5 testline6
 	global pcreg fpreg spreg
-	global srcfile srcdir subdir
+	global srcfile srcdir subdir binfile
 	global arg1 arg3
 	global decimal hex gdb_prompt
 	#
@@ -397,6 +377,11 @@ proc use_collected_data { data_source } {
 		}
 	    }
 	}
+
+	# There is always a thread of an inferior, either a live one or
+	# a faked one.
+	gdb_test "info threads" "\\* ${decimal}    (process|Thread) \[0-9\.\]+\[ \t\].*"
+	gdb_test "info inferiors" "\\* 1    process ${decimal} \[ \t\]+\[^\r\n\]*\[ \t\]+${binfile}.*"
     }
 }
 

@@ -1,6 +1,5 @@
 /* ldlex.h -
-   Copyright 1991, 1992, 1993, 1994, 1995, 1997, 2000, 2003, 2005, 2006,
-   2007, 2012 Free Software Foundation, Inc.
+   Copyright (C) 1991-2023 Free Software Foundation, Inc.
 
    This file is part of the GNU Binutils.
 
@@ -34,7 +33,9 @@ enum option_values
   OPTION_DEFSYM,
   OPTION_DEMANGLE,
   OPTION_DYNAMIC_LINKER,
+  OPTION_NO_DYNAMIC_LINKER,
   OPTION_SYSROOT,
+  OPTION_OUT_IMPLIB,
   OPTION_EB,
   OPTION_EL,
   OPTION_EMBEDDED_RELOCS,
@@ -53,6 +54,7 @@ enum option_values
   OPTION_OFORMAT,
   OPTION_RELAX,
   OPTION_NO_RELAX,
+  OPTION_NO_SYMBOLIC,
   OPTION_RETAIN_SYMBOLS_FILE,
   OPTION_RPATH,
   OPTION_RPATH_LINK,
@@ -80,10 +82,13 @@ enum option_values
   OPTION_DYNAMIC_LIST_CPP_NEW,
   OPTION_DYNAMIC_LIST_CPP_TYPEINFO,
   OPTION_DYNAMIC_LIST_DATA,
+  OPTION_EXPORT_DYNAMIC_SYMBOL,
+  OPTION_EXPORT_DYNAMIC_SYMBOL_LIST,
   OPTION_WARN_COMMON,
   OPTION_WARN_CONSTRUCTORS,
   OPTION_WARN_FATAL,
   OPTION_NO_WARN_FATAL,
+  OPTION_NO_WARNINGS,
   OPTION_WARN_MULTIPLE_GP,
   OPTION_WARN_ONCE,
   OPTION_WARN_SECTION_ALIGN,
@@ -100,6 +105,7 @@ enum option_values
   OPTION_NO_GC_SECTIONS,
   OPTION_PRINT_GC_SECTIONS,
   OPTION_NO_PRINT_GC_SECTIONS,
+  OPTION_GC_KEEP_EXPORTED,
   OPTION_HASH_SIZE,
   OPTION_CHECK_SECTIONS,
   OPTION_NO_CHECK_SECTIONS,
@@ -112,6 +118,10 @@ enum option_values
   OPTION_ALLOW_SHLIB_UNDEFINED,
   OPTION_NO_ALLOW_SHLIB_UNDEFINED,
   OPTION_ALLOW_MULTIPLE_DEFINITION,
+#if SUPPORT_ERROR_HANDLING_SCRIPT
+  OPTION_ERROR_HANDLING_SCRIPT,
+#endif
+  OPTION_UNDEFINED_VERSION,
   OPTION_NO_UNDEFINED_VERSION,
   OPTION_DEFAULT_SYMVER,
   OPTION_DEFAULT_IMPORTED_SYMVER,
@@ -125,23 +135,46 @@ enum option_values
   OPTION_ACCEPT_UNKNOWN_INPUT_ARCH,
   OPTION_NO_ACCEPT_UNKNOWN_INPUT_ARCH,
   OPTION_PIE,
+  OPTION_NO_PIE,
   OPTION_UNRESOLVED_SYMBOLS,
   OPTION_WARN_UNRESOLVED_SYMBOLS,
   OPTION_ERROR_UNRESOLVED_SYMBOLS,
-  OPTION_WARN_SHARED_TEXTREL,
+  OPTION_WARN_TEXTREL,
   OPTION_WARN_ALTERNATE_EM,
   OPTION_REDUCE_MEMORY_OVERHEADS,
-#ifdef ENABLE_PLUGINS
+  OPTION_MAX_CACHE_SIZE,
+#if BFD_SUPPORTS_PLUGINS
   OPTION_PLUGIN,
   OPTION_PLUGIN_OPT,
-#endif /* ENABLE_PLUGINS */
+#endif /* BFD_SUPPORTS_PLUGINS */
   OPTION_DEFAULT_SCRIPT,
   OPTION_PRINT_OUTPUT_FORMAT,
+  OPTION_PRINT_SYSROOT,
   OPTION_IGNORE_UNRESOLVED_SYMBOL,
+  OPTION_PUSH_STATE,
+  OPTION_POP_STATE,
+  OPTION_DISABLE_MULTIPLE_DEFS_ABS,
+  OPTION_PRINT_MEMORY_USAGE,
+  OPTION_REQUIRE_DEFINED_SYMBOL,
+  OPTION_ORPHAN_HANDLING,
+  OPTION_FORCE_GROUP_ALLOCATION,
+  OPTION_PRINT_MAP_DISCARDED,
+  OPTION_NO_PRINT_MAP_DISCARDED,
+  OPTION_NON_CONTIGUOUS_REGIONS,
+  OPTION_NON_CONTIGUOUS_REGIONS_WARNINGS,
+  OPTION_DEPENDENCY_FILE,
+  OPTION_CTF_VARIABLES,
+  OPTION_NO_CTF_VARIABLES,
+  OPTION_CTF_SHARE_TYPES,
+  OPTION_WARN_EXECSTACK,
+  OPTION_NO_WARN_EXECSTACK,
+  OPTION_WARN_RWX_SEGMENTS,
+  OPTION_NO_WARN_RWX_SEGMENTS,
 };
 
 /* The initial parser states.  */
-typedef enum input_enum {
+typedef enum input_enum
+{
   input_selected,		/* We've set the initial state.  */
   input_script,
   input_mri_script,
@@ -160,22 +193,19 @@ extern int yylex (void);
 extern void lex_push_file (FILE *, const char *, unsigned int);
 extern void lex_redirect (const char *, const char *, unsigned int);
 extern void ldlex_script (void);
+extern void ldlex_inputlist (void);
 extern void ldlex_mri_script (void);
 extern void ldlex_version_script (void);
 extern void ldlex_version_file (void);
-extern void ldlex_defsym (void);
 extern void ldlex_expression (void);
-extern void ldlex_both (void);
-extern void ldlex_command (void);
+extern void ldlex_wild (void);
 extern void ldlex_popstate (void);
+extern void ldlex_backup (void);
 extern const char* ldlex_filename (void);
 
 /* In lexsup.c.  */
 extern int lex_input (void);
 extern void lex_unput (int);
-#ifndef yywrap
-extern int yywrap (void);
-#endif
 extern void parse_args (unsigned, char **);
 
 #endif

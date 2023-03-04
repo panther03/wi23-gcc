@@ -1,7 +1,5 @@
 /* IBM RS/6000 "XCOFF" back-end for BFD.
-   Copyright 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997, 1998, 2000,
-   2001, 2002, 2004, 2005, 2006, 2007, 2008, 2009
-   Free Software Foundation, Inc.
+   Copyright (C) 1990-2023 Free Software Foundation, Inc.
    Written by Metin G. Ozisik, Mimi Phuong-Thao Vo, and John Gilmore.
    Archive support from Damon A. Permezel.
    Contributed by IBM Corporation and Cygnus Support.
@@ -57,9 +55,7 @@
 
 #undef	SCNHDR
 
-/* ------------------------------------------------------------------------ */
-/*	Support for core file stuff..					    */
-/* ------------------------------------------------------------------------ */
+/* Support for core file stuff.  */
 
 #include <sys/user.h>
 #define __LDINFO_PTRACE32__	/* for __ld_info32 */
@@ -93,8 +89,9 @@ typedef unsigned long ptr_to_uint;
 
 /* Union of 32-bit and 64-bit versions of ld_info.  */
 
-typedef union {
-#ifdef __ld_info32
+typedef union
+{
+#if defined (__ld_info32) || defined (__ld_info64)
   struct __ld_info32 l32;
   struct __ld_info64 l64;
 #else
@@ -105,33 +102,43 @@ typedef union {
 
 /* Union of old and new core dump structures.  */
 
-typedef union {
+typedef union
+{
 #ifdef AIX_CORE_DUMPX_CORE
-  struct core_dumpx new_dump;	/* new AIX 4.3+ core dump */
+  struct core_dumpx new_dump;	/* New AIX 4.3+ core dump.  */
 #else
-  struct core_dump new_dump;		/* for simpler coding */
+  struct core_dump new_dump;	/* For simpler coding.  */
 #endif
-  struct core_dump old;		/* old AIX 4.2- core dump, still used on
-				   4.3+ with appropriate SMIT config */
+#ifndef BFD64			/* Use old only if gdb is 32-bit.  */
+  struct core_dump old;		/* Old AIX 4.2- core dump, still used on
+				   4.3+ with appropriate SMIT config.  */
+#endif
 } CoreHdr;
 
 /* Union of old and new vm_info structures.  */
 
 #ifdef CORE_VERSION_1
-typedef union {
+typedef union
+{
 #ifdef AIX_CORE_DUMPX_CORE
   struct vm_infox new_dump;
 #else
   struct vm_info new_dump;
 #endif
+#ifndef BFD64
   struct vm_info old;
+#endif
 } VmInfo;
 #endif
 
 /* Return whether CoreHdr C is in new or old format.  */
 
 #ifdef AIX_CORE_DUMPX_CORE
-# define CORE_NEW(c)	(!(c).old.c_entries)
+# ifndef BFD64
+#  define CORE_NEW(c)	(!(c).old.c_entries)
+# else
+#  define CORE_NEW(c)	1
+# endif
 #else
 # define CORE_NEW(c)	0
 #endif
@@ -143,7 +150,7 @@ typedef union {
    but that may not be the only such format version number.  */
 
 #ifdef AIX_5_CORE
-# define CORE_DUMPXX_VERSION  	267312562
+# define CORE_DUMPXX_VERSION	267312562
 # define CNEW_IS_CORE_DUMPXX(c) ((c).new_dump.c_version == CORE_DUMPXX_VERSION)
 #else
 # define CNEW_IS_CORE_DUMPXX(c) 0
@@ -260,40 +267,45 @@ typedef union {
 
 /* Size of the leading portion that old and new core dump structures have in
    common.  */
-#define CORE_COMMONSZ	((int) &((struct core_dump *) 0)->c_entries \
-			 + sizeof (((struct core_dump *) 0)->c_entries))
-
+#ifdef AIX_CORE_DUMPX_CORE
+#define CORE_COMMONSZ  ((long) &((struct core_dumpx *) 0)->c_entries \
+			+ sizeof (((struct core_dumpx *) 0)->c_entries))
+#else
+#define CORE_COMMONSZ  ((int) &((struct core_dump *) 0)->c_entries \
+			+ sizeof (((struct core_dump *) 0)->c_entries))
+#endif
 /* Define prototypes for certain functions, to avoid a compiler warning
    saying that they are missing.  */
 
-const bfd_target * rs6000coff_core_p (bfd *abfd);
-bfd_boolean rs6000coff_core_file_matches_executable_p (bfd *core_bfd,
-                                                       bfd *exec_bfd);
+bfd_cleanup rs6000coff_core_p (bfd *abfd);
+bool rs6000coff_core_file_matches_executable_p (bfd *core_bfd, bfd *exec_bfd);
 char * rs6000coff_core_file_failing_command (bfd *abfd);
 int rs6000coff_core_file_failing_signal (bfd *abfd);
 
 /* Try to read into CORE the header from the core file associated with ABFD.
    Return success.  */
 
-static bfd_boolean
+static bool
 read_hdr (bfd *abfd, CoreHdr *core)
 {
   bfd_size_type size;
 
   if (bfd_seek (abfd, (file_ptr) 0, SEEK_SET) != 0)
-    return FALSE;
+    return false;
 
   /* Read the leading portion that old and new core dump structures have in
      common.  */
   size = CORE_COMMONSZ;
   if (bfd_bread (core, size, abfd) != size)
-    return FALSE;
+    return false;
 
   /* Read the trailing portion of the structure.  */
   if (CORE_NEW (*core))
     size = sizeof (core->new_dump);
+#ifndef BFD64
   else
     size = sizeof (core->old);
+#endif
   size -= CORE_COMMONSZ;
   return bfd_bread ((char *) core + CORE_COMMONSZ, size, abfd) == size;
 }
@@ -319,7 +331,7 @@ make_bfd_asection (bfd *abfd, const char *name, flagword flags,
 /* Decide if a given bfd represents a `core' file or not. There really is no
    magic number or anything like, in rs6000coff.  */
 
-const bfd_target *
+bfd_cleanup
 rs6000coff_core_p (bfd *abfd)
 {
   CoreHdr core;
@@ -358,6 +370,7 @@ rs6000coff_core_p (bfd *abfd)
       c_stackend = CNEW_STACKORG (core.new_dump) + c_size;
       c_lsize = CNEW_LSIZE (core.new_dump);
       c_loader = CNEW_LOADER (core.new_dump);
+#ifndef BFD64
       proc64 = CNEW_PROC64 (core.new_dump);
     }
   else
@@ -368,6 +381,7 @@ rs6000coff_core_p (bfd *abfd)
       c_stackend = COLD_STACKEND;
       c_lsize = 0x7ffffff;
       c_loader = (file_ptr) (ptr_to_uint) COLD_LOADER (core.old);
+#endif
       proc64 = 0;
     }
 
@@ -381,11 +395,13 @@ rs6000coff_core_p (bfd *abfd)
       c_regsize = sizeof (CNEW_MSTSAVE (core.new_dump));
       c_regptr = &CNEW_MSTSAVE (core.new_dump);
     }
+#ifndef BFD64
   else
     {
       c_regsize = sizeof (COLD_MSTSAVE (core.old));
       c_regptr = &COLD_MSTSAVE (core.old);
     }
+#endif
   c_regoff = (char *) c_regptr - (char *) &core;
 
   if (bfd_stat (abfd, &statbuf) < 0)
@@ -435,9 +451,15 @@ rs6000coff_core_p (bfd *abfd)
     }
 
   /* Sanity check on the c_tab field.  */
-  if (!CORE_NEW (core) && (c_loader < (file_ptr) sizeof core.old ||
-			   c_loader >= statbuf.st_size ||
-			   c_loader >= c_stack))
+  if (!CORE_NEW (core)
+      && (
+#ifndef BFD64
+	  c_loader < (file_ptr) sizeof core.old
+#else
+	  c_loader < (file_ptr) sizeof core.new_dump
+#endif
+	  || c_loader >= statbuf.st_size
+	  || c_loader >= c_stack))
     {
       bfd_set_error (bfd_error_wrong_format);
       return NULL;
@@ -445,11 +467,14 @@ rs6000coff_core_p (bfd *abfd)
 
   /* Issue warning if the core file was truncated during writing.  */
   if (c_flag & CORE_TRUNC)
-    (*_bfd_error_handler) (_("%s: warning core file truncated"),
-			   bfd_get_filename (abfd));
+    _bfd_error_handler (_("%pB: warning core file truncated"), abfd);
 
   /* Allocate core file header.  */
+#ifndef BFD64
   size = CORE_NEW (core) ? sizeof (core.new_dump) : sizeof (core.old);
+#else
+  size =  sizeof (core.new_dump);
+#endif
   tmpptr = (char *) bfd_zalloc (abfd, (bfd_size_type) size);
   if (!tmpptr)
     return NULL;
@@ -530,6 +555,7 @@ rs6000coff_core_p (bfd *abfd)
     file_ptr ldi_core;
     uint ldi_next;
     bfd_vma ldi_dataorg;
+    bfd_vma core_dataorg;
 
     /* Fields from new and old core structures.  */
     bfd_size_type c_datasize, c_vmregions;
@@ -542,6 +568,7 @@ rs6000coff_core_p (bfd *abfd)
 	c_vmregions = core.new_dump.c_vmregions;
 	c_vmm = (file_ptr) core.new_dump.c_vmm;
       }
+#ifndef BFD64
     else
       {
 	c_datasize = core.old.c_datasize;
@@ -549,23 +576,32 @@ rs6000coff_core_p (bfd *abfd)
 	c_vmregions = core.old.c_vmregions;
 	c_vmm = (file_ptr) (ptr_to_uint) core.old.c_vmm;
       }
+#endif
 
     /* .data section from executable.  */
     if (c_datasize)
       {
+	/* If Large Memory Model is used, then the .data segment should start from
+	   BDATAORG which has been defined in the system header files. */
+
+	if (c_flag & CORE_BIGDATA)
+	  core_dataorg = BDATAORG;
+	else
+	  core_dataorg = CDATA_ADDR (c_datasize);
+
 	if (!make_bfd_asection (abfd, ".data",
 				SEC_ALLOC | SEC_LOAD | SEC_HAS_CONTENTS,
 				c_datasize,
-				(bfd_vma) CDATA_ADDR (c_datasize),
+				(bfd_vma) core_dataorg,
 				c_data))
 	  goto fail;
       }
 
     /* .data sections from loaded objects.  */
     if (proc64)
-      size = (int) ((LdInfo *) 0)->l64.ldinfo_filename;
+      size = (unsigned long) ((LdInfo *) 0)->l64.ldinfo_filename;
     else
-      size = (int) ((LdInfo *) 0)->l32.ldinfo_filename;
+      size = (unsigned long) ((LdInfo *) 0)->l32.ldinfo_filename;
 
     while (1)
       {
@@ -585,7 +621,7 @@ rs6000coff_core_p (bfd *abfd)
 	  {
 	    ldi_core = ldinfo.l32.ldinfo_core;
 	    ldi_datasize = ldinfo.l32.ldinfo_datasize;
-	    ldi_dataorg = (bfd_vma) (long) ldinfo.l32.ldinfo_dataorg;
+	    ldi_dataorg = (bfd_vma) (ptr_to_uint) ldinfo.l32.ldinfo_dataorg;
 	    ldi_next = ldinfo.l32.ldinfo_next;
 	  }
 
@@ -615,7 +651,11 @@ rs6000coff_core_p (bfd *abfd)
 	    file_ptr vminfo_offset;
 	    bfd_vma vminfo_addr;
 
+#ifndef BFD64
 	    size = CORE_NEW (core) ? sizeof (vminfo.new_dump) : sizeof (vminfo.old);
+#else
+	    size = sizeof (vminfo.new_dump);
+#endif
 	    if (bfd_bread (&vminfo, size, abfd) != size)
 	      goto fail;
 
@@ -625,12 +665,14 @@ rs6000coff_core_p (bfd *abfd)
 		vminfo_size = vminfo.new_dump.vminfo_size;
 		vminfo_offset = vminfo.new_dump.vminfo_offset;
 	      }
+#ifndef BFD64
 	    else
 	      {
-		vminfo_addr = (bfd_vma) (long) vminfo.old.vminfo_addr;
+		vminfo_addr = (bfd_vma) (ptr_to_uint) vminfo.old.vminfo_addr;
 		vminfo_size = vminfo.old.vminfo_size;
 		vminfo_offset = vminfo.old.vminfo_offset;
 	      }
+#endif
 
 	    if (vminfo_offset)
 	      if (!make_bfd_asection (abfd, ".vmdata",
@@ -643,7 +685,7 @@ rs6000coff_core_p (bfd *abfd)
   }
 #endif
 
-  return abfd->xvec;		/* This is garbage for now.  */
+  return _bfd_no_cleanup;
 
  fail:
   bfd_release (abfd, abfd->tdata.any);
@@ -654,7 +696,7 @@ rs6000coff_core_p (bfd *abfd)
 
 /* Return `TRUE' if given core is from the given executable.  */
 
-bfd_boolean
+bool
 rs6000coff_core_file_matches_executable_p (bfd *core_bfd, bfd *exec_bfd)
 {
   CoreHdr core;
@@ -662,16 +704,18 @@ rs6000coff_core_file_matches_executable_p (bfd *core_bfd, bfd *exec_bfd)
   char *path, *s;
   size_t alloc;
   const char *str1, *str2;
-  bfd_boolean ret;
+  bool ret;
   file_ptr c_loader;
 
   if (!read_hdr (core_bfd, &core))
-    return FALSE;
+    return false;
 
   if (CORE_NEW (core))
     c_loader = CNEW_LOADER (core.new_dump);
+#ifndef BFD64
   else
     c_loader = (file_ptr) (ptr_to_uint) COLD_LOADER (core.old);
+#endif
 
   if (CORE_NEW (core) && CNEW_PROC64 (core.new_dump))
     size = (int) ((LdInfo *) 0)->l64.ldinfo_filename;
@@ -679,12 +723,12 @@ rs6000coff_core_file_matches_executable_p (bfd *core_bfd, bfd *exec_bfd)
     size = (int) ((LdInfo *) 0)->l32.ldinfo_filename;
 
   if (bfd_seek (core_bfd, c_loader + size, SEEK_SET) != 0)
-    return FALSE;
+    return false;
 
   alloc = 100;
   path = bfd_malloc ((bfd_size_type) alloc);
   if (path == NULL)
-    return FALSE;
+    return false;
   s = path;
 
   while (1)
@@ -692,7 +736,7 @@ rs6000coff_core_file_matches_executable_p (bfd *core_bfd, bfd *exec_bfd)
       if (bfd_bread (s, (bfd_size_type) 1, core_bfd) != 1)
 	{
 	  free (path);
-	  return FALSE;
+	  return false;
 	}
       if (*s == '\0')
 	break;
@@ -706,7 +750,7 @@ rs6000coff_core_file_matches_executable_p (bfd *core_bfd, bfd *exec_bfd)
 	  if (n == NULL)
 	    {
 	      free (path);
-	      return FALSE;
+	      return false;
 	    }
 	  s = n + (path - s);
 	  path = n;
@@ -714,16 +758,16 @@ rs6000coff_core_file_matches_executable_p (bfd *core_bfd, bfd *exec_bfd)
     }
 
   str1 = strrchr (path, '/');
-  str2 = strrchr (exec_bfd->filename, '/');
+  str2 = strrchr (bfd_get_filename (exec_bfd), '/');
 
   /* step over character '/' */
   str1 = str1 != NULL ? str1 + 1 : path;
-  str2 = str2 != NULL ? str2 + 1 : exec_bfd->filename;
+  str2 = str2 != NULL ? str2 + 1 : bfd_get_filename (exec_bfd);
 
   if (strcmp (str1, str2) == 0)
-    ret = TRUE;
+    ret = true;
   else
-    ret = FALSE;
+    ret = false;
 
   free (path);
 
@@ -734,8 +778,12 @@ char *
 rs6000coff_core_file_failing_command (bfd *abfd)
 {
   CoreHdr *core = core_hdr (abfd);
+#ifndef BFD64
   char *com = CORE_NEW (*core) ?
     CNEW_COMM (core->new_dump) : COLD_COMM (core->old);
+#else
+  char *com = CNEW_COMM (core->new_dump);
+#endif
 
   if (*com)
     return com;
@@ -747,7 +795,11 @@ int
 rs6000coff_core_file_failing_signal (bfd *abfd)
 {
   CoreHdr *core = core_hdr (abfd);
+#ifndef BFD64
   return CORE_NEW (*core) ? core->new_dump.c_signo : core->old.c_signo;
+#else
+  return  core->new_dump.c_signo;
+#endif
 }
 
 #endif /* AIX_CORE */

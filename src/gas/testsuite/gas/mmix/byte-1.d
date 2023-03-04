@@ -1,5 +1,5 @@
 #readelf: -Ssrx1
-There are 7 section headers, starting at offset 0x88:
+There are 7 section headers, starting at offset .*:
 
 Section Headers:
  +\[Nr\] +Name +Type +Address +Offset
@@ -12,12 +12,12 @@ Section Headers:
  +0000000000000000 +0000000000000000 +WA +0 +0 +1
  +\[ 3\] \.bss +NOBITS +0000000000000000 +00000056
  +0000000000000000 +0000000000000000 +WA +0 +0 +1
- +\[ 4\] \.shstrtab +STRTAB +0000000000000000 +00000056
- +000000000000002c +0000000000000000 +0 +0 +1
- +\[ 5\] \.symtab +SYMTAB +0000000000000000 +00000248
- +00000000000000c0 +0000000000000018 +6 +7 +8
- +\[ 6\] \.strtab +STRTAB +0000000000000000 +00000308
+ +\[ 4\] \.symtab +SYMTAB +0000000000000000 .*
+ +00000000000000c0 +0000000000000018 +5 +7 +8
+ +\[ 5\] \.strtab +STRTAB +0000000000000000 .*
  +0000000000000018 +0000000000000000 +0 +0 +1
+ +\[ 6\] \.shstrtab +STRTAB +0000000000000000 +[0-9a-f]+
+ +000000000000002c +0000000000000000 +0 +0 +1
 Key to Flags:
 #...
 
@@ -26,9 +26,9 @@ There are no relocations in this file\.
 Symbol table '\.symtab' contains 8 entries:
  +Num: +Value +Size +Type +Bind +Vis +Ndx +Name
  +0: 0+ +0 +NOTYPE +LOCAL +DEFAULT +UND 
- +1: 0+ +0 +SECTION +LOCAL +DEFAULT +1 
- +2: 0+ +0 +SECTION +LOCAL +DEFAULT +2 
- +3: 0+ +0 +SECTION +LOCAL +DEFAULT +3 
+ +1: 0+ +0 +SECTION +LOCAL +DEFAULT +1.*
+ +2: 0+ +0 +SECTION +LOCAL +DEFAULT +2.*
+ +3: 0+ +0 +SECTION +LOCAL +DEFAULT +3.*
  +4: 0+2a +0 +NOTYPE +LOCAL +DEFAULT +ABS number
  +5: 0+4 +0 +NOTYPE +LOCAL +DEFAULT +1 label
  +6: 0+c +0 +NOTYPE +LOCAL +DEFAULT +1 lab2

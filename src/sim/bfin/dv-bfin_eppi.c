@@ -1,7 +1,7 @@
 /* Blackfin Enhanced Parallel Port Interface (EPPI) model
    For "new style" PPIs on BF54x/etc... parts.
 
-   Copyright (C) 2010-2013 Free Software Foundation, Inc.
+   Copyright (C) 2010-2023 Free Software Foundation, Inc.
    Contributed by Analog Devices, Inc.
 
    This file is part of simulators.
@@ -19,7 +19,8 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "config.h"
+/* This must come before any other includes.  */
+#include "defs.h"
 
 #include "sim-main.h"
 #include "devices.h"
@@ -90,13 +91,17 @@ bfin_eppi_io_write_buffer (struct hw *me, const void *source,
   bu32 *value32p;
   void *valuep;
 
+  /* Invalid access mode is higher priority than missing register.  */
+  if (!dv_bfin_mmr_require_16_32 (me, addr, nr_bytes, true))
+    return 0;
+
   if (nr_bytes == 4)
     value = dv_load_4 (source);
   else
     value = dv_load_2 (source);
 
   mmr_off = addr - eppi->base;
-  valuep = (void *)((unsigned long)eppi + mmr_base() + mmr_off);
+  valuep = (void *)((uintptr_t)eppi + mmr_base() + mmr_off);
   value16p = valuep;
   value32p = valuep;
 
@@ -105,7 +110,8 @@ bfin_eppi_io_write_buffer (struct hw *me, const void *source,
   switch (mmr_off)
     {
     case mmr_offset(status):
-      dv_bfin_mmr_require_16 (me, addr, nr_bytes, true);
+      if (!dv_bfin_mmr_require_16 (me, addr, nr_bytes, true))
+	return 0;
       dv_w1c_2 (value16p, value, 0x1ff);
       break;
     case mmr_offset(hcount):
@@ -115,7 +121,8 @@ bfin_eppi_io_write_buffer (struct hw *me, const void *source,
     case mmr_offset(frame):
     case mmr_offset(line):
     case mmr_offset(clkdiv):
-      dv_bfin_mmr_require_16 (me, addr, nr_bytes, true);
+      if (!dv_bfin_mmr_require_16 (me, addr, nr_bytes, true))
+	return 0;
       *value16p = value;
       break;
     case mmr_offset(control):
@@ -128,12 +135,13 @@ bfin_eppi_io_write_buffer (struct hw *me, const void *source,
     case mmr_offset(fs2p_lavf):
     case mmr_offset(clip):
     case mmr_offset(err):
-      dv_bfin_mmr_require_32 (me, addr, nr_bytes, true);
+      if (!dv_bfin_mmr_require_32 (me, addr, nr_bytes, true))
+	return 0;
       *value32p = value;
       break;
     default:
       dv_bfin_mmr_invalid (me, addr, nr_bytes, true);
-      break;
+      return 0;
     }
 
   return nr_bytes;
@@ -149,8 +157,12 @@ bfin_eppi_io_read_buffer (struct hw *me, void *dest,
   bu32 *value32p;
   void *valuep;
 
+  /* Invalid access mode is higher priority than missing register.  */
+  if (!dv_bfin_mmr_require_16_32 (me, addr, nr_bytes, true))
+    return 0;
+
   mmr_off = addr - eppi->base;
-  valuep = (void *)((unsigned long)eppi + mmr_base() + mmr_off);
+  valuep = (void *)((uintptr_t)eppi + mmr_base() + mmr_off);
   value16p = valuep;
   value32p = valuep;
 
@@ -166,7 +178,8 @@ bfin_eppi_io_read_buffer (struct hw *me, void *dest,
     case mmr_offset(frame):
     case mmr_offset(line):
     case mmr_offset(clkdiv):
-      dv_bfin_mmr_require_16 (me, addr, nr_bytes, false);
+      if (!dv_bfin_mmr_require_16 (me, addr, nr_bytes, false))
+	return 0;
       dv_store_2 (dest, *value16p);
       break;
     case mmr_offset(control):
@@ -176,12 +189,13 @@ bfin_eppi_io_read_buffer (struct hw *me, void *dest,
     case mmr_offset(fs2p_lavf):
     case mmr_offset(clip):
     case mmr_offset(err):
-      dv_bfin_mmr_require_32 (me, addr, nr_bytes, false);
+      if (!dv_bfin_mmr_require_32 (me, addr, nr_bytes, false))
+	return 0;
       dv_store_4 (dest, *value32p);
       break;
     default:
       dv_bfin_mmr_invalid (me, addr, nr_bytes, false);
-      break;
+      return 0;
     }
 
   return nr_bytes;

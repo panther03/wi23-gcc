@@ -1,4 +1,4 @@
-# Copyright 2011-2013 Free Software Foundation, Inc.
+# Copyright 2011-2023 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -16,36 +16,35 @@
 standard_testfile .c
 
 # This test is Linux-only.
-if ![istarget *-*-linux*] then {
+if {![istarget *-*-linux*]} {
     unsupported "info-os.exp"
     return -1
 }
 
 # Support for XML-output is needed to run this test.
-if [gdb_skip_xml_test] then {
-    unsupported "info-os.exp"
-    return -1
-}
+require allow_xml_test
 
 # Compile test program.
-if { [prepare_for_testing ${testfile}.exp $testfile $srcfile {debug additional_flags=-lpthread}] } {
-    fail "cannot compile test program"
+if { [prepare_for_testing "failed to prepare" $testfile $srcfile {debug pthreads}] } {
     return -1
 }
 
-if ![runto_main] then {
-    fail "cannot run to main"
+if {![runto_main]} {
     return -1
 }
 
 # Get PID of test program.
-set inferior_pid -1
+set inferior_pid ""
 set test "get inferior process ID"
-gdb_test_multiple "call getpid()" $test {
+gdb_test_multiple "call ((int (*) (void)) getpid) ()" $test {
     -re ".* = ($decimal).*$gdb_prompt $" {
 	set inferior_pid $expect_out(1,string)
 	pass $test
     }
+}
+if {$inferior_pid == ""} {
+    untested "failed to get pid"
+    return
 }
 
 gdb_breakpoint ${srcfile}:[gdb_get_line_number "Set breakpoint here"]
@@ -121,17 +120,16 @@ proc expect_multiline { command expect test } {
     global gdb_prompt
 
     # Do not duplicate FAILs from gdb_test_multiple.
-    set pass 0
-    set fail 0
+    set found 0
+    set ok 0
     gdb_test_multiple $command $test {
 	-re "^$expect *\r\n" {
-	    pass $test
-	    set pass 1
+	    set found 1
 	    exp_continue
 	}
 	-re "^$gdb_prompt $" {
-	    if !$pass {
-		set fail 1
+	    if $found {
+		set ok 1
 	    }
 	    # Exit the loop.
 	}
@@ -140,9 +138,7 @@ proc expect_multiline { command expect test } {
 	    exp_continue
 	}
     }
-    if $fail {
-	fail $test
-    }
+    gdb_assert { $ok } $test
 }
 
 # Test output of the 'info os' commands against the expected results.
@@ -171,6 +167,9 @@ expect_multiline "info os semaphores" "$semkey +$semid +666 +1 .*" "get semaphor
 #                               key   msqid   perm  num used bytes  num messages  last msgsnd() command  last msgrcv() command  user  group  creator user  creator group  last msgsnd() time  last msgrcv() time  last msgctl() time
 expect_multiline "info os msg" "$msgkey +$msqid +666 .*" "get message queues"
 
+gdb_test "info os unknown_entry" [multi_line \
+	"warning: Empty data returned by target.  Wrong osdata type\\\?" \
+	"Can not fetch data now."]
 
 # The SysV IPC primitives linger on after the creating process is killed
 # unless they are destroyed explicitly, so allow the test program to tidy

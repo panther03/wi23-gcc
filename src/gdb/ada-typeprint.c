@@ -1,5 +1,5 @@
 /* Support for printing Ada types for GDB, the GNU debugger.
-   Copyright (C) 1986-2013 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,51 +17,24 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 #include "defs.h"
-#include "gdb_obstack.h"
 #include "bfd.h"		/* Binary File Description */
-#include "symtab.h"
 #include "gdbtypes.h"
-#include "expression.h"
 #include "value.h"
-#include "gdbcore.h"
-#include "target.h"
-#include "command.h"
-#include "gdbcmd.h"
-#include "language.h"
-#include "demangle.h"
 #include "c-lang.h"
+#include "cli/cli-style.h"
 #include "typeprint.h"
+#include "target-float.h"
 #include "ada-lang.h"
-
 #include <ctype.h>
-#include "gdb_string.h"
-#include <errno.h>
 
 static int print_selected_record_field_types (struct type *, struct type *,
 					      int, int,
 					      struct ui_file *, int, int,
 					      const struct type_print_options *);
-   
+
 static int print_record_field_types (struct type *, struct type *,
 				     struct ui_file *, int, int,
 				     const struct type_print_options *);
-
-static void print_array_type (struct type *, struct ui_file *, int, int,
-			      const struct type_print_options *);
-
-static int print_choices (struct type *, int, struct ui_file *,
-			  struct type *);
-
-static void print_range (struct type *, struct ui_file *);
-
-static void print_range_bound (struct type *, char *, int *,
-			       struct ui_file *);
-
-static void
-print_dynamic_range_bound (struct type *, const char *, int,
-			   const char *, struct ui_file *);
-
-static void print_range_type (struct type *, struct ui_file *);
 
 
 
@@ -84,7 +57,7 @@ decoded_type_name (struct type *type)
       if (name_buffer == NULL || name_buffer_len <= strlen (raw_name))
 	{
 	  name_buffer_len = 16 + 2 * strlen (raw_name);
-	  name_buffer = xrealloc (name_buffer, name_buffer_len);
+	  name_buffer = (char *) xrealloc (name_buffer, name_buffer_len);
 	}
       strcpy (name_buffer, raw_name);
 
@@ -120,31 +93,95 @@ decoded_type_name (struct type *type)
     }
 }
 
-/* Print TYPE on STREAM, preferably as a range.  */
+/* Return nonzero if TYPE is a subrange type, and its bounds
+   are identical to the bounds of its subtype.  */
+
+static int
+type_is_full_subrange_of_target_type (struct type *type)
+{
+  struct type *subtype;
+
+  if (type->code () != TYPE_CODE_RANGE)
+    return 0;
+
+  subtype = type->target_type ();
+  if (subtype == NULL)
+    return 0;
+
+  if (is_dynamic_type (type))
+    return 0;
+
+  if (ada_discrete_type_low_bound (type)
+      != ada_discrete_type_low_bound (subtype))
+    return 0;
+
+  if (ada_discrete_type_high_bound (type)
+      != ada_discrete_type_high_bound (subtype))
+    return 0;
+
+  return 1;
+}
+
+/* Print TYPE on STREAM, preferably as a range if BOUNDS_PREFERED_P
+   is nonzero.  */
 
 static void
-print_range (struct type *type, struct ui_file *stream)
+print_range (struct type *type, struct ui_file *stream,
+	     int bounds_prefered_p)
 {
-  switch (TYPE_CODE (type))
+  if (!bounds_prefered_p)
+    {
+      /* Try stripping all TYPE_CODE_RANGE layers whose bounds
+	 are identical to the bounds of their subtype.  When
+	 the bounds of both types match, it can allow us to
+	 print a range using the name of its base type, which
+	 is easier to read.  For instance, we would print...
+
+	     array (character) of ...
+
+	 ... instead of...
+
+	     array ('["00"]' .. '["ff"]') of ...  */
+      while (type_is_full_subrange_of_target_type (type))
+	type = type->target_type ();
+    }
+
+  switch (type->code ())
     {
     case TYPE_CODE_RANGE:
     case TYPE_CODE_ENUM:
       {
-	struct type *target_type;
-	target_type = TYPE_TARGET_TYPE (type);
-	if (target_type == NULL)
-	  target_type = type;
-	ada_print_scalar (target_type, ada_discrete_type_low_bound (type),
-			  stream);
-	fprintf_filtered (stream, " .. ");
-	ada_print_scalar (target_type, ada_discrete_type_high_bound (type),
-			  stream);
+	LONGEST lo = 0, hi = 0; /* init for gcc -Wall */
+	int got_error = 0;
+
+	try
+	  {
+	    lo = ada_discrete_type_low_bound (type);
+	    hi = ada_discrete_type_high_bound (type);
+	  }
+	catch (const gdb_exception_error &e)
+	  {
+	    /* This can happen when the range is dynamic.  Sometimes,
+	       resolving dynamic property values requires us to have
+	       access to an actual object, which is not available
+	       when the user is using the "ptype" command on a type.
+	       Print the range as an unbounded range.  */
+	    gdb_printf (stream, "<>");
+	    got_error = 1;
+	  }
+
+	if (!got_error)
+	  {
+	    ada_print_scalar (type, lo, stream);
+	    gdb_printf (stream, " .. ");
+	    ada_print_scalar (type, hi, stream);
+	  }
       }
       break;
     default:
-      fprintf_filtered (stream, "%.*s",
-			ada_name_prefix_len (TYPE_NAME (type)),
-			TYPE_NAME (type));
+      gdb_printf (stream, "%.*s",
+		  ada_name_prefix_len (type->name ()),
+		  type->name ());
       break;
     }
 }
@@ -153,7 +190,7 @@ print_range (struct type *type, struct ui_file *stream)
    set *N past the bound and its delimiter, if any.  */
 
 static void
-print_range_bound (struct type *type, char *bounds, int *n,
+print_range_bound (struct type *type, const char *bounds, int *n,
 		   struct ui_file *stream)
 {
   LONGEST B;
@@ -161,17 +198,17 @@ print_range_bound (struct type *type, char *bounds, int *n,
   if (ada_scan_number (bounds, *n, &B, n))
     {
       /* STABS decodes all range types which bounds are 0 .. -1 as
-         unsigned integers (ie. the type code is TYPE_CODE_INT, not
-         TYPE_CODE_RANGE).  Unfortunately, ada_print_scalar() relies
-         on the unsigned flag to determine whether the bound should
-         be printed as a signed or an unsigned value.  This causes
-         the upper bound of the 0 .. -1 range types to be printed as
-         a very large unsigned number instead of -1.
-         To workaround this stabs deficiency, we replace the TYPE by NULL
-         to indicate default output when we detect that the bound is negative,
-         and the type is a TYPE_CODE_INT.  The bound is negative when
-         'm' is the last character of the number scanned in BOUNDS.  */
-      if (bounds[*n - 1] == 'm' && TYPE_CODE (type) == TYPE_CODE_INT)
+	 unsigned integers (ie. the type code is TYPE_CODE_INT, not
+	 TYPE_CODE_RANGE).  Unfortunately, ada_print_scalar() relies
+	 on the unsigned flag to determine whether the bound should
+	 be printed as a signed or an unsigned value.  This causes
+	 the upper bound of the 0 .. -1 range types to be printed as
+	 a very large unsigned number instead of -1.
+	 To workaround this stabs deficiency, we replace the TYPE by NULL
+	 to indicate default output when we detect that the bound is negative,
+	 and the type is a TYPE_CODE_INT.  The bound is negative when
+	 'm' is the last character of the number scanned in BOUNDS.  */
+      if (bounds[*n - 1] == 'm' && type->code () == TYPE_CODE_INT)
 	type = NULL;
       ada_print_scalar (type, B, stream);
       if (bounds[*n] == '_')
@@ -180,8 +217,8 @@ print_range_bound (struct type *type, char *bounds, int *n,
   else
     {
       int bound_len;
-      char *bound = bounds + *n;
-      char *pend;
+      const char *bound = bounds + *n;
+      const char *pend;
 
       pend = strstr (bound, "__");
       if (pend == NULL)
@@ -191,7 +228,7 @@ print_range_bound (struct type *type, char *bounds, int *n,
 	  bound_len = pend - bound;
 	  *n += bound_len + 2;
 	}
-      fprintf_filtered (stream, "%.*s", bound_len, bound);
+      gdb_printf (stream, "%.*s", bound_len, bound);
     }
 }
 
@@ -203,48 +240,48 @@ static void
 print_dynamic_range_bound (struct type *type, const char *name, int name_len,
 			   const char *suffix, struct ui_file *stream)
 {
-  static char *name_buf = NULL;
-  static size_t name_buf_len = 0;
   LONGEST B;
-  int OK;
+  std::string name_buf (name, name_len);
+  name_buf += suffix;
 
-  GROW_VECT (name_buf, name_buf_len, name_len + strlen (suffix) + 1);
-  strncpy (name_buf, name, name_len);
-  strcpy (name_buf + name_len, suffix);
-
-  B = get_int_var_value (name_buf, &OK);
-  if (OK)
+  if (get_int_var_value (name_buf.c_str (), B))
     ada_print_scalar (type, B, stream);
   else
-    fprintf_filtered (stream, "?");
+    gdb_printf (stream, "?");
 }
 
 /* Print RAW_TYPE as a range type, using any bound information
-   following the GNAT encoding (if available).  */
+   following the GNAT encoding (if available).
+
+   If BOUNDS_PREFERED_P is nonzero, force the printing of the range
+   using its bounds.  Otherwise, try printing the range without
+   printing the value of the bounds, if possible (this is only
+   considered a hint, not a guaranty).  */
 
 static void
-print_range_type (struct type *raw_type, struct ui_file *stream)
+print_range_type (struct type *raw_type, struct ui_file *stream,
+		  int bounds_prefered_p)
 {
   const char *name;
   struct type *base_type;
   const char *subtype_info;
 
   gdb_assert (raw_type != NULL);
-  name = TYPE_NAME (raw_type);
+  name = raw_type->name ();
   gdb_assert (name != NULL);
 
-  if (TYPE_CODE (raw_type) == TYPE_CODE_RANGE)
-    base_type = TYPE_TARGET_TYPE (raw_type);
+  if (raw_type->code () == TYPE_CODE_RANGE)
+    base_type = raw_type->target_type ();
   else
     base_type = raw_type;
 
   subtype_info = strstr (name, "___XD");
   if (subtype_info == NULL)
-    print_range (raw_type, stream);
+    print_range (raw_type, stream, bounds_prefered_p);
   else
     {
       int prefix_len = subtype_info - name;
-      char *bounds_str;
+      const char *bounds_str;
       int n;
 
       subtype_info += 5;
@@ -260,7 +297,7 @@ print_range_type (struct type *raw_type, struct ui_file *stream)
 	print_dynamic_range_bound (base_type, name, prefix_len, "___L",
 				   stream);
 
-      fprintf_filtered (stream, " .. ");
+      gdb_printf (stream, " .. ");
 
       if (*subtype_info == 'U')
 	print_range_bound (base_type, bounds_str, &n, stream);
@@ -275,48 +312,31 @@ print_range_type (struct type *raw_type, struct ui_file *stream)
 static void
 print_enum_type (struct type *type, struct ui_file *stream)
 {
-  int len = TYPE_NFIELDS (type);
+  int len = type->num_fields ();
   int i;
   LONGEST lastval;
 
-  fprintf_filtered (stream, "(");
-  wrap_here (" ");
+  gdb_printf (stream, "(");
+  stream->wrap_here (1);
 
   lastval = 0;
   for (i = 0; i < len; i++)
     {
       QUIT;
       if (i)
-	fprintf_filtered (stream, ", ");
-      wrap_here ("    ");
-      fputs_filtered (ada_enum_name (TYPE_FIELD_NAME (type, i)), stream);
-      if (lastval != TYPE_FIELD_ENUMVAL (type, i))
+	gdb_printf (stream, ", ");
+      stream->wrap_here (4);
+      fputs_styled (ada_enum_name (type->field (i).name ()),
+		    variable_name_style.style (), stream);
+      if (lastval != type->field (i).loc_enumval ())
 	{
-	  fprintf_filtered (stream, " => %s",
-			    plongest (TYPE_FIELD_ENUMVAL (type, i)));
-	  lastval = TYPE_FIELD_ENUMVAL (type, i);
+	  gdb_printf (stream, " => %s",
+		      plongest (type->field (i).loc_enumval ()));
+	  lastval = type->field (i).loc_enumval ();
 	}
       lastval += 1;
     }
-  fprintf_filtered (stream, ")");
-}
-
-/* Print representation of Ada fixed-point type TYPE on STREAM.  */
-
-static void
-print_fixed_point_type (struct type *type, struct ui_file *stream)
-{
-  DOUBLEST delta = ada_delta (type);
-  DOUBLEST small = ada_fixed_to_float (type, 1.0);
-
-  if (delta < 0.0)
-    fprintf_filtered (stream, "delta ??");
-  else
-    {
-      fprintf_filtered (stream, "delta %g", (double) delta);
-      if (delta != small)
-	fprintf_filtered (stream, " <'small = %g>", (double) small);
-    }
+  gdb_printf (stream, ")");
 }
 
 /* Print simple (constrained) array type TYPE on STREAM.  LEVEL is the
@@ -330,16 +350,18 @@ print_array_type (struct type *type, struct ui_file *stream, int show,
 {
   int bitsize;
   int n_indices;
+  struct type *elt_type = NULL;
 
   if (ada_is_constrained_packed_array_type (type))
     type = ada_coerce_to_simple_array_type (type);
 
   bitsize = 0;
-  fprintf_filtered (stream, "array (");
+  gdb_printf (stream, "array (");
 
   if (type == NULL)
     {
-      fprintf_filtered (stream, _("<undecipherable array type>"));
+      fprintf_styled (stream, metadata_style.style (),
+		      _("<undecipherable array type>"));
       return;
     }
 
@@ -355,29 +377,37 @@ print_array_type (struct type *type, struct ui_file *stream, int show,
       bitsize = 0;
       if (range_desc_type == NULL)
 	{
-	  for (arr_type = type; TYPE_CODE (arr_type) == TYPE_CODE_ARRAY;
-	       arr_type = TYPE_TARGET_TYPE (arr_type))
+	  for (arr_type = type; arr_type->code () == TYPE_CODE_ARRAY; )
 	    {
 	      if (arr_type != type)
-		fprintf_filtered (stream, ", ");
-	      print_range (TYPE_INDEX_TYPE (arr_type), stream);
+		gdb_printf (stream, ", ");
+	      print_range (arr_type->index_type (), stream,
+			   0 /* bounds_prefered_p */);
 	      if (TYPE_FIELD_BITSIZE (arr_type, 0) > 0)
 		bitsize = TYPE_FIELD_BITSIZE (arr_type, 0);
+	      /* A multi-dimensional array is represented using a
+		 sequence of array types.  If one of these types has a
+		 name, then it is not another dimension of the outer
+		 array, but rather the element type of the outermost
+		 array.  */
+	      arr_type = arr_type->target_type ();
+	      if (arr_type->name () != nullptr)
+		break;
 	    }
 	}
       else
 	{
 	  int k;
 
-	  n_indices = TYPE_NFIELDS (range_desc_type);
+	  n_indices = range_desc_type->num_fields ();
 	  for (k = 0, arr_type = type;
 	       k < n_indices;
-	       k += 1, arr_type = TYPE_TARGET_TYPE (arr_type))
+	       k += 1, arr_type = arr_type->target_type ())
 	    {
 	      if (k > 0)
-		fprintf_filtered (stream, ", ");
-	      print_range_type (TYPE_FIELD_TYPE (range_desc_type, k),
-				stream);
+		gdb_printf (stream, ", ");
+	      print_range_type (range_desc_type->field (k).type (),
+				stream, 0 /* bounds_prefered_p */);
 	      if (TYPE_FIELD_BITSIZE (arr_type, 0) > 0)
 		bitsize = TYPE_FIELD_BITSIZE (arr_type, 0);
 	    }
@@ -388,15 +418,19 @@ print_array_type (struct type *type, struct ui_file *stream, int show,
       int i, i0;
 
       for (i = i0 = ada_array_arity (type); i > 0; i -= 1)
-	fprintf_filtered (stream, "%s<>", i == i0 ? "" : ", ");
+	gdb_printf (stream, "%s<>", i == i0 ? "" : ", ");
     }
 
-  fprintf_filtered (stream, ") of ");
-  wrap_here ("");
-  ada_print_type (ada_array_element_type (type, n_indices), "", stream,
-		  show == 0 ? 0 : show - 1, level + 1, flags);
-  if (bitsize > 0)
-    fprintf_filtered (stream, " <packed: %d-bit elements>", bitsize);
+  elt_type = ada_array_element_type (type, n_indices);
+  gdb_printf (stream, ") of ");
+  stream->wrap_here (0);
+  ada_print_type (elt_type, "", stream, show == 0 ? 0 : show - 1, level + 1,
+		  flags);
+  /* Arrays with variable-length elements are never bit-packed in practice but
+     compilers have to describe their stride so that we can properly fetch
+     individual elements.  Do not say the array is packed in this case.  */
+  if (bitsize > 0 && !is_dynamic_type (elt_type))
+    gdb_printf (stream, " <packed: %d-bit elements>", bitsize);
 }
 
 /* Print the choices encoded by field FIELD_NUM of variant-part TYPE on
@@ -404,7 +438,7 @@ print_array_type (struct type *type, struct ui_file *stream, int show,
    values.  Return non-zero if the field is an encoding of
    discriminant values, as in a standard variant record, and 0 if the
    field is not so encoded (as happens with single-component variants
-   in types annotated with pragma Unchecked_Variant).  */
+   in types annotated with pragma Unchecked_Union).  */
 
 static int
 print_choices (struct type *type, int field_num, struct ui_file *stream,
@@ -412,7 +446,7 @@ print_choices (struct type *type, int field_num, struct ui_file *stream,
 {
   int have_output;
   int p;
-  const char *name = TYPE_FIELD_NAME (type, field_num);
+  const char *name = type->field (field_num).name ();
 
   have_output = 0;
 
@@ -433,13 +467,13 @@ print_choices (struct type *type, int field_num, struct ui_file *stream,
 	  goto Huh;
 	case '_':
 	case '\0':
-	  fprintf_filtered (stream, " =>");
+	  gdb_printf (stream, " =>");
 	  return 1;
 	case 'S':
 	case 'R':
 	case 'O':
 	  if (have_output)
-	    fprintf_filtered (stream, " | ");
+	    gdb_printf (stream, " | ");
 	  have_output = 1;
 	  break;
 	}
@@ -463,20 +497,49 @@ print_choices (struct type *type, int field_num, struct ui_file *stream,
 		|| name[p] != 'T' || !ada_scan_number (name, p + 1, &U, &p))
 	      goto Huh;
 	    ada_print_scalar (val_type, L, stream);
-	    fprintf_filtered (stream, " .. ");
+	    gdb_printf (stream, " .. ");
 	    ada_print_scalar (val_type, U, stream);
 	    break;
 	  }
 	case 'O':
-	  fprintf_filtered (stream, "others");
+	  gdb_printf (stream, "others");
 	  p += 1;
 	  break;
 	}
     }
 
 Huh:
-  fprintf_filtered (stream, "?? =>");
+  gdb_printf (stream, "? =>");
   return 0;
+}
+
+/* A helper for print_variant_clauses that prints the members of
+   VAR_TYPE.  DISCR_TYPE is the type of the discriminant (or nullptr
+   if not available).  The discriminant is contained in OUTER_TYPE.
+   STREAM, LEVEL, SHOW, and FLAGS are the same as for
+   ada_print_type.  */
+
+static void
+print_variant_clauses (struct type *var_type, struct type *discr_type,
+		       struct type *outer_type, struct ui_file *stream,
+		       int show, int level,
+		       const struct type_print_options *flags)
+{
+  for (int i = 0; i < var_type->num_fields (); i += 1)
+    {
+      gdb_printf (stream, "\n%*swhen ", level, "");
+      if (print_choices (var_type, i, stream, discr_type))
+	{
+	  if (print_record_field_types (var_type->field (i).type (),
+					outer_type, stream, show, level,
+					flags)
+	      <= 0)
+	    gdb_printf (stream, " null;");
+	}
+      else
+	print_selected_record_field_types (var_type, outer_type, i, i,
+					   stream, show, level, flags);
+    }
 }
 
 /* Assuming that field FIELD_NUM of TYPE represents variants whose
@@ -493,17 +556,16 @@ print_variant_clauses (struct type *type, int field_num,
 		       int show, int level,
 		       const struct type_print_options *flags)
 {
-  int i;
   struct type *var_type, *par_type;
   struct type *discr_type;
 
-  var_type = TYPE_FIELD_TYPE (type, field_num);
+  var_type = type->field (field_num).type ();
   discr_type = ada_variant_discrim_type (var_type, outer_type);
 
-  if (TYPE_CODE (var_type) == TYPE_CODE_PTR)
+  if (var_type->code () == TYPE_CODE_PTR)
     {
-      var_type = TYPE_TARGET_TYPE (var_type);
-      if (var_type == NULL || TYPE_CODE (var_type) != TYPE_CODE_UNION)
+      var_type = var_type->target_type ();
+      if (var_type == NULL || var_type->code () != TYPE_CODE_UNION)
 	return;
     }
 
@@ -511,21 +573,8 @@ print_variant_clauses (struct type *type, int field_num,
   if (par_type != NULL)
     var_type = par_type;
 
-  for (i = 0; i < TYPE_NFIELDS (var_type); i += 1)
-    {
-      fprintf_filtered (stream, "\n%*swhen ", level + 4, "");
-      if (print_choices (var_type, i, stream, discr_type))
-	{
-	  if (print_record_field_types (TYPE_FIELD_TYPE (var_type, i),
-					outer_type, stream, show, level + 4,
-					flags)
-	      <= 0)
-	    fprintf_filtered (stream, " null;");
-	}
-      else
-	print_selected_record_field_types (var_type, outer_type, i, i,
-					   stream, show, level + 4, flags);
-    }
+  print_variant_clauses (var_type, discr_type, outer_type, stream, show,
+			 level + 4, flags);
 }
 
 /* Assuming that field FIELD_NUM of TYPE is a variant part whose
@@ -541,12 +590,15 @@ print_variant_part (struct type *type, int field_num, struct type *outer_type,
 		    struct ui_file *stream, int show, int level,
 		    const struct type_print_options *flags)
 {
-  fprintf_filtered (stream, "\n%*scase %s is", level + 4, "",
-		    ada_variant_discrim_name
-		    (TYPE_FIELD_TYPE (type, field_num)));
+  const char *variant
+    = ada_variant_discrim_name (type->field (field_num).type ());
+  if (*variant == '\0')
+    variant = "?";
+
+  gdb_printf (stream, "\n%*scase %s is", level + 4, "", variant);
   print_variant_clauses (type, field_num, outer_type, stream, show,
 			 level + 4, flags);
-  fprintf_filtered (stream, "\n%*send case;", level + 4, "");
+  gdb_printf (stream, "\n%*send case;", level + 4, "");
 }
 
 /* Print a description on STREAM of the fields FLD0 through FLD1 in
@@ -568,7 +620,7 @@ print_selected_record_field_types (struct type *type, struct type *outer_type,
 
   flds = 0;
 
-  if (fld0 > fld1 && TYPE_STUB (type))
+  if (fld0 > fld1 && type->is_stub ())
     return -1;
 
   for (i = fld0; i <= fld1; i += 1)
@@ -578,7 +630,7 @@ print_selected_record_field_types (struct type *type, struct type *outer_type,
       if (ada_is_parent_field (type, i) || ada_is_ignored_field (type, i))
 	;
       else if (ada_is_wrapper_field (type, i))
-	flds += print_record_field_types (TYPE_FIELD_TYPE (type, i), type,
+	flds += print_record_field_types (type->field (i).type (), type,
 					  stream, show, level, flags);
       else if (ada_is_variant_part (type, i))
 	{
@@ -588,15 +640,129 @@ print_selected_record_field_types (struct type *type, struct type *outer_type,
       else
 	{
 	  flds += 1;
-	  fprintf_filtered (stream, "\n%*s", level + 4, "");
-	  ada_print_type (TYPE_FIELD_TYPE (type, i),
-			  TYPE_FIELD_NAME (type, i),
+	  gdb_printf (stream, "\n%*s", level + 4, "");
+	  ada_print_type (type->field (i).type (),
+			  type->field (i).name (),
 			  stream, show - 1, level + 4, flags);
-	  fprintf_filtered (stream, ";");
+	  gdb_printf (stream, ";");
 	}
     }
 
   return flds;
+}
+
+static void print_record_field_types_dynamic
+  (const gdb::array_view<variant_part> &parts,
+   int from, int to, struct type *type, struct ui_file *stream,
+   int show, int level, const struct type_print_options *flags);
+
+/* Print the choices encoded by VARIANT on STREAM.  LEVEL is the
+   indentation level.  The type of the discriminant for VARIANT is
+   given by DISR_TYPE.  */
+
+static void
+print_choices (struct type *discr_type, const variant &variant,
+	       struct ui_file *stream, int level)
+{
+  gdb_printf (stream, "\n%*swhen ", level, "");
+  if (variant.is_default ())
+    gdb_printf (stream, "others");
+  else
+    {
+      bool first = true;
+      for (const discriminant_range &range : variant.discriminants)
+	{
+	  if (!first)
+	    gdb_printf (stream, " | ");
+	  first = false;
+
+	  ada_print_scalar (discr_type, range.low, stream);
+	  if (range.low != range.high)
+	    ada_print_scalar (discr_type, range.high, stream);
+	}
+    }
+
+  gdb_printf (stream, " =>");
+}
+
+/* Print a single variant part, PART, on STREAM.  TYPE is the
+   enclosing type.  SHOW, LEVEL, and FLAGS are the usual type-printing
+   settings.  This prints information about PART and the fields it
+   controls.  It returns the index of the next field that should be
+   shown -- that is, one after the last field printed by this
+   call.  */
+
+static int
+print_variant_part (const variant_part &part,
+		    struct type *type, struct ui_file *stream,
+		    int show, int level,
+		    const struct type_print_options *flags)
+{
+  struct type *discr_type = nullptr;
+  const char *name;
+  if (part.discriminant_index == -1)
+    name = "?";
+  else
+    {
+      name = type->field (part.discriminant_index).name ();;
+      discr_type = type->field (part.discriminant_index).type ();
+    }
+
+  gdb_printf (stream, "\n%*scase %s is", level + 4, "", name);
+
+  int last_field = -1;
+  for (const variant &variant : part.variants)
+    {
+      print_choices (discr_type, variant, stream, level + 8);
+
+      if (variant.first_field == variant.last_field)
+	gdb_printf (stream, " null;");
+      else
+	{
+	  print_record_field_types_dynamic (variant.parts,
+					    variant.first_field,
+					    variant.last_field, type, stream,
+					    show, level + 8, flags);
+	  last_field = variant.last_field;
+	}
+    }
+
+  gdb_printf (stream, "\n%*send case;", level + 4, "");
+
+  return last_field;
+}
+
+/* Print some fields of TYPE to STREAM.  SHOW, LEVEL, and FLAGS are
+   the usual type-printing settings.  PARTS is the array of variant
+   parts that correspond to the range of fields to be printed.  FROM
+   and TO are the range of fields to print.  */
+
+static void
+print_record_field_types_dynamic (const gdb::array_view<variant_part> &parts,
+				  int from, int to,
+				  struct type *type, struct ui_file *stream,
+				  int show, int level,
+				  const struct type_print_options *flags)
+{
+  int field = from;
+
+  for (const variant_part &part : parts)
+    {
+      if (part.variants.empty ())
+	continue;
+
+      /* Print any non-varying fields.  */
+      int first_varying = part.variants[0].first_field;
+      print_selected_record_field_types (type, type, field,
+					 first_varying - 1, stream,
+					 show, level, flags);
+
+      field = print_variant_part (part, type, stream, show, level, flags);
+    }
+
+  /* Print any trailing fields that we were asked to print.  */
+  print_selected_record_field_types (type, type, field, to - 1, stream, show,
+				     level, flags);
 }
 
 /* Print a description on STREAM of all fields of record or union type
@@ -607,8 +773,23 @@ print_record_field_types (struct type *type, struct type *outer_type,
 			  struct ui_file *stream, int show, int level,
 			  const struct type_print_options *flags)
 {
+  struct dynamic_prop *prop = type->dyn_prop (DYN_PROP_VARIANT_PARTS);
+  if (prop != nullptr)
+    {
+      if (prop->kind () == PROP_TYPE)
+	{
+	  type = prop->original_type ();
+	  prop = type->dyn_prop (DYN_PROP_VARIANT_PARTS);
+	}
+      gdb_assert (prop->kind () == PROP_VARIANT_PARTS);
+      print_record_field_types_dynamic (*prop->variant_parts (),
+					0, type->num_fields (),
+					type, stream, show, level, flags);
+      return type->num_fields ();
+    }
+
   return print_selected_record_field_types (type, outer_type,
-					    0, TYPE_NFIELDS (type) - 1,
+					    0, type->num_fields () - 1,
 					    stream, show, level, flags);
 }
    
@@ -639,15 +820,15 @@ print_record_type (struct type *type0, struct ui_file *stream, int show,
 	 prevents a crash trying to print a NULL pointer.  */
       if (parent_name == NULL)
 	parent_name = ada_type_name (parent_type);
-      fprintf_filtered (stream, "new %s with record", parent_name);
+      gdb_printf (stream, "new %s with record", parent_name);
     }
   else if (parent_type == NULL && ada_is_tagged_type (type, 0))
-    fprintf_filtered (stream, "tagged record");
+    gdb_printf (stream, "tagged record");
   else
-    fprintf_filtered (stream, "record");
+    gdb_printf (stream, "record");
 
   if (show < 0)
-    fprintf_filtered (stream, " ... end record");
+    gdb_printf (stream, " ... end record");
   else
     {
       int flds;
@@ -660,11 +841,11 @@ print_record_type (struct type *type0, struct ui_file *stream, int show,
 					flags);
 
       if (flds > 0)
-	fprintf_filtered (stream, "\n%*send record", level, "");
+	gdb_printf (stream, "\n%*send record", level, "");
       else if (flds < 0)
-	fprintf_filtered (stream, _(" <incomplete type> end record"));
+	gdb_printf (stream, _(" <incomplete type> end record"));
       else
-	fprintf_filtered (stream, " null; end record");
+	gdb_printf (stream, " null; end record");
     }
 }
 
@@ -678,27 +859,17 @@ print_unchecked_union_type (struct type *type, struct ui_file *stream,
 			    const struct type_print_options *flags)
 {
   if (show < 0)
-    fprintf_filtered (stream, "record (?) is ... end record");
-  else if (TYPE_NFIELDS (type) == 0)
-    fprintf_filtered (stream, "record (?) is null; end record");
+    gdb_printf (stream, "record (?) is ... end record");
+  else if (type->num_fields () == 0)
+    gdb_printf (stream, "record (?) is null; end record");
   else
     {
-      int i;
+      gdb_printf (stream, "record (?) is\n%*scase ? is", level + 4, "");
 
-      fprintf_filtered (stream, "record (?) is\n%*scase ? is", level + 4, "");
+      print_variant_clauses (type, nullptr, type, stream, show, level + 8, flags);
 
-      for (i = 0; i < TYPE_NFIELDS (type); i += 1)
-	{
-	  fprintf_filtered (stream, "\n%*swhen ? =>\n%*s", level + 8, "",
-			    level + 12, "");
-	  ada_print_type (TYPE_FIELD_TYPE (type, i),
-			  TYPE_FIELD_NAME (type, i),
-			  stream, show - 1, level + 12, flags);
-	  fprintf_filtered (stream, ";");
-	}
-
-      fprintf_filtered (stream, "\n%*send case;\n%*send record",
-			level + 4, "", level, "");
+      gdb_printf (stream, "\n%*send case;\n%*send record",
+		  level + 4, "", level, "");
     }
 }
 
@@ -711,45 +882,51 @@ static void
 print_func_type (struct type *type, struct ui_file *stream, const char *name,
 		 const struct type_print_options *flags)
 {
-  int i, len = TYPE_NFIELDS (type);
+  int i, len = type->num_fields ();
 
-  if (TYPE_CODE (TYPE_TARGET_TYPE (type)) == TYPE_CODE_VOID)
-    fprintf_filtered (stream, "procedure");
+  if (type->target_type () != NULL
+      && type->target_type ()->code () == TYPE_CODE_VOID)
+    gdb_printf (stream, "procedure");
   else
-    fprintf_filtered (stream, "function");
+    gdb_printf (stream, "function");
 
   if (name != NULL && name[0] != '\0')
-    fprintf_filtered (stream, " %s", name);
+    {
+      gdb_puts (" ", stream);
+      fputs_styled (name, function_name_style.style (), stream);
+    }
 
   if (len > 0)
     {
-      fprintf_filtered (stream, " (");
+      gdb_printf (stream, " (");
       for (i = 0; i < len; i += 1)
 	{
 	  if (i > 0)
 	    {
-	      fputs_filtered ("; ", stream);
-	      wrap_here ("    ");
+	      gdb_puts ("; ", stream);
+	      stream->wrap_here (4);
 	    }
-	  fprintf_filtered (stream, "a%d: ", i + 1);
-	  ada_print_type (TYPE_FIELD_TYPE (type, i), "", stream, -1, 0,
+	  gdb_printf (stream, "a%d: ", i + 1);
+	  ada_print_type (type->field (i).type (), "", stream, -1, 0,
 			  flags);
 	}
-      fprintf_filtered (stream, ")");
+      gdb_printf (stream, ")");
     }
 
-  if (TYPE_CODE (TYPE_TARGET_TYPE (type)) != TYPE_CODE_VOID)
+  if (type->target_type () == NULL)
+    gdb_printf (stream, " return <unknown return type>");
+  else if (type->target_type ()->code () != TYPE_CODE_VOID)
     {
-      fprintf_filtered (stream, " return ");
-      ada_print_type (TYPE_TARGET_TYPE (type), "", stream, 0, 0, flags);
+      gdb_printf (stream, " return ");
+      ada_print_type (type->target_type (), "", stream, 0, 0, flags);
     }
 }
 
 
 /* Print a description of a type TYPE0.
    Output goes to STREAM (via stdio).
-   If VARSTRING is a non-empty string, print as an Ada variable/field
-       declaration.
+   If VARSTRING is a non-NULL, non-empty string, print as an Ada
+       variable/field declaration.
    SHOW+1 is the maximum number of levels of internal type structure
       to show (this applies to record types, enumerated types, and
       array types).
@@ -764,98 +941,124 @@ ada_print_type (struct type *type0, const char *varstring,
 		struct ui_file *stream, int show, int level,
 		const struct type_print_options *flags)
 {
+  if (type0->code () == TYPE_CODE_INTERNAL_FUNCTION)
+    {
+      c_print_type (type0, "", stream, show, level,
+		    language_ada, flags);
+      return;
+    }
+
   struct type *type = ada_check_typedef (ada_get_base_type (type0));
-  char *type_name = decoded_type_name (type0);
+  /* If we can decode the original type name, use it.  However, there
+     are cases where the original type is an internally-generated type
+     with a name that can't be decoded (and whose encoded name might
+     not actually bear any relation to the type actually declared in
+     the sources). In that case, try using the name of the base type
+     in its place.
+
+     Note that we looked at the possibility of always using the name
+     of the base type. This does not always work, unfortunately, as
+     there are situations where it's the base type which has an
+     internally-generated name.  */
+  const char *type_name = decoded_type_name (type0);
+  if (type_name == nullptr)
+    type_name = decoded_type_name (type);
   int is_var_decl = (varstring != NULL && varstring[0] != '\0');
 
   if (type == NULL)
     {
       if (is_var_decl)
-	fprintf_filtered (stream, "%.*s: ",
-			  ada_name_prefix_len (varstring), varstring);
-      fprintf_filtered (stream, "<null type?>");
+	gdb_printf (stream, "%.*s: ",
+		    ada_name_prefix_len (varstring), varstring);
+      fprintf_styled (stream, metadata_style.style (), "<null type?>");
       return;
     }
 
-  if (show > 0)
-    type = ada_check_typedef (type);
-
-  if (is_var_decl && TYPE_CODE (type) != TYPE_CODE_FUNC)
-    fprintf_filtered (stream, "%.*s: ",
-		      ada_name_prefix_len (varstring), varstring);
+  if (is_var_decl && type->code () != TYPE_CODE_FUNC)
+    gdb_printf (stream, "%.*s: ",
+		ada_name_prefix_len (varstring), varstring);
 
   if (type_name != NULL && show <= 0 && !ada_is_aligner_type (type))
     {
-      fprintf_filtered (stream, "%.*s",
-			ada_name_prefix_len (type_name), type_name);
+      gdb_printf (stream, "%.*s",
+		  ada_name_prefix_len (type_name), type_name);
       return;
     }
 
   if (ada_is_aligner_type (type))
     ada_print_type (ada_aligned_type (type), "", stream, show, level, flags);
   else if (ada_is_constrained_packed_array_type (type)
-	   && TYPE_CODE (type) != TYPE_CODE_PTR)
+	   && type->code () != TYPE_CODE_PTR)
     print_array_type (type, stream, show, level, flags);
   else
-    switch (TYPE_CODE (type))
+    switch (type->code ())
       {
       default:
-	fprintf_filtered (stream, "<");
-	c_print_type (type, "", stream, show, level, flags);
-	fprintf_filtered (stream, ">");
+	gdb_printf (stream, "<");
+	c_print_type (type, "", stream, show, level, language_ada, flags);
+	gdb_printf (stream, ">");
 	break;
       case TYPE_CODE_PTR:
       case TYPE_CODE_TYPEDEF:
-	fprintf_filtered (stream, "access ");
-	ada_print_type (TYPE_TARGET_TYPE (type), "", stream, show, level,
+	/* An __XVL field is not truly a pointer, so don't print
+	   "access" in this case.  */
+	if (type->code () != TYPE_CODE_PTR
+	    || (varstring != nullptr
+		&& strstr (varstring, "___XVL") == nullptr))
+	  gdb_printf (stream, "access ");
+	ada_print_type (type->target_type (), "", stream, show, level,
 			flags);
 	break;
       case TYPE_CODE_REF:
-	fprintf_filtered (stream, "<ref> ");
-	ada_print_type (TYPE_TARGET_TYPE (type), "", stream, show, level,
+	gdb_printf (stream, "<ref> ");
+	ada_print_type (type->target_type (), "", stream, show, level,
 			flags);
 	break;
       case TYPE_CODE_ARRAY:
 	print_array_type (type, stream, show, level, flags);
 	break;
       case TYPE_CODE_BOOL:
-	fprintf_filtered (stream, "(false, true)");
+	gdb_printf (stream, "(false, true)");
 	break;
       case TYPE_CODE_INT:
-	if (ada_is_fixed_point_type (type))
-	  print_fixed_point_type (type, stream);
-	else
-	  {
-	    const char *name = ada_type_name (type);
+	{
+	  const char *name = ada_type_name (type);
 
-	    if (!ada_is_range_type_name (name))
-	      fprintf_filtered (stream, _("<%d-byte integer>"),
-				TYPE_LENGTH (type));
-	    else
-	      {
-		fprintf_filtered (stream, "range ");
-		print_range_type (type, stream);
-	      }
-	  }
+	  if (!ada_is_range_type_name (name))
+	    fprintf_styled (stream, metadata_style.style (),
+			    _("<%s-byte integer>"),
+			    pulongest (type->length ()));
+	  else
+	    {
+	      gdb_printf (stream, "range ");
+	      print_range_type (type, stream, 1 /* bounds_prefered_p */);
+	    }
+	}
 	break;
       case TYPE_CODE_RANGE:
-	if (ada_is_fixed_point_type (type))
-	  print_fixed_point_type (type, stream);
+	if (is_fixed_point_type (type))
+	  {
+	    gdb_printf (stream, "<");
+	    print_type_fixed_point (type, stream);
+	    gdb_printf (stream, ">");
+	  }
 	else if (ada_is_modular_type (type))
-	  fprintf_filtered (stream, "mod %s", 
-			    int_string (ada_modulus (type), 10, 0, 0, 1));
+	  gdb_printf (stream, "mod %s", 
+		      int_string (ada_modulus (type), 10, 0, 0, 1));
 	else
 	  {
-	    fprintf_filtered (stream, "range ");
-	    print_range (type, stream);
+	    gdb_printf (stream, "range ");
+	    print_range (type, stream, 1 /* bounds_prefered_p */);
 	  }
 	break;
       case TYPE_CODE_FLT:
-	fprintf_filtered (stream, _("<%d-byte float>"), TYPE_LENGTH (type));
+	fprintf_styled (stream, metadata_style.style (),
+			_("<%s-byte float>"),
+			pulongest (type->length ()));
 	break;
       case TYPE_CODE_ENUM:
 	if (show < 0)
-	  fprintf_filtered (stream, "(...)");
+	  gdb_printf (stream, "(...)");
 	else
 	  print_enum_type (type, stream);
 	break;
@@ -863,8 +1066,8 @@ ada_print_type (struct type *type0, const char *varstring,
 	if (ada_is_array_descriptor_type (type))
 	  print_array_type (type, stream, show, level, flags);
 	else if (ada_is_bogus_array_descriptor (type))
-	  fprintf_filtered (stream,
-			    _("array (?) of ? (<mal-formed descriptor>)"));
+	  gdb_printf (stream,
+		      _("array (?) of ? (<mal-formed descriptor>)"));
 	else
 	  print_record_type (type, stream, show, level, flags);
 	break;
@@ -881,9 +1084,8 @@ ada_print_type (struct type *type0, const char *varstring,
 
 void
 ada_print_typedef (struct type *type, struct symbol *new_symbol,
-                   struct ui_file *stream)
+		   struct ui_file *stream)
 {
   type = ada_check_typedef (type);
   ada_print_type (type, "", stream, 0, 0, &type_print_raw_options);
-  fprintf_filtered (stream, "\n");
 }

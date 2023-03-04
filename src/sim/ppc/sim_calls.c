@@ -27,22 +27,14 @@
 
 #undef printf_filtered /* blow away the mapping */
 
-#ifdef HAVE_STDLIB_H
 #include <stdlib.h>
-#endif
-
-#ifdef HAVE_STRING_H
 #include <string.h>
-#else
-#ifdef HAVE_STRINGS_H
-#include <strings.h>
-#endif
-#endif
 
+#include "ansidecl.h"
 #include "libiberty.h"
 #include "bfd.h"
-#include "gdb/callback.h"
-#include "gdb/remote-sim.h"
+#include "sim/callback.h"
+#include "sim/sim.h"
 #include "gdb/signals.h"
 
 /* Define the rate at which the simulator should poll the host
@@ -63,7 +55,7 @@ SIM_DESC
 sim_open (SIM_OPEN_KIND kind,
 	  host_callback *callback,
 	  struct bfd *abfd,
-	  char **argv)
+	  char * const *argv)
 {
   callbacks = callback;
 
@@ -77,7 +69,8 @@ sim_open (SIM_OPEN_KIND kind,
   root_device = psim_tree();
   simulator = NULL;
 
-  psim_options(root_device, argv + 1);
+  if (psim_options (root_device, argv + 1, kind) == NULL)
+    return NULL;
 
   if (ppc_trace[trace_opts])
     print_options ();
@@ -97,7 +90,7 @@ sim_close (SIM_DESC sd, int quitting)
 
 
 SIM_RC
-sim_load (SIM_DESC sd, char *prog, bfd *abfd, int from_tty)
+sim_load (SIM_DESC sd, const char *prog, bfd *abfd, int from_tty)
 {
   TRACE(trace_gdb, ("sim_load(prog=%s, from_tty=%d) called\n",
 		    prog, from_tty));
@@ -131,30 +124,32 @@ sim_load (SIM_DESC sd, char *prog, bfd *abfd, int from_tty)
 }
 
 
-int
-sim_read (SIM_DESC sd, SIM_ADDR mem, unsigned char *buf, int length)
+uint64_t
+sim_read (SIM_DESC sd, uint64_t mem, void *buf, uint64_t length)
 {
   int result = psim_read_memory(simulator, MAX_NR_PROCESSORS,
 				buf, mem, length);
-  TRACE(trace_gdb, ("sim_read(mem=0x%lx, buf=0x%lx, length=%d) = %d\n",
-		    (long)mem, (long)buf, length, result));
+  TRACE(trace_gdb,
+	("sim_read(mem=0x%" PRIx64 ", buf=%p, length=%" PRIx64 ") = %d\n",
+	 mem, buf, length, result));
   return result;
 }
 
 
-int
-sim_write (SIM_DESC sd, SIM_ADDR mem, const unsigned char *buf, int length)
+uint64_t
+sim_write (SIM_DESC sd, uint64_t mem, const void *buf, uint64_t length)
 {
   int result = psim_write_memory(simulator, MAX_NR_PROCESSORS,
 				 buf, mem, length,
 				 1/*violate_ro*/);
-  TRACE(trace_gdb, ("sim_write(mem=0x%lx, buf=0x%lx, length=%d) = %d\n",
-		    (long)mem, (long)buf, length, result));
+  TRACE(trace_gdb,
+	("sim_write(mem=0x%" PRIx64 ", buf=%p, length=%" PRIx64 ") = %d\n",
+	 mem, buf, length, result));
   return result;
 }
 
 void
-sim_info (SIM_DESC sd, int verbose)
+sim_info (SIM_DESC sd, bool verbose)
 {
   TRACE(trace_gdb, ("sim_info(verbose=%d) called\n", verbose));
   psim_print_info (simulator, verbose);
@@ -164,12 +159,10 @@ sim_info (SIM_DESC sd, int verbose)
 SIM_RC
 sim_create_inferior (SIM_DESC sd,
 		     struct bfd *abfd,
-		     char **argv,
-		     char **envp)
+		     char * const *argv,
+		     char * const *envp)
 {
   unsigned_word entry_point;
-  TRACE(trace_gdb, ("sim_create_inferior(start_address=0x%x, ...)\n",
-		    entry_point));
 
   if (simulator == NULL)
     error ("No program loaded");
@@ -178,6 +171,9 @@ sim_create_inferior (SIM_DESC sd,
     entry_point = bfd_get_start_address (abfd);
   else
     entry_point = 0xfff00000; /* ??? */
+
+  TRACE(trace_gdb, ("sim_create_inferior(start_address=0x%x, ...)\n",
+		    entry_point));
 
   psim_init(simulator);
   psim_stack(simulator, argv, envp);
@@ -215,8 +211,8 @@ sim_stop_reason (SIM_DESC sd, enum sim_stop *reason, int *sigrc)
     break;
   }
 
-  TRACE(trace_gdb, ("sim_stop_reason(reason=0x%lx(%ld), sigrc=0x%lx(%ld))\n",
-		    (long)reason, (long)*reason, (long)sigrc, (long)*sigrc));
+  TRACE(trace_gdb, ("sim_stop_reason(reason=%p(%ld), sigrc=%p(%ld))\n",
+		    reason, (long)*reason, sigrc, (long)*sigrc));
 }
 
 
@@ -247,7 +243,7 @@ sim_resume (SIM_DESC sd, int step, int siggnal)
 }
 
 void
-sim_do_command (SIM_DESC sd, char *cmd)
+sim_do_command (SIM_DESC sd, const char *cmd)
 {
   TRACE(trace_gdb, ("sim_do_commands(cmd=%s) called\n",
 		    cmd ? cmd : "(null)"));
@@ -260,6 +256,12 @@ sim_do_command (SIM_DESC sd, char *cmd)
 
 char **
 sim_complete_command (SIM_DESC sd, const char *text, const char *word)
+{
+  return NULL;
+}
+
+char *
+sim_memory_map (SIM_DESC sd)
 {
   return NULL;
 }
@@ -373,6 +375,8 @@ sim_io_flush_stdoutput(void)
   }
 }
 
+/* Glue to use sim-fpu module.  */
+
 void
 sim_io_error (SIM_DESC sd, const char *fmt, ...)
 {
@@ -380,10 +384,24 @@ sim_io_error (SIM_DESC sd, const char *fmt, ...)
   va_start(ap, fmt);
   callbacks->evprintf_filtered (callbacks, fmt, ap);
   va_end(ap);
-  callbacks->error (callbacks, "");
+  /* Printing a space here avoids empty printf compiler warnings.  Not ideal,
+     but we want error's side-effect where it halts processing.  */
+  callbacks->error (callbacks, " ");
 }
 
 /****/
+
+void
+error (const char *msg, ...)
+{
+  va_list ap;
+  va_start(ap, msg);
+  callbacks->evprintf_filtered (callbacks, msg, ap);
+  va_end(ap);
+  /* Printing a space here avoids empty printf compiler warnings.  Not ideal,
+     but we want error's side-effect where it halts processing.  */
+  callbacks->error (callbacks, " ");
+}
 
 void *
 zalloc(long size)

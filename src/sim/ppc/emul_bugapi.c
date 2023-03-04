@@ -27,21 +27,9 @@
 #include "emul_generic.h"
 #include "emul_bugapi.h"
 
-#ifdef HAVE_UNISTD_H
 #include <unistd.h>
-#endif
-
-#ifdef HAVE_STDLIB_H
 #include <stdlib.h>
-#endif
-
-#ifdef HAVE_STRING_H
 #include <string.h>
-#else
-#ifdef HAVE_STRINGS_H
-#include <strings.h>
-#endif
-#endif
 
 
 /* EMULATION
@@ -339,7 +327,7 @@ emul_bugapi_instruction_name(int call_id)
   static char buffer[40];
   int i;
 
-  for (i = 0; i < sizeof (bug_mapping) / sizeof (bug_mapping[0]); i++)
+  for (i = 0; i < ARRAY_SIZE (bug_mapping); i++)
     {
       if (bug_mapping[i].value == call_id)
 	return bug_mapping[i].info;
@@ -503,7 +491,7 @@ emul_bugapi_instruction_call(cpu *processor,
   switch (call_id) {
   default:
     error("emul-bugapi: unimplemented bugapi %s from address 0x%lx\n",
-	  emul_bugapi_instruction_name (call_id), SRR0);
+	  emul_bugapi_instruction_name (call_id), (unsigned long) SRR0);
     break;
 
   /* read a single character, output r3 = byte */

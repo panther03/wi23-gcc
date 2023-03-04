@@ -2,8 +2,7 @@
 # It does some substitutions.
 fragment <<EOF
 /* A vanilla emulation with no defaults
-   Copyright 1991, 1992, 1994, 2000, 2001, 2002, 2003, 2005, 2007, 2008
-   Free Software Foundation, Inc.
+   Copyright (C) 1991-2023 Free Software Foundation, Inc.
    Written by Steve Chamberlain steve@cygnus.com
 
    This file is part of the GNU Binutils.
@@ -26,6 +25,7 @@ fragment <<EOF
 #include "sysdep.h"
 #include "bfd.h"
 #include "bfdlink.h"
+#include "ctf-api.h"
 
 #include "ld.h"
 #include "ldmisc.h"
@@ -55,33 +55,12 @@ vanilla_get_script (int *isfile)
   *isfile = 0;
   return "";
 }
-
-struct ld_emulation_xfer_struct ld_vanilla_emulation =
-{
-  vanilla_before_parse,
-  syslib_default,
-  hll_default,
-  after_parse_default,
-  after_open_default,
-  after_allocation_default,
-  vanilla_set_output_arch,
-  ldemul_default_target,
-  before_allocation_default,
-  vanilla_get_script,
-  "vanilla",
-  "a.out-sunos-big",
-  finish_default,
-  NULL,	/* create output section statements */
-  NULL,	/* open dynamic archive */
-  NULL,	/* place orphan */
-  NULL,	/* set symbols */
-  NULL,	/* parse args */
-  NULL,	/* add_options */
-  NULL,	/* handle_option */
-  NULL,	/* unrecognized file */
-  NULL,	/* list options */
-  NULL,	/* recognized file */
-  NULL,	/* find_potential_libraries */
-  NULL	/* new_vers_pattern */
-};
 EOF
+
+LDEMUL_BEFORE_PARSE=vanilla_before_parse
+LDEMUL_SET_OUTPUT_ARCH=vanilla_set_output_arch
+LDEMUL_GET_SCRIPT=vanilla_get_script
+EMULATION_NAME=vanilla
+OUTPUT_FORMAT=a.out-sunos-big
+
+source_em ${srcdir}/emultempl/emulation.em

@@ -1,6 +1,6 @@
 /* Blackfin One-Time Programmable Memory (OTP) model
 
-   Copyright (C) 2010-2013 Free Software Foundation, Inc.
+   Copyright (C) 2010-2023 Free Software Foundation, Inc.
    Contributed by Analog Devices, Inc.
 
    This file is part of simulators.
@@ -18,7 +18,8 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "config.h"
+/* This must come before any other includes.  */
+#include "defs.h"
 
 #include "sim-main.h"
 #include "devices.h"
@@ -90,7 +91,8 @@ bfin_otp_write_page_val2 (struct bfin_otp *otp, bu16 page, bu64 lo, bu64 hi)
 static void
 bfin_otp_write_page (struct bfin_otp *otp, bu16 page)
 {
-  bfin_otp_write_page_val (otp, page, (void *)&otp->data0);
+  bfin_otp_write_page_val2 (otp, page, ((bu64)otp->data1 << 32) | otp->data0,
+			    ((bu64)otp->data3 << 32) | otp->data2);
 }
 
 static unsigned
@@ -104,13 +106,17 @@ bfin_otp_io_write_buffer (struct hw *me, const void *source, int space,
   bu32 *value32p;
   void *valuep;
 
+  /* Invalid access mode is higher priority than missing register.  */
+  if (!dv_bfin_mmr_require_16_32 (me, addr, nr_bytes, true))
+    return 0;
+
   if (nr_bytes == 4)
     value = dv_load_4 (source);
   else
     value = dv_load_2 (source);
 
   mmr_off = addr - otp->base;
-  valuep = (void *)((unsigned long)otp + mmr_base() + mmr_off);
+  valuep = (void *)((uintptr_t)otp + mmr_base() + mmr_off);
   value16p = valuep;
   value32p = valuep;
 
@@ -122,7 +128,8 @@ bfin_otp_io_write_buffer (struct hw *me, const void *source, int space,
       {
 	int page;
 
-	dv_bfin_mmr_require_16 (me, addr, nr_bytes, true);
+	if (!dv_bfin_mmr_require_16 (me, addr, nr_bytes, true))
+	  return 0;
 	/* XXX: Seems like these bits aren't writable.  */
 	*value16p = value & 0x39FF;
 
@@ -142,12 +149,14 @@ bfin_otp_io_write_buffer (struct hw *me, const void *source, int space,
 	break;
       }
     case mmr_offset(ben):
-      dv_bfin_mmr_require_16 (me, addr, nr_bytes, true);
+      if (!dv_bfin_mmr_require_16 (me, addr, nr_bytes, true))
+	return 0;
       /* XXX: All bits seem to be writable.  */
       *value16p = value;
       break;
     case mmr_offset(status):
-      dv_bfin_mmr_require_16 (me, addr, nr_bytes, true);
+      if (!dv_bfin_mmr_require_16 (me, addr, nr_bytes, true))
+	return 0;
       /* XXX: All bits seem to be W1C.  */
       dv_w1c_2 (value16p, value, -1);
       break;
@@ -156,12 +165,13 @@ bfin_otp_io_write_buffer (struct hw *me, const void *source, int space,
     case mmr_offset(data1):
     case mmr_offset(data2):
     case mmr_offset(data3):
-      dv_bfin_mmr_require_32 (me, addr, nr_bytes, true);
+      if (!dv_bfin_mmr_require_32 (me, addr, nr_bytes, true))
+	return 0;
       *value32p = value;
       break;
     default:
       dv_bfin_mmr_invalid (me, addr, nr_bytes, true);
-      break;
+      return 0;
     }
 
   return nr_bytes;
@@ -177,8 +187,12 @@ bfin_otp_io_read_buffer (struct hw *me, void *dest, int space,
   bu32 *value32p;
   void *valuep;
 
+  /* Invalid access mode is higher priority than missing register.  */
+  if (!dv_bfin_mmr_require_16_32 (me, addr, nr_bytes, false))
+    return 0;
+
   mmr_off = addr - otp->base;
-  valuep = (void *)((unsigned long)otp + mmr_base() + mmr_off);
+  valuep = (void *)((uintptr_t)otp + mmr_base() + mmr_off);
   value16p = valuep;
   value32p = valuep;
 
@@ -189,7 +203,8 @@ bfin_otp_io_read_buffer (struct hw *me, void *dest, int space,
     case mmr_offset(control):
     case mmr_offset(ben):
     case mmr_offset(status):
-      dv_bfin_mmr_require_16 (me, addr, nr_bytes, false);
+      if (!dv_bfin_mmr_require_16 (me, addr, nr_bytes, false))
+	return 0;
       dv_store_2 (dest, *value16p);
       break;
     case mmr_offset(timing):
@@ -197,12 +212,13 @@ bfin_otp_io_read_buffer (struct hw *me, void *dest, int space,
     case mmr_offset(data1):
     case mmr_offset(data2):
     case mmr_offset(data3):
-      dv_bfin_mmr_require_32 (me, addr, nr_bytes, false);
+      if (!dv_bfin_mmr_require_32 (me, addr, nr_bytes, false))
+	return 0;
       dv_store_4 (dest, *value32p);
       break;
     default:
       dv_bfin_mmr_invalid (me, addr, nr_bytes, false);
-      break;
+      return 0;
     }
 
   return nr_bytes;
@@ -264,7 +280,7 @@ bfin_otp_finish (struct hw *me)
   otp->timing  = 0x00001485;
 
   /* Semi-random value for unique chip id.  */
-  bfin_otp_write_page_val2 (otp, FPS00, (unsigned long)otp, ~(unsigned long)otp);
+  bfin_otp_write_page_val2 (otp, FPS00, (uintptr_t)otp, ~(uintptr_t)otp);
 
   memset (part_str, 0, sizeof (part_str));
   sprintf (part_str, "ADSP-BF%iX", type);

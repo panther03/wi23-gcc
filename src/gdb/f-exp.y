@@ -1,5 +1,6 @@
+
 /* YACC parser for Fortran expressions, for GDB.
-   Copyright (C) 1986-2013 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    Contributed by Motorola.  Adapted from the C parser by Farooq Butt
    (fmbutt@engage.sps.mot.com).
@@ -42,7 +43,6 @@
 %{
 
 #include "defs.h"
-#include "gdb_string.h"
 #include "expression.h"
 #include "value.h"
 #include "parser-defs.h"
@@ -53,80 +53,56 @@
 #include "objfiles.h" /* For have_full_symbols and have_partial_symbols */
 #include "block.h"
 #include <ctype.h>
+#include <algorithm>
+#include "type-stack.h"
+#include "f-exp.h"
 
-#define parse_type builtin_type (parse_gdbarch)
-#define parse_f_type builtin_f_type (parse_gdbarch)
+#define parse_type(ps) builtin_type (ps->gdbarch ())
+#define parse_f_type(ps) builtin_f_type (ps->gdbarch ())
 
-/* Remap normal yacc parser interface names (yyparse, yylex, yyerror, etc),
-   as well as gratuitiously global symbol names, so we can have multiple
-   yacc generated parsers in gdb.  Note that these are only the variables
-   produced by yacc.  If other parser generators (bison, byacc, etc) produce
-   additional global names that conflict at link time, then those parser
-   generators need to be fixed instead of adding those names to this list.  */
+/* Remap normal yacc parser interface names (yyparse, yylex, yyerror,
+   etc).  */
+#define GDB_YY_REMAP_PREFIX f_
+#include "yy-remap.h"
 
-#define	yymaxdepth f_maxdepth
-#define	yyparse	f_parse
-#define	yylex	f_lex
-#define	yyerror	f_error
-#define	yylval	f_lval
-#define	yychar	f_char
-#define	yydebug	f_debug
-#define	yypact	f_pact	
-#define	yyr1	f_r1			
-#define	yyr2	f_r2			
-#define	yydef	f_def		
-#define	yychk	f_chk		
-#define	yypgo	f_pgo		
-#define	yyact	f_act		
-#define	yyexca	f_exca
-#define yyerrflag f_errflag
-#define yynerrs	f_nerrs
-#define	yyps	f_ps
-#define	yypv	f_pv
-#define	yys	f_s
-#define	yy_yys	f_yys
-#define	yystate	f_state
-#define	yytmp	f_tmp
-#define	yyv	f_v
-#define	yy_yyv	f_yyv
-#define	yyval	f_val
-#define	yylloc	f_lloc
-#define yyreds	f_reds		/* With YYDEBUG defined */
-#define yytoks	f_toks		/* With YYDEBUG defined */
-#define yyname	f_name		/* With YYDEBUG defined */
-#define yyrule	f_rule		/* With YYDEBUG defined */
-#define yylhs	f_yylhs
-#define yylen	f_yylen
-#define yydefred f_yydefred
-#define yydgoto	f_yydgoto
-#define yysindex f_yysindex
-#define yyrindex f_yyrindex
-#define yygindex f_yygindex
-#define yytable	 f_yytable
-#define yycheck	 f_yycheck
-#define yyss	f_yyss
-#define yysslim	f_yysslim
-#define yyssp	f_yyssp
-#define yystacksize f_yystacksize
-#define yyvs	f_yyvs
-#define yyvsp	f_yyvsp
+/* The state of the parser, used internally when we are parsing the
+   expression.  */
 
-#ifndef YYDEBUG
-#define	YYDEBUG	1		/* Default to yydebug support */
-#endif
+static struct parser_state *pstate = NULL;
 
-#define YYFPRINTF parser_fprintf
+/* Depth of parentheses.  */
+static int paren_depth;
+
+/* The current type stack.  */
+static struct type_stack *type_stack;
 
 int yyparse (void);
 
 static int yylex (void);
 
-void yyerror (char *);
+static void yyerror (const char *);
 
 static void growbuf_by_size (int);
 
 static int match_string_literal (void);
 
+static void push_kind_type (LONGEST val, struct type *type);
+
+static struct type *convert_to_kind_type (struct type *basetype, int kind);
+
+static void wrap_unop_intrinsic (exp_opcode opcode);
+
+static void wrap_binop_intrinsic (exp_opcode opcode);
+
+static void wrap_ternop_intrinsic (exp_opcode opcode);
+
+template<typename T>
+static void fortran_wrap2_kind (type *base_type);
+
+template<typename T>
+static void fortran_wrap3_kind (type *base_type);
+
+using namespace expr;
 %}
 
 /* Although the yacc "value" of an expression is not used,
@@ -140,14 +116,16 @@ static int match_string_literal (void);
       LONGEST val;
       struct type *type;
     } typed_val;
-    DOUBLEST dval;
+    struct {
+      gdb_byte val[16];
+      struct type *type;
+    } typed_val_float;
     struct symbol *sym;
     struct type *tval;
     struct stoken sval;
     struct ttype tsym;
     struct symtoken ssym;
     int voidval;
-    struct block *bval;
     enum exp_opcode opcode;
     struct internalvar *ivar;
 
@@ -157,7 +135,8 @@ static int match_string_literal (void);
 
 %{
 /* YYSTYPE gets defined by %union */
-static int parse_number (const char *, int, int, YYSTYPE *);
+static int parse_number (struct parser_state *, const char *, int,
+			 int, YYSTYPE *);
 %}
 
 %type <voidval> exp  type_exp start variable 
@@ -170,7 +149,7 @@ static int parse_number (const char *, int, int, YYSTYPE *);
 %type <tval> ptype
 
 %token <typed_val> INT
-%token <dval> FLOAT
+%token <typed_val_float> FLOAT
 
 /* Both NAME and TYPENAME tokens represent symbols in the input,
    and both convey their data as strings.
@@ -184,6 +163,7 @@ static int parse_number (const char *, int, int, YYSTYPE *);
 %token <lval> BOOLEAN_LITERAL
 %token <ssym> NAME 
 %token <tsym> TYPENAME
+%token <voidval> COMPLETE
 %type <sval> name
 %type <ssym> name_not_typename
 
@@ -194,21 +174,26 @@ static int parse_number (const char *, int, int, YYSTYPE *);
 
 %token <ssym> NAME_OR_INT 
 
-%token  SIZEOF 
+%token SIZEOF KIND
 %token ERROR
 
 /* Special type cases, put in to allow the parser to distinguish different
    legal basetypes.  */
-%token INT_KEYWORD INT_S2_KEYWORD LOGICAL_S1_KEYWORD LOGICAL_S2_KEYWORD 
+%token INT_S1_KEYWORD INT_S2_KEYWORD INT_KEYWORD INT_S4_KEYWORD INT_S8_KEYWORD
+%token LOGICAL_S1_KEYWORD LOGICAL_S2_KEYWORD LOGICAL_KEYWORD LOGICAL_S4_KEYWORD
 %token LOGICAL_S8_KEYWORD
-%token LOGICAL_KEYWORD REAL_KEYWORD REAL_S8_KEYWORD REAL_S16_KEYWORD 
-%token COMPLEX_S8_KEYWORD COMPLEX_S16_KEYWORD COMPLEX_S32_KEYWORD 
+%token REAL_KEYWORD REAL_S4_KEYWORD REAL_S8_KEYWORD REAL_S16_KEYWORD
+%token COMPLEX_KEYWORD COMPLEX_S4_KEYWORD COMPLEX_S8_KEYWORD
+%token COMPLEX_S16_KEYWORD
 %token BOOL_AND BOOL_OR BOOL_NOT   
+%token SINGLE DOUBLE PRECISION
 %token <lval> CHARACTER 
 
-%token <voidval> VARIABLE
+%token <sval> DOLLAR_VARIABLE
 
 %token <opcode> ASSIGN_MODIFY
+%token <opcode> UNOP_INTRINSIC BINOP_INTRINSIC
+%token <opcode> UNOP_OR_BINOP_INTRINSIC UNOP_OR_BINOP_OR_TERNOP_INTRINSIC
 
 %left ','
 %left ABOVE_COMMA
@@ -239,38 +224,40 @@ start   :	exp
 	;
 
 type_exp:	type
-			{ write_exp_elt_opcode(OP_TYPE);
-			  write_exp_elt_type($1);
-			  write_exp_elt_opcode(OP_TYPE); }
+			{ pstate->push_new<type_operation> ($1); }
 	;
 
 exp     :       '(' exp ')'
-        		{ }
-        ;
+			{ }
+	;
 
 /* Expressions, not including the comma operator.  */
 exp	:	'*' exp    %prec UNARY
-			{ write_exp_elt_opcode (UNOP_IND); }
+			{ pstate->wrap<unop_ind_operation> (); }
 	;
 
 exp	:	'&' exp    %prec UNARY
-			{ write_exp_elt_opcode (UNOP_ADDR); }
+			{ pstate->wrap<unop_addr_operation> (); }
 	;
 
 exp	:	'-' exp    %prec UNARY
-			{ write_exp_elt_opcode (UNOP_NEG); }
+			{ pstate->wrap<unary_neg_operation> (); }
 	;
 
 exp	:	BOOL_NOT exp    %prec UNARY
-			{ write_exp_elt_opcode (UNOP_LOGICAL_NOT); }
+			{ pstate->wrap<unary_logical_not_operation> (); }
 	;
 
 exp	:	'~' exp    %prec UNARY
-			{ write_exp_elt_opcode (UNOP_COMPLEMENT); }
+			{ pstate->wrap<unary_complement_operation> (); }
 	;
 
 exp	:	SIZEOF exp       %prec UNARY
-			{ write_exp_elt_opcode (UNOP_SIZEOF); }
+			{ pstate->wrap<unop_sizeof_operation> (); }
+	;
+
+exp	:	KIND '(' exp ')'       %prec UNARY
+			{ pstate->wrap<fortran_kind_operation> (); }
 	;
 
 /* No more explicit array operators, we treat everything in F77 as 
@@ -279,259 +266,383 @@ exp	:	SIZEOF exp       %prec UNARY
    later in eval.c.  */
 
 exp	:	exp '(' 
-			{ start_arglist (); }
+			{ pstate->start_arglist (); }
 		arglist ')'	
-			{ write_exp_elt_opcode (OP_F77_UNDETERMINED_ARGLIST);
-			  write_exp_elt_longcst ((LONGEST) end_arglist ());
-			  write_exp_elt_opcode (OP_F77_UNDETERMINED_ARGLIST); }
+			{
+			  std::vector<operation_up> args
+			    = pstate->pop_vector (pstate->end_arglist ());
+			  pstate->push_new<fortran_undetermined>
+			    (pstate->pop (), std::move (args));
+			}
+	;
+
+exp	:	UNOP_INTRINSIC '(' exp ')'
+			{
+			  wrap_unop_intrinsic ($1);
+			}
+	;
+
+exp	:	BINOP_INTRINSIC '(' exp ',' exp ')'
+			{
+			  wrap_binop_intrinsic ($1);
+			}
+	;
+
+exp	:	UNOP_OR_BINOP_INTRINSIC '('
+			{ pstate->start_arglist (); }
+		arglist ')'
+			{
+			  const int n = pstate->end_arglist ();
+
+			  switch (n)
+			    {
+			    case 1:
+			      wrap_unop_intrinsic ($1);
+			      break;
+			    case 2:
+			      wrap_binop_intrinsic ($1);
+			      break;
+			    default:
+			      gdb_assert_not_reached
+				("wrong number of arguments for intrinsics");
+			    }
+			}
+
+exp	:	UNOP_OR_BINOP_OR_TERNOP_INTRINSIC '('
+			{ pstate->start_arglist (); }
+		arglist ')'
+			{
+			  const int n = pstate->end_arglist ();
+
+			  switch (n)
+			    {
+			    case 1:
+			      wrap_unop_intrinsic ($1);
+			      break;
+			    case 2:
+			      wrap_binop_intrinsic ($1);
+			      break;
+			    case 3:
+			      wrap_ternop_intrinsic ($1);
+			      break;
+			    default:
+			      gdb_assert_not_reached
+				("wrong number of arguments for intrinsics");
+			    }
+			}
 	;
 
 arglist	:
 	;
 
 arglist	:	exp
-			{ arglist_len = 1; }
+			{ pstate->arglist_len = 1; }
 	;
 
 arglist :	subrange
-			{ arglist_len = 1; }
+			{ pstate->arglist_len = 1; }
 	;
    
 arglist	:	arglist ',' exp   %prec ABOVE_COMMA
-			{ arglist_len++; }
+			{ pstate->arglist_len++; }
+	;
+
+arglist	:	arglist ',' subrange   %prec ABOVE_COMMA
+			{ pstate->arglist_len++; }
 	;
 
 /* There are four sorts of subrange types in F90.  */
 
 subrange:	exp ':' exp	%prec ABOVE_COMMA
-			{ write_exp_elt_opcode (OP_F90_RANGE); 
-			  write_exp_elt_longcst (NONE_BOUND_DEFAULT);
-			  write_exp_elt_opcode (OP_F90_RANGE); }
+			{
+			  operation_up high = pstate->pop ();
+			  operation_up low = pstate->pop ();
+			  pstate->push_new<fortran_range_operation>
+			    (RANGE_STANDARD, std::move (low),
+			     std::move (high), operation_up ());
+			}
 	;
 
 subrange:	exp ':'	%prec ABOVE_COMMA
-			{ write_exp_elt_opcode (OP_F90_RANGE);
-			  write_exp_elt_longcst (HIGH_BOUND_DEFAULT);
-			  write_exp_elt_opcode (OP_F90_RANGE); }
+			{
+			  operation_up low = pstate->pop ();
+			  pstate->push_new<fortran_range_operation>
+			    (RANGE_HIGH_BOUND_DEFAULT, std::move (low),
+			     operation_up (), operation_up ());
+			}
 	;
 
 subrange:	':' exp	%prec ABOVE_COMMA
-			{ write_exp_elt_opcode (OP_F90_RANGE);
-			  write_exp_elt_longcst (LOW_BOUND_DEFAULT);
-			  write_exp_elt_opcode (OP_F90_RANGE); }
+			{
+			  operation_up high = pstate->pop ();
+			  pstate->push_new<fortran_range_operation>
+			    (RANGE_LOW_BOUND_DEFAULT, operation_up (),
+			     std::move (high), operation_up ());
+			}
 	;
 
 subrange:	':'	%prec ABOVE_COMMA
-			{ write_exp_elt_opcode (OP_F90_RANGE);
-			  write_exp_elt_longcst (BOTH_BOUND_DEFAULT);
-			  write_exp_elt_opcode (OP_F90_RANGE); }
+			{
+			  pstate->push_new<fortran_range_operation>
+			    (RANGE_LOW_BOUND_DEFAULT
+			     | RANGE_HIGH_BOUND_DEFAULT,
+			     operation_up (), operation_up (),
+			     operation_up ());
+			}
+	;
+
+/* And each of the four subrange types can also have a stride.  */
+subrange:	exp ':' exp ':' exp	%prec ABOVE_COMMA
+			{
+			  operation_up stride = pstate->pop ();
+			  operation_up high = pstate->pop ();
+			  operation_up low = pstate->pop ();
+			  pstate->push_new<fortran_range_operation>
+			    (RANGE_STANDARD | RANGE_HAS_STRIDE,
+			     std::move (low), std::move (high),
+			     std::move (stride));
+			}
+	;
+
+subrange:	exp ':' ':' exp	%prec ABOVE_COMMA
+			{
+			  operation_up stride = pstate->pop ();
+			  operation_up low = pstate->pop ();
+			  pstate->push_new<fortran_range_operation>
+			    (RANGE_HIGH_BOUND_DEFAULT
+			     | RANGE_HAS_STRIDE,
+			     std::move (low), operation_up (),
+			     std::move (stride));
+			}
+	;
+
+subrange:	':' exp ':' exp	%prec ABOVE_COMMA
+			{
+			  operation_up stride = pstate->pop ();
+			  operation_up high = pstate->pop ();
+			  pstate->push_new<fortran_range_operation>
+			    (RANGE_LOW_BOUND_DEFAULT
+			     | RANGE_HAS_STRIDE,
+			     operation_up (), std::move (high),
+			     std::move (stride));
+			}
+	;
+
+subrange:	':' ':' exp	%prec ABOVE_COMMA
+			{
+			  operation_up stride = pstate->pop ();
+			  pstate->push_new<fortran_range_operation>
+			    (RANGE_LOW_BOUND_DEFAULT
+			     | RANGE_HIGH_BOUND_DEFAULT
+			     | RANGE_HAS_STRIDE,
+			     operation_up (), operation_up (),
+			     std::move (stride));
+			}
 	;
 
 complexnum:     exp ',' exp 
-                	{ }                          
-        ;
+			{ }                          
+	;
 
 exp	:	'(' complexnum ')'
-                	{ write_exp_elt_opcode(OP_COMPLEX);
-			  write_exp_elt_type (parse_f_type->builtin_complex_s16);
-                	  write_exp_elt_opcode(OP_COMPLEX); }
+			{
+			  operation_up rhs = pstate->pop ();
+			  operation_up lhs = pstate->pop ();
+			  pstate->push_new<complex_operation>
+			    (std::move (lhs), std::move (rhs),
+			     parse_f_type (pstate)->builtin_complex_s16);
+			}
 	;
 
 exp	:	'(' type ')' exp  %prec UNARY
-			{ write_exp_elt_opcode (UNOP_CAST);
-			  write_exp_elt_type ($2);
-			  write_exp_elt_opcode (UNOP_CAST); }
+			{
+			  pstate->push_new<unop_cast_operation>
+			    (pstate->pop (), $2);
+			}
 	;
 
 exp     :       exp '%' name
-                        { write_exp_elt_opcode (STRUCTOP_STRUCT);
-                          write_exp_string ($3);
-                          write_exp_elt_opcode (STRUCTOP_STRUCT); }
-        ;
+			{
+			  pstate->push_new<fortran_structop_operation>
+			    (pstate->pop (), copy_name ($3));
+			}
+	;
+
+exp     :       exp '%' name COMPLETE
+			{
+			  structop_base_operation *op
+			    = new fortran_structop_operation (pstate->pop (),
+							      copy_name ($3));
+			  pstate->mark_struct_expression (op);
+			  pstate->push (operation_up (op));
+			}
+	;
+
+exp     :       exp '%' COMPLETE
+			{
+			  structop_base_operation *op
+			    = new fortran_structop_operation (pstate->pop (),
+							      "");
+			  pstate->mark_struct_expression (op);
+			  pstate->push (operation_up (op));
+			}
+	;
 
 /* Binary operators in order of decreasing precedence.  */
 
 exp	:	exp '@' exp
-			{ write_exp_elt_opcode (BINOP_REPEAT); }
+			{ pstate->wrap2<repeat_operation> (); }
 	;
 
 exp	:	exp STARSTAR exp
-			{ write_exp_elt_opcode (BINOP_EXP); }
+			{ pstate->wrap2<exp_operation> (); }
 	;
 
 exp	:	exp '*' exp
-			{ write_exp_elt_opcode (BINOP_MUL); }
+			{ pstate->wrap2<mul_operation> (); }
 	;
 
 exp	:	exp '/' exp
-			{ write_exp_elt_opcode (BINOP_DIV); }
+			{ pstate->wrap2<div_operation> (); }
 	;
 
 exp	:	exp '+' exp
-			{ write_exp_elt_opcode (BINOP_ADD); }
+			{ pstate->wrap2<add_operation> (); }
 	;
 
 exp	:	exp '-' exp
-			{ write_exp_elt_opcode (BINOP_SUB); }
+			{ pstate->wrap2<sub_operation> (); }
 	;
 
 exp	:	exp LSH exp
-			{ write_exp_elt_opcode (BINOP_LSH); }
+			{ pstate->wrap2<lsh_operation> (); }
 	;
 
 exp	:	exp RSH exp
-			{ write_exp_elt_opcode (BINOP_RSH); }
+			{ pstate->wrap2<rsh_operation> (); }
 	;
 
 exp	:	exp EQUAL exp
-			{ write_exp_elt_opcode (BINOP_EQUAL); }
+			{ pstate->wrap2<equal_operation> (); }
 	;
 
 exp	:	exp NOTEQUAL exp
-			{ write_exp_elt_opcode (BINOP_NOTEQUAL); }
+			{ pstate->wrap2<notequal_operation> (); }
 	;
 
 exp	:	exp LEQ exp
-			{ write_exp_elt_opcode (BINOP_LEQ); }
+			{ pstate->wrap2<leq_operation> (); }
 	;
 
 exp	:	exp GEQ exp
-			{ write_exp_elt_opcode (BINOP_GEQ); }
+			{ pstate->wrap2<geq_operation> (); }
 	;
 
 exp	:	exp LESSTHAN exp
-			{ write_exp_elt_opcode (BINOP_LESS); }
+			{ pstate->wrap2<less_operation> (); }
 	;
 
 exp	:	exp GREATERTHAN exp
-			{ write_exp_elt_opcode (BINOP_GTR); }
+			{ pstate->wrap2<gtr_operation> (); }
 	;
 
 exp	:	exp '&' exp
-			{ write_exp_elt_opcode (BINOP_BITWISE_AND); }
+			{ pstate->wrap2<bitwise_and_operation> (); }
 	;
 
 exp	:	exp '^' exp
-			{ write_exp_elt_opcode (BINOP_BITWISE_XOR); }
+			{ pstate->wrap2<bitwise_xor_operation> (); }
 	;
 
 exp	:	exp '|' exp
-			{ write_exp_elt_opcode (BINOP_BITWISE_IOR); }
+			{ pstate->wrap2<bitwise_ior_operation> (); }
 	;
 
 exp     :       exp BOOL_AND exp
-			{ write_exp_elt_opcode (BINOP_LOGICAL_AND); }
+			{ pstate->wrap2<logical_and_operation> (); }
 	;
 
 
 exp	:	exp BOOL_OR exp
-			{ write_exp_elt_opcode (BINOP_LOGICAL_OR); }
+			{ pstate->wrap2<logical_or_operation> (); }
 	;
 
 exp	:	exp '=' exp
-			{ write_exp_elt_opcode (BINOP_ASSIGN); }
+			{ pstate->wrap2<assign_operation> (); }
 	;
 
 exp	:	exp ASSIGN_MODIFY exp
-			{ write_exp_elt_opcode (BINOP_ASSIGN_MODIFY);
-			  write_exp_elt_opcode ($2);
-			  write_exp_elt_opcode (BINOP_ASSIGN_MODIFY); }
+			{
+			  operation_up rhs = pstate->pop ();
+			  operation_up lhs = pstate->pop ();
+			  pstate->push_new<assign_modify_operation>
+			    ($2, std::move (lhs), std::move (rhs));
+			}
 	;
 
 exp	:	INT
-			{ write_exp_elt_opcode (OP_LONG);
-			  write_exp_elt_type ($1.type);
-			  write_exp_elt_longcst ((LONGEST)($1.val));
-			  write_exp_elt_opcode (OP_LONG); }
+			{
+			  pstate->push_new<long_const_operation>
+			    ($1.type, $1.val);
+			}
 	;
 
 exp	:	NAME_OR_INT
 			{ YYSTYPE val;
-			  parse_number ($1.stoken.ptr, $1.stoken.length, 0, &val);
-			  write_exp_elt_opcode (OP_LONG);
-			  write_exp_elt_type (val.typed_val.type);
-			  write_exp_elt_longcst ((LONGEST)val.typed_val.val);
-			  write_exp_elt_opcode (OP_LONG); }
+			  parse_number (pstate, $1.stoken.ptr,
+					$1.stoken.length, 0, &val);
+			  pstate->push_new<long_const_operation>
+			    (val.typed_val.type,
+			     val.typed_val.val);
+			}
 	;
 
 exp	:	FLOAT
-			{ write_exp_elt_opcode (OP_DOUBLE);
-			  write_exp_elt_type (parse_f_type->builtin_real_s8);
-			  write_exp_elt_dblcst ($1);
-			  write_exp_elt_opcode (OP_DOUBLE); }
+			{
+			  float_data data;
+			  std::copy (std::begin ($1.val), std::end ($1.val),
+				     std::begin (data));
+			  pstate->push_new<float_const_operation> ($1.type, data);
+			}
 	;
 
 exp	:	variable
 	;
 
-exp	:	VARIABLE
+exp	:	DOLLAR_VARIABLE
+			{ pstate->push_dollar ($1); }
 	;
 
 exp	:	SIZEOF '(' type ')'	%prec UNARY
-			{ write_exp_elt_opcode (OP_LONG);
-			  write_exp_elt_type (parse_f_type->builtin_integer);
-			  CHECK_TYPEDEF ($3);
-			  write_exp_elt_longcst ((LONGEST) TYPE_LENGTH ($3));
-			  write_exp_elt_opcode (OP_LONG); }
+			{
+			  $3 = check_typedef ($3);
+			  pstate->push_new<long_const_operation>
+			    (parse_f_type (pstate)->builtin_integer,
+			     $3->length ());
+			}
 	;
 
 exp     :       BOOLEAN_LITERAL
-			{ write_exp_elt_opcode (OP_BOOL);
-			  write_exp_elt_longcst ((LONGEST) $1);
-			  write_exp_elt_opcode (OP_BOOL);
-			}
-        ;
+			{ pstate->push_new<bool_operation> ($1); }
+	;
 
 exp	:	STRING_LITERAL
 			{
-			  write_exp_elt_opcode (OP_STRING);
-			  write_exp_string ($1);
-			  write_exp_elt_opcode (OP_STRING);
+			  pstate->push_new<string_operation>
+			    (copy_name ($1));
 			}
 	;
 
 variable:	name_not_typename
-			{ struct symbol *sym = $1.sym;
-
-			  if (sym)
-			    {
-			      if (symbol_read_needs_frame (sym))
-				{
-				  if (innermost_block == 0
-				      || contained_in (block_found, 
-						       innermost_block))
-				    innermost_block = block_found;
-				}
-			      write_exp_elt_opcode (OP_VAR_VALUE);
-			      /* We want to use the selected frame, not
-				 another more inner frame which happens to
-				 be in the same block.  */
-			      write_exp_elt_block (NULL);
-			      write_exp_elt_sym (sym);
-			      write_exp_elt_opcode (OP_VAR_VALUE);
-			      break;
-			    }
-			  else
-			    {
-			      struct bound_minimal_symbol msymbol;
-			      char *arg = copy_name ($1.stoken);
-
-			      msymbol =
-				lookup_bound_minimal_symbol (arg);
-			      if (msymbol.minsym != NULL)
-				write_exp_msymbol (msymbol);
-			      else if (!have_full_symbols () && !have_partial_symbols ())
-				error (_("No symbol table is loaded.  Use the \"file\" command."));
-			      else
-				error (_("No symbol \"%s\" in current context."),
-				       copy_name ($1.stoken));
-			    }
+			{ struct block_symbol sym = $1.sym;
+			  std::string name = copy_name ($1.stoken);
+			  pstate->push_symbol (name.c_str (), sym);
 			}
 	;
 
 
 type    :       ptype
-        ;
+	;
 
 ptype	:	typebase
 	|	typebase abs_decl
@@ -543,7 +654,7 @@ ptype	:	typebase
 		  struct type *range_type;
 		  
 		  while (!done)
-		    switch (pop_type ())
+		    switch (type_stack->pop ())
 		      {
 		      case tp_end:
 			done = 1;
@@ -552,16 +663,17 @@ ptype	:	typebase
 			follow_type = lookup_pointer_type (follow_type);
 			break;
 		      case tp_reference:
-			follow_type = lookup_reference_type (follow_type);
+			follow_type = lookup_lvalue_reference_type (follow_type);
 			break;
 		      case tp_array:
-			array_size = pop_type_int ();
+			array_size = type_stack->pop_int ();
 			if (array_size != -1)
 			  {
 			    range_type =
-			      create_range_type ((struct type *) NULL,
-						 parse_f_type->builtin_integer,
-						 0, array_size - 1);
+			      create_static_range_type ((struct type *) NULL,
+							parse_f_type (pstate)
+							->builtin_integer,
+							0, array_size - 1);
 			    follow_type =
 			      create_array_type ((struct type *) NULL,
 						 follow_type, range_type);
@@ -572,28 +684,39 @@ ptype	:	typebase
 		      case tp_function:
 			follow_type = lookup_function_type (follow_type);
 			break;
+		      case tp_kind:
+			{
+			  int kind_val = type_stack->pop_int ();
+			  follow_type
+			    = convert_to_kind_type (follow_type, kind_val);
+			}
+			break;
 		      }
 		  $$ = follow_type;
 		}
 	;
 
 abs_decl:	'*'
-			{ push_type (tp_pointer); $$ = 0; }
+			{ type_stack->push (tp_pointer); $$ = 0; }
 	|	'*' abs_decl
-			{ push_type (tp_pointer); $$ = $2; }
+			{ type_stack->push (tp_pointer); $$ = $2; }
 	|	'&'
-			{ push_type (tp_reference); $$ = 0; }
+			{ type_stack->push (tp_reference); $$ = 0; }
 	|	'&' abs_decl
-			{ push_type (tp_reference); $$ = $2; }
+			{ type_stack->push (tp_reference); $$ = $2; }
 	|	direct_abs_decl
 	;
 
 direct_abs_decl: '(' abs_decl ')'
 			{ $$ = $2; }
+	| 	'(' KIND '=' INT ')'
+			{ push_kind_type ($4.val, $4.type); }
+	|	'*' INT
+			{ push_kind_type ($2.val, $2.type); }
 	| 	direct_abs_decl func_mod
-			{ push_type (tp_function); }
+			{ type_stack->push (tp_function); }
 	|	func_mod
-			{ push_type (tp_function); }
+			{ type_stack->push (tp_function); }
 	;
 
 func_mod:	'(' ')'
@@ -605,32 +728,52 @@ func_mod:	'(' ')'
 typebase  /* Implements (approximately): (type-qualifier)* type-specifier */
 	:	TYPENAME
 			{ $$ = $1.type; }
+	|	INT_S1_KEYWORD
+			{ $$ = parse_f_type (pstate)->builtin_integer_s1; }
+	|	INT_S2_KEYWORD
+			{ $$ = parse_f_type (pstate)->builtin_integer_s2; }
 	|	INT_KEYWORD
-			{ $$ = parse_f_type->builtin_integer; }
-	|	INT_S2_KEYWORD 
-			{ $$ = parse_f_type->builtin_integer_s2; }
+			{ $$ = parse_f_type (pstate)->builtin_integer; }
+	|	INT_S4_KEYWORD
+			{ $$ = parse_f_type (pstate)->builtin_integer; }
+	|	INT_S8_KEYWORD
+			{ $$ = parse_f_type (pstate)->builtin_integer_s8; }
 	|	CHARACTER 
-			{ $$ = parse_f_type->builtin_character; }
-	|	LOGICAL_S8_KEYWORD
-			{ $$ = parse_f_type->builtin_logical_s8; }
-	|	LOGICAL_KEYWORD 
-			{ $$ = parse_f_type->builtin_logical; }
-	|	LOGICAL_S2_KEYWORD
-			{ $$ = parse_f_type->builtin_logical_s2; }
+			{ $$ = parse_f_type (pstate)->builtin_character; }
 	|	LOGICAL_S1_KEYWORD 
-			{ $$ = parse_f_type->builtin_logical_s1; }
+			{ $$ = parse_f_type (pstate)->builtin_logical_s1; }
+	|	LOGICAL_S2_KEYWORD
+			{ $$ = parse_f_type (pstate)->builtin_logical_s2; }
+	|	LOGICAL_KEYWORD
+			{ $$ = parse_f_type (pstate)->builtin_logical; }
+	|	LOGICAL_S4_KEYWORD
+			{ $$ = parse_f_type (pstate)->builtin_logical; }
+	|	LOGICAL_S8_KEYWORD
+			{ $$ = parse_f_type (pstate)->builtin_logical_s8; }
 	|	REAL_KEYWORD 
-			{ $$ = parse_f_type->builtin_real; }
+			{ $$ = parse_f_type (pstate)->builtin_real; }
+	|	REAL_S4_KEYWORD
+			{ $$ = parse_f_type (pstate)->builtin_real; }
 	|       REAL_S8_KEYWORD
-			{ $$ = parse_f_type->builtin_real_s8; }
+			{ $$ = parse_f_type (pstate)->builtin_real_s8; }
 	|	REAL_S16_KEYWORD
-			{ $$ = parse_f_type->builtin_real_s16; }
+			{ $$ = parse_f_type (pstate)->builtin_real_s16; }
+	|	COMPLEX_KEYWORD
+			{ $$ = parse_f_type (pstate)->builtin_complex; }
+	|	COMPLEX_S4_KEYWORD
+			{ $$ = parse_f_type (pstate)->builtin_complex; }
 	|	COMPLEX_S8_KEYWORD
-			{ $$ = parse_f_type->builtin_complex_s8; }
+			{ $$ = parse_f_type (pstate)->builtin_complex_s8; }
 	|	COMPLEX_S16_KEYWORD 
-			{ $$ = parse_f_type->builtin_complex_s16; }
-	|	COMPLEX_S32_KEYWORD 
-			{ $$ = parse_f_type->builtin_complex_s32; }
+			{ $$ = parse_f_type (pstate)->builtin_complex_s16; }
+	|	SINGLE PRECISION
+			{ $$ = parse_f_type (pstate)->builtin_real;}
+	|	DOUBLE PRECISION
+			{ $$ = parse_f_type (pstate)->builtin_real_s8;}
+	|	SINGLE COMPLEX_KEYWORD
+			{ $$ = parse_f_type (pstate)->builtin_complex;}
+	|	DOUBLE COMPLEX_KEYWORD
+			{ $$ = parse_f_type (pstate)->builtin_complex_s8;}
 	;
 
 nonempty_typelist
@@ -646,8 +789,11 @@ nonempty_typelist
 		}
 	;
 
-name	:	NAME
-		{  $$ = $1.stoken; }
+name
+	:	NAME
+		{ $$ = $1.stoken; }
+	|	TYPENAME
+		{ $$ = $1.stoken; }
 	;
 
 name_not_typename :	NAME
@@ -662,6 +808,179 @@ name_not_typename :	NAME
 
 %%
 
+/* Called to match intrinsic function calls with one argument to their
+   respective implementation and push the operation.  */
+
+static void
+wrap_unop_intrinsic (exp_opcode code)
+{
+  switch (code)
+    {
+    case UNOP_ABS:
+      pstate->wrap<fortran_abs_operation> ();
+      break;
+    case FORTRAN_FLOOR:
+      pstate->wrap<fortran_floor_operation_1arg> ();
+      break;
+    case FORTRAN_CEILING:
+      pstate->wrap<fortran_ceil_operation_1arg> ();
+      break;
+    case UNOP_FORTRAN_ALLOCATED:
+      pstate->wrap<fortran_allocated_operation> ();
+      break;
+    case UNOP_FORTRAN_RANK:
+      pstate->wrap<fortran_rank_operation> ();
+      break;
+    case UNOP_FORTRAN_SHAPE:
+      pstate->wrap<fortran_array_shape_operation> ();
+      break;
+    case UNOP_FORTRAN_LOC:
+      pstate->wrap<fortran_loc_operation> ();
+      break;
+    case FORTRAN_ASSOCIATED:
+      pstate->wrap<fortran_associated_1arg> ();
+      break;
+    case FORTRAN_ARRAY_SIZE:
+      pstate->wrap<fortran_array_size_1arg> ();
+      break;
+    case FORTRAN_CMPLX:
+      pstate->wrap<fortran_cmplx_operation_1arg> ();
+      break;
+    case FORTRAN_LBOUND:
+    case FORTRAN_UBOUND:
+      pstate->push_new<fortran_bound_1arg> (code, pstate->pop ());
+      break;
+    default:
+      gdb_assert_not_reached ("unhandled intrinsic");
+    }
+}
+
+/* Called to match intrinsic function calls with two arguments to their
+   respective implementation and push the operation.  */
+
+static void
+wrap_binop_intrinsic (exp_opcode code)
+{
+  switch (code)
+    {
+    case FORTRAN_FLOOR:
+      fortran_wrap2_kind<fortran_floor_operation_2arg>
+	(parse_f_type (pstate)->builtin_integer);
+      break;
+    case FORTRAN_CEILING:
+      fortran_wrap2_kind<fortran_ceil_operation_2arg>
+	(parse_f_type (pstate)->builtin_integer);
+      break;
+    case BINOP_MOD:
+      pstate->wrap2<fortran_mod_operation> ();
+      break;
+    case BINOP_FORTRAN_MODULO:
+      pstate->wrap2<fortran_modulo_operation> ();
+      break;
+    case FORTRAN_CMPLX:
+      pstate->wrap2<fortran_cmplx_operation_2arg> ();
+      break;
+    case FORTRAN_ASSOCIATED:
+      pstate->wrap2<fortran_associated_2arg> ();
+      break;
+    case FORTRAN_ARRAY_SIZE:
+      pstate->wrap2<fortran_array_size_2arg> ();
+      break;
+    case FORTRAN_LBOUND:
+    case FORTRAN_UBOUND:
+      {
+	operation_up arg2 = pstate->pop ();
+	operation_up arg1 = pstate->pop ();
+	pstate->push_new<fortran_bound_2arg> (code, std::move (arg1),
+					      std::move (arg2));
+      }
+      break;
+    default:
+      gdb_assert_not_reached ("unhandled intrinsic");
+    }
+}
+
+/* Called to match intrinsic function calls with three arguments to their
+   respective implementation and push the operation.  */
+
+static void
+wrap_ternop_intrinsic (exp_opcode code)
+{
+  switch (code)
+    {
+    case FORTRAN_LBOUND:
+    case FORTRAN_UBOUND:
+      {
+	operation_up kind_arg = pstate->pop ();
+	operation_up arg2 = pstate->pop ();
+	operation_up arg1 = pstate->pop ();
+
+	value *val = kind_arg->evaluate (nullptr, pstate->expout.get (),
+					 EVAL_AVOID_SIDE_EFFECTS);
+	gdb_assert (val != nullptr);
+
+	type *follow_type
+	  = convert_to_kind_type (parse_f_type (pstate)->builtin_integer,
+				  value_as_long (val));
+
+	pstate->push_new<fortran_bound_3arg> (code, std::move (arg1),
+					      std::move (arg2), follow_type);
+      }
+      break;
+    case FORTRAN_ARRAY_SIZE:
+      fortran_wrap3_kind<fortran_array_size_3arg>
+	(parse_f_type (pstate)->builtin_integer);
+      break;
+    case FORTRAN_CMPLX:
+      fortran_wrap3_kind<fortran_cmplx_operation_3arg>
+	(parse_f_type (pstate)->builtin_complex);
+      break;
+    default:
+      gdb_assert_not_reached ("unhandled intrinsic");
+    }
+}
+
+/* A helper that pops two operations (similar to wrap2), evaluates the last one
+   assuming it is a kind parameter, and wraps them in some other operation
+   pushing it to the stack.  */
+
+template<typename T>
+static void
+fortran_wrap2_kind (type *base_type)
+{
+  operation_up kind_arg = pstate->pop ();
+  operation_up arg = pstate->pop ();
+
+  value *val = kind_arg->evaluate (nullptr, pstate->expout.get (),
+				   EVAL_AVOID_SIDE_EFFECTS);
+  gdb_assert (val != nullptr);
+
+  type *follow_type = convert_to_kind_type (base_type, value_as_long (val));
+
+  pstate->push_new<T> (std::move (arg), follow_type);
+}
+
+/* A helper that pops three operations, evaluates the last one assuming it is a
+   kind parameter, and wraps them in some other operation pushing it to the
+   stack.  */
+
+template<typename T>
+static void
+fortran_wrap3_kind (type *base_type)
+{
+  operation_up kind_arg = pstate->pop ();
+  operation_up arg2 = pstate->pop ();
+  operation_up arg1 = pstate->pop ();
+
+  value *val = kind_arg->evaluate (nullptr, pstate->expout.get (),
+				   EVAL_AVOID_SIDE_EFFECTS);
+  gdb_assert (val != nullptr);
+
+  type *follow_type = convert_to_kind_type (base_type, value_as_long (val));
+
+  pstate->push_new<T> (std::move (arg1), std::move (arg2), follow_type);
+}
+
 /* Take care of parsing a number (anything that starts with a digit).
    Set yylval and return the token type; update lexptr.
    LEN is the number of characters in it.  */
@@ -669,10 +988,11 @@ name_not_typename :	NAME
 /*** Needs some error checking for the float case ***/
 
 static int
-parse_number (const char *p, int len, int parsed_float, YYSTYPE *putithere)
+parse_number (struct parser_state *par_state,
+	      const char *p, int len, int parsed_float, YYSTYPE *putithere)
 {
-  LONGEST n = 0;
-  LONGEST prevn = 0;
+  ULONGEST n = 0;
+  ULONGEST prevn = 0;
   int c;
   int base = input_radix;
   int unsigned_p = 0;
@@ -684,20 +1004,26 @@ parse_number (const char *p, int len, int parsed_float, YYSTYPE *putithere)
   if (parsed_float)
     {
       /* It's a float since it contains a point or an exponent.  */
-      /* [dD] is not understood as an exponent by atof, change it to 'e'.  */
+      /* [dD] is not understood as an exponent by parse_float,
+	 change it to 'e'.  */
       char *tmp, *tmp2;
 
       tmp = xstrdup (p);
       for (tmp2 = tmp; *tmp2; ++tmp2)
 	if (*tmp2 == 'd' || *tmp2 == 'D')
 	  *tmp2 = 'e';
-      putithere->dval = atof (tmp);
+
+      /* FIXME: Should this use different types?  */
+      putithere->typed_val_float.type = parse_f_type (pstate)->builtin_real_s8;
+      bool parsed = parse_float (tmp, len,
+				 putithere->typed_val_float.type,
+				 putithere->typed_val_float.val);
       free (tmp);
-      return FLOAT;
+      return parsed? FLOAT : ERROR;
     }
 
   /* Handle base-switching prefixes 0x, 0t, 0d, 0 */
-  if (p[0] == '0')
+  if (p[0] == '0' && len > 1)
     switch (p[1])
       {
       case 'x':
@@ -750,16 +1076,11 @@ parse_number (const char *p, int len, int parsed_float, YYSTYPE *putithere)
 	  n *= base;
 	  n += i;
 	}
-      /* Portably test for overflow (only works for nonzero values, so make
-	 a second check for zero).  */
-      if ((prevn >= n) && n != 0)
-	unsigned_p=1;		/* Try something unsigned */
-      /* If range checking enabled, portably test for unsigned overflow.  */
-      if (RANGE_CHECK && n != 0)
-	{
-	  if ((unsigned_p && (unsigned)prevn >= (unsigned)n))
-	    range_error (_("Overflow on numeric constant."));
-	}
+      /* Test for overflow.  */
+      if (prevn == 0 && n == 0)
+	;
+      else if (RANGE_CHECK && prevn >= n)
+	range_error (_("Overflow on numeric constant."));
       prevn = n;
     }
   
@@ -774,23 +1095,31 @@ parse_number (const char *p, int len, int parsed_float, YYSTYPE *putithere)
      but too many compilers warn about that, when ints and longs
      are the same size.  So we shift it twice, with fewer bits
      each time, for the same result.  */
-  
-  if ((gdbarch_int_bit (parse_gdbarch) != gdbarch_long_bit (parse_gdbarch)
+
+  int bits_available;
+  if ((gdbarch_int_bit (par_state->gdbarch ())
+       != gdbarch_long_bit (par_state->gdbarch ())
        && ((n >> 2)
-	   >> (gdbarch_int_bit (parse_gdbarch)-2))) /* Avoid shift warning */
+	   >> (gdbarch_int_bit (par_state->gdbarch ())-2))) /* Avoid
+							    shift warning */
       || long_p)
     {
-      high_bit = ((ULONGEST)1) << (gdbarch_long_bit (parse_gdbarch)-1);
-      unsigned_type = parse_type->builtin_unsigned_long;
-      signed_type = parse_type->builtin_long;
-    }
+      bits_available = gdbarch_long_bit (par_state->gdbarch ());
+      unsigned_type = parse_type (par_state)->builtin_unsigned_long;
+      signed_type = parse_type (par_state)->builtin_long;
+  }
   else 
     {
-      high_bit = ((ULONGEST)1) << (gdbarch_int_bit (parse_gdbarch)-1);
-      unsigned_type = parse_type->builtin_unsigned_int;
-      signed_type = parse_type->builtin_int;
+      bits_available = gdbarch_int_bit (par_state->gdbarch ());
+      unsigned_type = parse_type (par_state)->builtin_unsigned_int;
+      signed_type = parse_type (par_state)->builtin_int;
     }    
+  high_bit = ((ULONGEST)1) << (bits_available - 1);
   
+  if (RANGE_CHECK
+      && ((n >> 2) >> (bits_available - 2)))
+    range_error (_("Overflow on numeric constant."));
+
   putithere->typed_val.val = n;
   
   /* If the high bit of the worked out type is set then this number
@@ -804,74 +1133,197 @@ parse_number (const char *p, int len, int parsed_float, YYSTYPE *putithere)
   return INT;
 }
 
+/* Called to setup the type stack when we encounter a '(kind=N)' type
+   modifier, performs some bounds checking on 'N' and then pushes this to
+   the type stack followed by the 'tp_kind' marker.  */
+static void
+push_kind_type (LONGEST val, struct type *type)
+{
+  int ival;
+
+  if (type->is_unsigned ())
+    {
+      ULONGEST uval = static_cast <ULONGEST> (val);
+      if (uval > INT_MAX)
+	error (_("kind value out of range"));
+      ival = static_cast <int> (uval);
+    }
+  else
+    {
+      if (val > INT_MAX || val < 0)
+	error (_("kind value out of range"));
+      ival = static_cast <int> (val);
+    }
+
+  type_stack->push (ival);
+  type_stack->push (tp_kind);
+}
+
+/* Called when a type has a '(kind=N)' modifier after it, for example
+   'character(kind=1)'.  The BASETYPE is the type described by 'character'
+   in our example, and KIND is the integer '1'.  This function returns a
+   new type that represents the basetype of a specific kind.  */
+static struct type *
+convert_to_kind_type (struct type *basetype, int kind)
+{
+  if (basetype == parse_f_type (pstate)->builtin_character)
+    {
+      /* Character of kind 1 is a special case, this is the same as the
+	 base character type.  */
+      if (kind == 1)
+	return parse_f_type (pstate)->builtin_character;
+    }
+  else if (basetype == parse_f_type (pstate)->builtin_complex)
+    {
+      if (kind == 4)
+	return parse_f_type (pstate)->builtin_complex;
+      else if (kind == 8)
+	return parse_f_type (pstate)->builtin_complex_s8;
+      else if (kind == 16)
+	return parse_f_type (pstate)->builtin_complex_s16;
+    }
+  else if (basetype == parse_f_type (pstate)->builtin_real)
+    {
+      if (kind == 4)
+	return parse_f_type (pstate)->builtin_real;
+      else if (kind == 8)
+	return parse_f_type (pstate)->builtin_real_s8;
+      else if (kind == 16)
+	return parse_f_type (pstate)->builtin_real_s16;
+    }
+  else if (basetype == parse_f_type (pstate)->builtin_logical)
+    {
+      if (kind == 1)
+	return parse_f_type (pstate)->builtin_logical_s1;
+      else if (kind == 2)
+	return parse_f_type (pstate)->builtin_logical_s2;
+      else if (kind == 4)
+	return parse_f_type (pstate)->builtin_logical;
+      else if (kind == 8)
+	return parse_f_type (pstate)->builtin_logical_s8;
+    }
+  else if (basetype == parse_f_type (pstate)->builtin_integer)
+    {
+      if (kind == 1)
+	return parse_f_type (pstate)->builtin_integer_s1;
+      else if (kind == 2)
+	return parse_f_type (pstate)->builtin_integer_s2;
+      else if (kind == 4)
+	return parse_f_type (pstate)->builtin_integer;
+      else if (kind == 8)
+	return parse_f_type (pstate)->builtin_integer_s8;
+    }
+
+  error (_("unsupported kind %d for type %s"),
+	 kind, TYPE_SAFE_NAME (basetype));
+
+  /* Should never get here.  */
+  return nullptr;
+}
+
 struct token
 {
-  char *operator;
+  /* The string to match against.  */
+  const char *oper;
+
+  /* The lexer token to return.  */
   int token;
+
+  /* The expression opcode to embed within the token.  */
   enum exp_opcode opcode;
+
+  /* When this is true the string in OPER is matched exactly including
+     case, when this is false OPER is matched case insensitively.  */
+  bool case_sensitive;
 };
 
-static const struct token dot_ops[] =
+/* List of Fortran operators.  */
+
+static const struct token fortran_operators[] =
 {
-  { ".and.", BOOL_AND, BINOP_END },
-  { ".AND.", BOOL_AND, BINOP_END },
-  { ".or.", BOOL_OR, BINOP_END },
-  { ".OR.", BOOL_OR, BINOP_END },
-  { ".not.", BOOL_NOT, BINOP_END },
-  { ".NOT.", BOOL_NOT, BINOP_END },
-  { ".eq.", EQUAL, BINOP_END },
-  { ".EQ.", EQUAL, BINOP_END },
-  { ".eqv.", EQUAL, BINOP_END },
-  { ".NEQV.", NOTEQUAL, BINOP_END },
-  { ".neqv.", NOTEQUAL, BINOP_END },
-  { ".EQV.", EQUAL, BINOP_END },
-  { ".ne.", NOTEQUAL, BINOP_END },
-  { ".NE.", NOTEQUAL, BINOP_END },
-  { ".le.", LEQ, BINOP_END },
-  { ".LE.", LEQ, BINOP_END },
-  { ".ge.", GEQ, BINOP_END },
-  { ".GE.", GEQ, BINOP_END },
-  { ".gt.", GREATERTHAN, BINOP_END },
-  { ".GT.", GREATERTHAN, BINOP_END },
-  { ".lt.", LESSTHAN, BINOP_END },
-  { ".LT.", LESSTHAN, BINOP_END },
-  { NULL, 0, 0 }
+  { ".and.", BOOL_AND, OP_NULL, false },
+  { ".or.", BOOL_OR, OP_NULL, false },
+  { ".not.", BOOL_NOT, OP_NULL, false },
+  { ".eq.", EQUAL, OP_NULL, false },
+  { ".eqv.", EQUAL, OP_NULL, false },
+  { ".neqv.", NOTEQUAL, OP_NULL, false },
+  { ".xor.", NOTEQUAL, OP_NULL, false },
+  { "==", EQUAL, OP_NULL, false },
+  { ".ne.", NOTEQUAL, OP_NULL, false },
+  { "/=", NOTEQUAL, OP_NULL, false },
+  { ".le.", LEQ, OP_NULL, false },
+  { "<=", LEQ, OP_NULL, false },
+  { ".ge.", GEQ, OP_NULL, false },
+  { ">=", GEQ, OP_NULL, false },
+  { ".gt.", GREATERTHAN, OP_NULL, false },
+  { ">", GREATERTHAN, OP_NULL, false },
+  { ".lt.", LESSTHAN, OP_NULL, false },
+  { "<", LESSTHAN, OP_NULL, false },
+  { "**", STARSTAR, BINOP_EXP, false },
 };
 
-struct f77_boolean_val 
+/* Holds the Fortran representation of a boolean, and the integer value we
+   substitute in when one of the matching strings is parsed.  */
+struct f77_boolean_val
 {
-  char *name;
+  /* The string representing a Fortran boolean.  */
+  const char *name;
+
+  /* The integer value to replace it with.  */
   int value;
-}; 
+};
 
-static const struct f77_boolean_val boolean_values[]  = 
+/* The set of Fortran booleans.  These are matched case insensitively.  */
+static const struct f77_boolean_val boolean_values[]  =
 {
   { ".true.", 1 },
-  { ".TRUE.", 1 },
-  { ".false.", 0 },
-  { ".FALSE.", 0 },
-  { NULL, 0 }
+  { ".false.", 0 }
 };
 
-static const struct token f77_keywords[] = 
+static const token f_keywords[] =
 {
-  { "complex_16", COMPLEX_S16_KEYWORD, BINOP_END },
-  { "complex_32", COMPLEX_S32_KEYWORD, BINOP_END },
-  { "character", CHARACTER, BINOP_END },
-  { "integer_2", INT_S2_KEYWORD, BINOP_END },
-  { "logical_1", LOGICAL_S1_KEYWORD, BINOP_END },
-  { "logical_2", LOGICAL_S2_KEYWORD, BINOP_END },
-  { "logical_8", LOGICAL_S8_KEYWORD, BINOP_END },
-  { "complex_8", COMPLEX_S8_KEYWORD, BINOP_END },
-  { "integer", INT_KEYWORD, BINOP_END },
-  { "logical", LOGICAL_KEYWORD, BINOP_END },
-  { "real_16", REAL_S16_KEYWORD, BINOP_END },
-  { "complex", COMPLEX_S8_KEYWORD, BINOP_END },
-  { "sizeof", SIZEOF, BINOP_END },
-  { "real_8", REAL_S8_KEYWORD, BINOP_END },
-  { "real", REAL_KEYWORD, BINOP_END },
-  { NULL, 0, 0 }
-}; 
+  /* Historically these have always been lowercase only in GDB.  */
+  { "character", CHARACTER, OP_NULL, true },
+  { "complex", COMPLEX_KEYWORD, OP_NULL, true },
+  { "complex_4", COMPLEX_S4_KEYWORD, OP_NULL, true },
+  { "complex_8", COMPLEX_S8_KEYWORD, OP_NULL, true },
+  { "complex_16", COMPLEX_S16_KEYWORD, OP_NULL, true },
+  { "integer_1", INT_S1_KEYWORD, OP_NULL, true },
+  { "integer_2", INT_S2_KEYWORD, OP_NULL, true },
+  { "integer_4", INT_S4_KEYWORD, OP_NULL, true },
+  { "integer", INT_KEYWORD, OP_NULL, true },
+  { "integer_8", INT_S8_KEYWORD, OP_NULL, true },
+  { "logical_1", LOGICAL_S1_KEYWORD, OP_NULL, true },
+  { "logical_2", LOGICAL_S2_KEYWORD, OP_NULL, true },
+  { "logical", LOGICAL_KEYWORD, OP_NULL, true },
+  { "logical_4", LOGICAL_S4_KEYWORD, OP_NULL, true },
+  { "logical_8", LOGICAL_S8_KEYWORD, OP_NULL, true },
+  { "real", REAL_KEYWORD, OP_NULL, true },
+  { "real_4", REAL_S4_KEYWORD, OP_NULL, true },
+  { "real_8", REAL_S8_KEYWORD, OP_NULL, true },
+  { "real_16", REAL_S16_KEYWORD, OP_NULL, true },
+  { "sizeof", SIZEOF, OP_NULL, true },
+  { "single", SINGLE, OP_NULL, true },
+  { "double", DOUBLE, OP_NULL, true },
+  { "precision", PRECISION, OP_NULL, true },
+  /* The following correspond to actual functions in Fortran and are case
+     insensitive.  */
+  { "kind", KIND, OP_NULL, false },
+  { "abs", UNOP_INTRINSIC, UNOP_ABS, false },
+  { "mod", BINOP_INTRINSIC, BINOP_MOD, false },
+  { "floor", UNOP_OR_BINOP_INTRINSIC, FORTRAN_FLOOR, false },
+  { "ceiling", UNOP_OR_BINOP_INTRINSIC, FORTRAN_CEILING, false },
+  { "modulo", BINOP_INTRINSIC, BINOP_FORTRAN_MODULO, false },
+  { "cmplx", UNOP_OR_BINOP_OR_TERNOP_INTRINSIC, FORTRAN_CMPLX, false },
+  { "lbound", UNOP_OR_BINOP_OR_TERNOP_INTRINSIC, FORTRAN_LBOUND, false },
+  { "ubound", UNOP_OR_BINOP_OR_TERNOP_INTRINSIC, FORTRAN_UBOUND, false },
+  { "allocated", UNOP_INTRINSIC, UNOP_FORTRAN_ALLOCATED, false },
+  { "associated", UNOP_OR_BINOP_INTRINSIC, FORTRAN_ASSOCIATED, false },
+  { "rank", UNOP_INTRINSIC, UNOP_FORTRAN_RANK, false },
+  { "size", UNOP_OR_BINOP_OR_TERNOP_INTRINSIC, FORTRAN_ARRAY_SIZE, false },
+  { "shape", UNOP_INTRINSIC, UNOP_FORTRAN_SHAPE, false },
+  { "loc", UNOP_INTRINSIC, UNOP_FORTRAN_LOC, false },
+};
 
 /* Implementation of a dynamically expandable buffer for processing input
    characters acquired through lexptr and building a value to return in
@@ -900,7 +1352,7 @@ growbuf_by_size (int count)
 {
   int growby;
 
-  growby = max (count, GROWBY_MIN_SIZE);
+  growby = std::max (count, GROWBY_MIN_SIZE);
   tempbufsize += growby;
   if (tempbuf == NULL)
     tempbuf = (char *) malloc (tempbufsize);
@@ -920,14 +1372,14 @@ growbuf_by_size (int count)
 static int
 match_string_literal (void)
 {
-  const char *tokptr = lexptr;
+  const char *tokptr = pstate->lexptr;
 
   for (tempbufindex = 0, tokptr++; *tokptr != '\0'; tokptr++)
     {
       CHECKBUF (1);
-      if (*tokptr == *lexptr)
+      if (*tokptr == *pstate->lexptr)
 	{
-	  if (*(tokptr + 1) == *lexptr)
+	  if (*(tokptr + 1) == *pstate->lexptr)
 	    tokptr++;
 	  else
 	    break;
@@ -942,10 +1394,19 @@ match_string_literal (void)
       tempbuf[tempbufindex] = '\0';
       yylval.sval.ptr = tempbuf;
       yylval.sval.length = tempbufindex;
-      lexptr = ++tokptr;
+      pstate->lexptr = ++tokptr;
       return STRING_LITERAL;
     }
 }
+
+/* This is set if a NAME token appeared at the very end of the input
+   string, with no whitespace separating the name from the EOF.  This
+   is used only when parsing to do field name completion.  */
+static bool saw_name_at_eof;
+
+/* This is set if the previously-returned token was a structure
+   operator '%'.  */
+static bool last_was_structop;
 
 /* Read one token, getting characters through lexptr.  */
 
@@ -954,61 +1415,62 @@ yylex (void)
 {
   int c;
   int namelen;
-  unsigned int i,token;
+  unsigned int token;
   const char *tokstart;
-  
+  bool saw_structop = last_was_structop;
+
+  last_was_structop = false;
+
  retry:
  
-  prev_lexptr = lexptr;
+  pstate->prev_lexptr = pstate->lexptr;
  
-  tokstart = lexptr;
-  
-  /* First of all, let us make sure we are not dealing with the 
+  tokstart = pstate->lexptr;
+
+  /* First of all, let us make sure we are not dealing with the
      special tokens .true. and .false. which evaluate to 1 and 0.  */
-  
-  if (*lexptr == '.')
-    { 
-      for (i = 0; boolean_values[i].name != NULL; i++)
+
+  if (*pstate->lexptr == '.')
+    {
+      for (const auto &candidate : boolean_values)
 	{
-	  if (strncmp (tokstart, boolean_values[i].name,
-		       strlen (boolean_values[i].name)) == 0)
+	  if (strncasecmp (tokstart, candidate.name,
+			   strlen (candidate.name)) == 0)
 	    {
-	      lexptr += strlen (boolean_values[i].name); 
-	      yylval.lval = boolean_values[i].value; 
+	      pstate->lexptr += strlen (candidate.name);
+	      yylval.lval = candidate.value;
 	      return BOOLEAN_LITERAL;
 	    }
 	}
     }
-  
-  /* See if it is a special .foo. operator.  */
-  
-  for (i = 0; dot_ops[i].operator != NULL; i++)
-    if (strncmp (tokstart, dot_ops[i].operator,
-		 strlen (dot_ops[i].operator)) == 0)
-      {
-	lexptr += strlen (dot_ops[i].operator);
-	yylval.opcode = dot_ops[i].opcode;
-	return dot_ops[i].token;
-      }
-  
-  /* See if it is an exponentiation operator.  */
 
-  if (strncmp (tokstart, "**", 2) == 0)
-    {
-      lexptr += 2;
-      yylval.opcode = BINOP_EXP;
-      return STARSTAR;
-    }
+  /* See if it is a Fortran operator.  */
+  for (const auto &candidate : fortran_operators)
+    if (strncasecmp (tokstart, candidate.oper,
+		     strlen (candidate.oper)) == 0)
+      {
+	gdb_assert (!candidate.case_sensitive);
+	pstate->lexptr += strlen (candidate.oper);
+	yylval.opcode = candidate.opcode;
+	return candidate.token;
+      }
 
   switch (c = *tokstart)
     {
     case 0:
+      if (saw_name_at_eof)
+	{
+	  saw_name_at_eof = false;
+	  return COMPLETE;
+	}
+      else if (pstate->parse_completion && saw_structop)
+	return COMPLETE;
       return 0;
       
     case ' ':
     case '\t':
     case '\n':
-      lexptr++;
+      pstate->lexptr++;
       goto retry;
       
     case '\'':
@@ -1019,27 +1481,27 @@ yylex (void)
       
     case '(':
       paren_depth++;
-      lexptr++;
+      pstate->lexptr++;
       return c;
       
     case ')':
       if (paren_depth == 0)
 	return 0;
       paren_depth--;
-      lexptr++;
+      pstate->lexptr++;
       return c;
       
     case ',':
-      if (comma_terminates && paren_depth == 0)
+      if (pstate->comma_terminates && paren_depth == 0)
 	return 0;
-      lexptr++;
+      pstate->lexptr++;
       return c;
       
     case '.':
       /* Might be a floating point number.  */
-      if (lexptr[1] < '0' || lexptr[1] > '9')
+      if (pstate->lexptr[1] < '0' || pstate->lexptr[1] > '9')
 	goto symbol;		/* Nope, must be a symbol.  */
-      /* FALL THRU into number case.  */
+      /* FALL THRU.  */
       
     case '0':
     case '1':
@@ -1052,7 +1514,7 @@ yylex (void)
     case '8':
     case '9':
       {
-        /* It's a number.  */
+	/* It's a number.  */
 	int got_dot = 0, got_e = 0, got_d = 0, toktype;
 	const char *p = tokstart;
 	int hex = input_radix > 10;
@@ -1090,25 +1552,28 @@ yylex (void)
 			 && (*p < 'A' || *p > 'Z')))
 	      break;
 	  }
-	toktype = parse_number (tokstart, p - tokstart, got_dot|got_e|got_d,
+	toktype = parse_number (pstate, tokstart, p - tokstart,
+				got_dot|got_e|got_d,
 				&yylval);
-        if (toktype == ERROR)
-          {
+	if (toktype == ERROR)
+	  {
 	    char *err_copy = (char *) alloca (p - tokstart + 1);
 	    
 	    memcpy (err_copy, tokstart, p - tokstart);
 	    err_copy[p - tokstart] = 0;
 	    error (_("Invalid number \"%s\"."), err_copy);
 	  }
-	lexptr = p;
+	pstate->lexptr = p;
 	return toktype;
       }
-      
+
+    case '%':
+      last_was_structop = true;
+      /* Fall through.  */
     case '+':
     case '-':
     case '*':
     case '/':
-    case '%':
     case '|':
     case '&':
     case '^':
@@ -1125,7 +1590,7 @@ yylex (void)
     case '{':
     case '}':
     symbol:
-      lexptr++;
+      pstate->lexptr++;
       return c;
     }
   
@@ -1146,85 +1611,116 @@ yylex (void)
   if (namelen == 2 && tokstart[0] == 'i' && tokstart[1] == 'f')
     return 0;
   
-  lexptr += namelen;
+  pstate->lexptr += namelen;
   
   /* Catch specific keywords.  */
-  
-  for (i = 0; f77_keywords[i].operator != NULL; i++)
-    if (strlen (f77_keywords[i].operator) == namelen
-	&& strncmp (tokstart, f77_keywords[i].operator, namelen) == 0)
+
+  for (const auto &keyword : f_keywords)
+    if (strlen (keyword.oper) == namelen
+	&& ((!keyword.case_sensitive
+	     && strncasecmp (tokstart, keyword.oper, namelen) == 0)
+	    || (keyword.case_sensitive
+		&& strncmp (tokstart, keyword.oper, namelen) == 0)))
       {
-	/* 	lexptr += strlen(f77_keywords[i].operator); */ 
-	yylval.opcode = f77_keywords[i].opcode;
-	return f77_keywords[i].token;
+	yylval.opcode = keyword.opcode;
+	return keyword.token;
       }
-  
+
   yylval.sval.ptr = tokstart;
   yylval.sval.length = namelen;
   
   if (*tokstart == '$')
-    {
-      write_dollar_variable (yylval.sval);
-      return VARIABLE;
-    }
-  
+    return DOLLAR_VARIABLE;
+
   /* Use token-type TYPENAME for symbols that happen to be defined
      currently as names of types; NAME for other symbols.
      The caller is not constrained to care about the distinction.  */
   {
-    char *tmp = copy_name (yylval.sval);
-    struct symbol *sym;
-    struct field_of_this_result is_a_field_of_this;
+    std::string tmp = copy_name (yylval.sval);
+    struct block_symbol result;
+    const domain_enum lookup_domains[] =
+    {
+      STRUCT_DOMAIN,
+      VAR_DOMAIN,
+      MODULE_DOMAIN
+    };
     int hextype;
-    
-    /* Initialize this in case we *don't* use it in this call; that
-       way we can refer to it unconditionally below.  */
-    memset (&is_a_field_of_this, 0, sizeof (is_a_field_of_this));
 
-    sym = lookup_symbol (tmp, expression_context_block,
-			 VAR_DOMAIN,
-			 parse_language->la_language == language_cplus
-			 ? &is_a_field_of_this : NULL);
-    if (sym && SYMBOL_CLASS (sym) == LOC_TYPEDEF)
+    for (const auto &domain : lookup_domains)
       {
-	yylval.tsym.type = SYMBOL_TYPE (sym);
-	return TYPENAME;
+	result = lookup_symbol (tmp.c_str (), pstate->expression_context_block,
+				domain, NULL);
+	if (result.symbol && result.symbol->aclass () == LOC_TYPEDEF)
+	  {
+	    yylval.tsym.type = result.symbol->type ();
+	    return TYPENAME;
+	  }
+
+	if (result.symbol)
+	  break;
       }
+
     yylval.tsym.type
-      = language_lookup_primitive_type_by_name (parse_language,
-						parse_gdbarch, tmp);
+      = language_lookup_primitive_type (pstate->language (),
+					pstate->gdbarch (), tmp.c_str ());
     if (yylval.tsym.type != NULL)
       return TYPENAME;
     
     /* Input names that aren't symbols but ARE valid hex numbers,
        when the input radix permits them, can be names or numbers
        depending on the parse.  Note we support radixes > 16 here.  */
-    if (!sym
+    if (!result.symbol
 	&& ((tokstart[0] >= 'a' && tokstart[0] < 'a' + input_radix - 10)
 	    || (tokstart[0] >= 'A' && tokstart[0] < 'A' + input_radix - 10)))
       {
  	YYSTYPE newlval;	/* Its value is ignored.  */
-	hextype = parse_number (tokstart, namelen, 0, &newlval);
+	hextype = parse_number (pstate, tokstart, namelen, 0, &newlval);
 	if (hextype == INT)
 	  {
-	    yylval.ssym.sym = sym;
-	    yylval.ssym.is_a_field_of_this = is_a_field_of_this.type != NULL;
+	    yylval.ssym.sym = result;
+	    yylval.ssym.is_a_field_of_this = false;
 	    return NAME_OR_INT;
 	  }
       }
-    
+
+    if (pstate->parse_completion && *pstate->lexptr == '\0')
+      saw_name_at_eof = true;
+
     /* Any other kind of symbol */
-    yylval.ssym.sym = sym;
-    yylval.ssym.is_a_field_of_this = is_a_field_of_this.type != NULL;
+    yylval.ssym.sym = result;
+    yylval.ssym.is_a_field_of_this = false;
     return NAME;
   }
 }
 
-void
-yyerror (char *msg)
+int
+f_language::parser (struct parser_state *par_state) const
 {
-  if (prev_lexptr)
-    lexptr = prev_lexptr;
+  /* Setting up the parser state.  */
+  scoped_restore pstate_restore = make_scoped_restore (&pstate);
+  scoped_restore restore_yydebug = make_scoped_restore (&yydebug,
+							parser_debug);
+  gdb_assert (par_state != NULL);
+  pstate = par_state;
+  last_was_structop = false;
+  saw_name_at_eof = false;
+  paren_depth = 0;
 
-  error (_("A %s in expression, near `%s'."), (msg ? msg : "error"), lexptr);
+  struct type_stack stack;
+  scoped_restore restore_type_stack = make_scoped_restore (&type_stack,
+							   &stack);
+
+  int result = yyparse ();
+  if (!result)
+    pstate->set_operation (pstate->pop ());
+  return result;
+}
+
+static void
+yyerror (const char *msg)
+{
+  if (pstate->prev_lexptr)
+    pstate->lexptr = pstate->prev_lexptr;
+
+  error (_("A %s in expression, near `%s'."), msg, pstate->lexptr);
 }

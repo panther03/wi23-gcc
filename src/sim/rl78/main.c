@@ -1,6 +1,6 @@
 /* main.c --- main function for stand-alone RL78 simulator.
 
-   Copyright (C) 2011-2013 Free Software Foundation, Inc.
+   Copyright (C) 2011-2023 Free Software Foundation, Inc.
    Contributed by Red Hat, Inc.
 
    This file is part of the GNU simulators.
@@ -19,20 +19,17 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+/* This must come before any other includes.  */
+#include "defs.h"
 
-#include "config.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#ifdef HAVE_UNISTD_H
 #include <unistd.h>
-#endif
 #include <assert.h>
 #include <setjmp.h>
 #include <signal.h>
-#ifdef HAVE_GETOPT_H
 #include <getopt.h>
-#endif
 
 #include "libiberty.h"
 #include "bfd.h"
@@ -65,10 +62,12 @@ main (int argc, char **argv)
   int save_trace;
   bfd *prog;
   int rc;
+  static const struct option longopts[] = { { 0 } };
 
   xmalloc_set_program_name (argv[0]);
 
-  while ((o = getopt (argc, argv, "tvdr:D:")) != -1)
+  while ((o = getopt_long (argc, argv, "tvdr:D:M:", longopts, NULL))
+	 != -1)
     {
       switch (o)
 	{
@@ -87,6 +86,27 @@ main (int argc, char **argv)
 	case 'D':
 	  dump_counts_filename = optarg;
 	  break;
+	case 'M':
+	  if (strcmp (optarg, "g10") == 0)
+	    {
+	      rl78_g10_mode = 1;
+	      g13_multiply = 0;
+	      g14_multiply = 0;
+	      mem_set_mirror (0, 0xf8000, 4096);
+	    }
+	  if (strcmp (optarg, "g13") == 0)
+	    {
+	      rl78_g10_mode = 0;
+	      g13_multiply = 1;
+	      g14_multiply = 0;
+	    }
+	  if (strcmp (optarg, "g14") == 0)
+	    {
+	      rl78_g10_mode = 0;
+	      g13_multiply = 0;
+	      g14_multiply = 1;
+	    }
+	  break;
 	case '?':
 	  {
 	    fprintf (stderr,
@@ -96,6 +116,7 @@ main (int argc, char **argv)
 		     "\t-t\t\t- trace.\n"
 		     "\t-d\t\t- disassemble.\n"
 		     "\t-r <bytes>\t- ram size.\n"
+		     "\t-M <mcu>\t- mcu type, default none, allowed: g10,g13,g14\n"
 		     "\t-D <filename>\t- dump cycle count histogram\n");
 	    exit (1);
 	  }

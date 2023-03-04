@@ -1,6 +1,6 @@
 /* Handle different target file systems for GDB, the GNU Debugger.
 
-   Copyright (C) 2010-2013 Free Software Foundation, Inc.
+   Copyright (C) 2010-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -64,30 +64,28 @@ show_target_file_system_kind_command (struct ui_file *file,
 				      const char *value)
 {
   if (target_file_system_kind == file_system_kind_auto)
-    fprintf_filtered (file, _("\
+    gdb_printf (file, _("\
 The assumed file system kind for target reported file names \
 is \"%s\" (currently \"%s\").\n"),
-		      value,
-		      effective_target_file_system_kind ());
+		value,
+		effective_target_file_system_kind ());
   else
-    fprintf_filtered (file, _("\
+    gdb_printf (file, _("\
 The assumed file system kind for target reported file names \
 is \"%s\".\n"),
-		      value);
+		value);
 }
 
-/* Provide a prototype to silence -Wmissing-prototypes.  */
-extern initialize_file_ftype _initialize_filesystem;
-
+void _initialize_filesystem ();
 void
-_initialize_filesystem (void)
+_initialize_filesystem ()
 {
   add_setshow_enum_cmd ("target-file-system-kind",
 			class_files,
 			target_file_system_kinds,
 			&target_file_system_kind, _("\
-Set assumed file system kind for target reported file names"), _("\
-Show assumed file system kind for target reported file names"),
+Set assumed file system kind for target reported file names."), _("\
+Show assumed file system kind for target reported file names."),
 			_("\
 If `unix', target file names (e.g., loaded shared library file names)\n\
 starting the forward slash (`/') character are considered absolute,\n\

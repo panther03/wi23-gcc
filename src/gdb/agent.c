@@ -1,4 +1,4 @@
-/* Copyright (C) 2012-2013 Free Software Foundation, Inc.
+/* Copyright (C) 2012-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -19,13 +19,15 @@
 #include "command.h"
 #include "gdbcmd.h"
 #include "target.h"
-#include "agent.h"
+#include "gdbsupport/agent.h"
+#include "observable.h"
+#include "objfiles.h"
 
 /* Enum strings for "set|show agent".  */
 
 static const char can_use_agent_on[] = "on";
 static const char can_use_agent_off[] = "off";
-static const char *can_use_agent_enum[] =
+static const char * const can_use_agent_enum[] =
 {
   can_use_agent_on,
   can_use_agent_off,
@@ -38,24 +40,27 @@ static void
 show_can_use_agent (struct ui_file *file, int from_tty,
 		    struct cmd_list_element *c, const char *value)
 {
-  fprintf_filtered (file,
-		    _("Debugger's willingness to use agent in inferior "
-		      "as a helper is %s.\n"), value);
+  gdb_printf (file,
+	      _("Debugger's willingness to use agent in inferior "
+		"as a helper is %s.\n"), value);
 }
 
 static void
-set_can_use_agent (char *args, int from_tty, struct cmd_list_element *c)
+set_can_use_agent (const char *args, int from_tty, struct cmd_list_element *c)
 {
-  if (target_use_agent (can_use_agent == can_use_agent_on) == 0)
+  bool can_use = (can_use_agent == can_use_agent_on);
+  if (can_use && !agent_loaded_p ())
+    {
+      /* Since the setting was off, we may not have observed the objfiles and
+	 therefore not looked up the required symbols.  Do so now.  */
+      for (objfile *objfile : current_program_space->objfiles ())
+	if (agent_look_up_symbols (objfile) == 0)
+	  break;
+    }
+  if (target_use_agent (can_use) == 0)
     /* Something wrong during setting, set flag to default value.  */
     can_use_agent = can_use_agent_off;
 }
-
-/* -Wmissing-prototypes */
-extern initialize_file_ftype _initialize_agent;
-
-#include "observer.h"
-#include "objfiles.h"
 
 static void
 agent_new_objfile (struct objfile *objfile)
@@ -63,13 +68,18 @@ agent_new_objfile (struct objfile *objfile)
   if (objfile == NULL || agent_loaded_p ())
     return;
 
+  if (can_use_agent == can_use_agent_off)
+    return;
+
   agent_look_up_symbols (objfile);
 }
 
+void _initialize_agent ();
 void
-_initialize_agent (void)
+_initialize_agent ()
 {
-  observer_attach_new_objfile (agent_new_objfile);
+  gdb::observers::new_objfile.attach (agent_new_objfile,
+				      "agent");
 
   add_setshow_enum_cmd ("agent", class_run,
 			can_use_agent_enum,

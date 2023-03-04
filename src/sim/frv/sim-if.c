@@ -1,5 +1,5 @@
 /* Main simulator entry points specific to the FRV.
-   Copyright (C) 1998-2013 Free Software Foundation, Inc.
+   Copyright (C) 1998-2023 Free Software Foundation, Inc.
    Contributed by Red Hat.
 
 This file is part of the GNU simulators.
@@ -17,23 +17,22 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
+/* This must come before any other includes.  */
+#include "defs.h"
+
+#include <stdlib.h>
+
+#include "sim/callback.h"
+
 #define WANT_CPU
 #define WANT_CPU_FRVBF
 #include "sim-main.h"
-#ifdef HAVE_STDLIB_H
-#include <stdlib.h>
-#endif
 #include "sim-options.h"
 #include "libiberty.h"
 #include "bfd.h"
-#include "elf-bfd.h"
+#include "bfd/elf-bfd.h"
 
 static void free_state (SIM_DESC);
-static void print_frv_misc_cpu (SIM_CPU *cpu, int verbose);
-
-/* Records simulator descriptor so utilities like frv_dump_regs can be
-   called from gdb.  */
-SIM_DESC current_state;
 
 /* Cover function of sim_state_free to free the cpu buffers as well.  */
 
@@ -46,35 +45,31 @@ free_state (SIM_DESC sd)
   sim_state_free (sd);
 }
 
+extern const SIM_MACH * const frv_sim_machs[];
+
 /* Create an instance of the simulator.  */
 
 SIM_DESC
-sim_open (kind, callback, abfd, argv)
-     SIM_OPEN_KIND kind;
-     host_callback *callback;
-     bfd *abfd;
-     char **argv;
+sim_open (SIM_OPEN_KIND kind, host_callback *callback, bfd *abfd,
+	  char * const *argv)
 {
   char c;
   int i;
   unsigned long elf_flags = 0;
   SIM_DESC sd = sim_state_alloc (kind, callback);
 
+  /* Set default options before parsing user options.  */
+  STATE_MACHS (sd) = frv_sim_machs;
+  STATE_MODEL_NAME (sd) = "fr500";
+  current_alignment = STRICT_ALIGNMENT;
+  current_target_byte_order = BFD_ENDIAN_BIG;
+
   /* The cpu data is kept in a separately allocated chunk of memory.  */
-  if (sim_cpu_alloc_all (sd, 1, cgen_cpu_max_extra_bytes ()) != SIM_RC_OK)
+  if (sim_cpu_alloc_all_extra (sd, 0, sizeof (struct frv_sim_cpu)) != SIM_RC_OK)
     {
       free_state (sd);
       return 0;
     }
-
-#if 0 /* FIXME: pc is in mach-specific struct */
-  /* FIXME: watchpoints code shouldn't need this */
-  {
-    SIM_CPU *current_cpu = STATE_CPU (sd, 0);
-    STATE_WATCHPOINTS (sd)->pc = &(PC);
-    STATE_WATCHPOINTS (sd)->sizeof_pc = sizeof (PC);
-  }
-#endif
 
   if (sim_pre_argv_init (sd, argv[0]) != SIM_RC_OK)
     {
@@ -87,42 +82,20 @@ sim_open (kind, callback, abfd, argv)
      augment the meaning of an option.  */
   sim_add_option_table (sd, NULL, frv_options);
 
-  /* getopt will print the error message so we just have to exit if this fails.
-     FIXME: Hmmm...  in the case of gdb we need getopt to call
-     print_filtered.  */
+  /* The parser will print an error message for us, so we silently return.  */
   if (sim_parse_args (sd, argv) != SIM_RC_OK)
     {
       free_state (sd);
       return 0;
     }
 
-#if 0
-  /* Allocate a handler for the control registers and other devices
-     if no memory for that range has been allocated by the user.
-     All are allocated in one chunk to keep things from being
-     unnecessarily complicated.  */
-  if (sim_core_read_buffer (sd, NULL, read_map, &c, FRV_DEVICE_ADDR, 1) == 0)
-    sim_core_attach (sd, NULL,
-		     0 /*level*/,
-		     access_read_write,
-		     0 /*space ???*/,
-		     FRV_DEVICE_ADDR, FRV_DEVICE_LEN /*nr_bytes*/,
-		     0 /*modulo*/,
-		     &frv_devices,
-		     NULL /*buffer*/);
-#endif
-
   /* Allocate core managed memory if none specified by user.
      Use address 4 here in case the user wanted address 0 unmapped.  */
   if (sim_core_read_buffer (sd, NULL, read_map, &c, 4, 1) == 0)
-    sim_do_commandf (sd, "memory region 0,0x%lx", FRV_DEFAULT_MEM_SIZE);
+    sim_do_commandf (sd, "memory region 0,0x%x", FRV_DEFAULT_MEM_SIZE);
 
   /* check for/establish the reference program image */
-  if (sim_analyze_program (sd,
-			   (STATE_PROG_ARGV (sd) != NULL
-			    ? *STATE_PROG_ARGV (sd)
-			    : NULL),
-			   abfd) != SIM_RC_OK)
+  if (sim_analyze_program (sd, STATE_PROG_FILE (sd), abfd) != SIM_RC_OK)
     {
       free_state (sd);
       return 0;
@@ -133,7 +106,7 @@ sim_open (kind, callback, abfd, argv)
     bfd *prog_bfd = STATE_PROG_BFD (sd);
     if (prog_bfd != NULL)
       {
-	struct elf_backend_data *backend_data;
+	const struct elf_backend_data *backend_data;
 
 	if (bfd_get_arch (prog_bfd) != bfd_arch_frv)
 	  {
@@ -180,10 +153,6 @@ sim_open (kind, callback, abfd, argv)
     frv_cgen_init_dis (cd);
   }
 
-  /* Initialize various cgen things not done by common framework.
-     Must be done after frv_cgen_cpu_open.  */
-  cgen_init (sd);
-
   /* CPU specific initialization.  */
   for (i = 0; i < MAX_NR_PROCESSORS; ++i)
     {
@@ -191,17 +160,11 @@ sim_open (kind, callback, abfd, argv)
       frv_initialize (cpu, sd);
     }
 
-  /* Store in a global so things like sparc32_dump_regs can be invoked
-     from the gdb command line.  */
-  current_state = sd;
-
   return sd;
 }
 
 void
-sim_close (sd, quitting)
-     SIM_DESC sd;
-     int quitting;
+frv_sim_close (SIM_DESC sd, int quitting)
 {
   int i;
   /* Terminate cache support.  */
@@ -211,20 +174,15 @@ sim_close (sd, quitting)
       frv_cache_term (CPU_INSN_CACHE (cpu));
       frv_cache_term (CPU_DATA_CACHE (cpu));
     }
-
-  frv_cgen_cpu_close (CPU_CPU_DESC (STATE_CPU (sd, 0)));
-  sim_module_uninstall (sd);
 }
 
 SIM_RC
-sim_create_inferior (sd, abfd, argv, envp)
-     SIM_DESC sd;
-     bfd *abfd;
-     char **argv;
-     char **envp;
+sim_create_inferior (SIM_DESC sd, bfd *abfd, char * const *argv,
+		     char * const *env)
 {
   SIM_CPU *current_cpu = STATE_CPU (sd, 0);
-  SIM_ADDR addr;
+  host_callback *cb = STATE_CALLBACK (sd);
+  bfd_vma addr;
 
   if (abfd != NULL)
     addr = bfd_get_start_address (abfd);
@@ -232,10 +190,24 @@ sim_create_inferior (sd, abfd, argv, envp)
     addr = 0;
   sim_pc_set (current_cpu, addr);
 
-#if 0
-  STATE_ARGV (sd) = sim_copy_argv (argv);
-  STATE_ENVP (sd) = sim_copy_argv (envp);
-#endif
+  /* Standalone mode (i.e. `run`) will take care of the argv for us in
+     sim_open() -> sim_parse_args().  But in debug mode (i.e. 'target sim'
+     with `gdb`), we need to handle it because the user can change the
+     argv on the fly via gdb's 'run'.  */
+  if (STATE_PROG_ARGV (sd) != argv)
+    {
+      freeargv (STATE_PROG_ARGV (sd));
+      STATE_PROG_ARGV (sd) = dupargv (argv);
+    }
+
+  if (STATE_PROG_ENVP (sd) != env)
+    {
+      freeargv (STATE_PROG_ENVP (sd));
+      STATE_PROG_ENVP (sd) = dupargv (env);
+    }
+
+  cb->argv = STATE_PROG_ARGV (sd);
+  cb->envp = STATE_PROG_ENVP (sd);
 
   return SIM_RC_OK;
 }

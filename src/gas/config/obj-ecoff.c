@@ -1,6 +1,5 @@
 /* ECOFF object file format.
-   Copyright 1993, 1994, 1995, 1996, 1998, 1999, 2000, 2001, 2002,
-   2005, 2007, 2009, 2010  Free Software Foundation, Inc.
+   Copyright (C) 1993-2023 Free Software Foundation, Inc.
    Contributed by Cygnus Support.
    This file was put together by Ian Lance Taylor <ian@cygnus.com>.
 
@@ -26,6 +25,7 @@
 #include "coff/internal.h"
 #include "bfd/libcoff.h"
 #include "bfd/libecoff.h"
+#include "bfd/ecoff-bfd.h"
 
 /* Almost all of the ECOFF support is actually in ecoff.c in the main
    gas directory.  This file mostly just arranges to call that one at
@@ -54,7 +54,7 @@ ecoff_frob_file_before_fix (void)
      This output ordering of sections is magic, on the Alpha, at
      least.  The .lita section must come before .lit8 and .lit4,
      otherwise the OSF/1 linker may silently trash the .lit{4,8}
-     section contents.  Also, .text must preceed .rdata.  These differ
+     section contents.  Also, .text must precede .rdata.  These differ
      from the order described in some parts of the DEC OSF/1 Assembly
      Language Programmer's Guide, but that order doesn't seem to work
      with their linker.
@@ -91,15 +91,15 @@ ecoff_frob_file_before_fix (void)
 	  }
       if (i == n_names)
 	{
-	  bfd_set_section_vma (stdoutput, sec, addr);
-	  addr += bfd_section_size (stdoutput, sec);
+	  bfd_set_section_vma (sec, addr);
+	  addr += bfd_section_size (sec);
 	}
     }
   for (i = 0; i < n_names; i++)
     if (secs[i])
       {
-	bfd_set_section_vma (stdoutput, secs[i], addr);
-	addr += bfd_section_size (stdoutput, secs[i]);
+	bfd_set_section_vma (secs[i], addr);
+	addr += bfd_section_size (secs[i]);
       }
   for (i = n_names - 1; i >= 0; i--)
     if (secs[i])
@@ -189,7 +189,7 @@ obj_ecoff_set_ext (symbolS *sym, EXTR *ext)
   know (bfd_asymbol_flavour (symbol_get_bfdsym (sym))
 	== bfd_target_ecoff_flavour);
   esym = ecoffsymbol (symbol_get_bfdsym (sym));
-  esym->local = FALSE;
+  esym->local = false;
   esym->native = xmalloc (debug_swap->external_ext_size);
   (*debug_swap->swap_ext_out) (stdoutput, ext, esym->native);
 }
@@ -222,8 +222,8 @@ ecoff_separate_stab_sections (void)
    relating to debugging information are supported here.
 
    The following pseudo-ops from the Kane and Heinrich MIPS book
-   should be defined here, but are currently unsupported: .aent,
-   .bgnb, .endb, .verstamp, .vreg.
+   should be defined here, but are currently unsupported: .bgnb,
+   .endb, .verstamp, .vreg.
 
    The following pseudo-ops from the Kane and Heinrich MIPS book are
    MIPS CPU specific, and should be defined by tc-mips.c: .alias,
@@ -254,6 +254,7 @@ const pseudo_typeS obj_pseudo_table[] =
   { "val",	ecoff_directive_val,	0 },
 
   /* ECOFF specific debugging information.  */
+  { "aent",	ecoff_directive_ent,	1 },
   { "begin",	ecoff_directive_begin,	0 },
   { "bend",	ecoff_directive_bend,	0 },
   { "end",	ecoff_directive_end,	0 },
@@ -289,6 +290,7 @@ const struct format_ops ecoff_format_ops =
      the single-format definition (0) would be in order.  */
   1,	/* emit_section_symbols.  */
   0,	/* begin.  */
+  0,	/* end.  */
   ecoff_new_file,
   obj_ecoff_frob_symbol,
   ecoff_frob_file,

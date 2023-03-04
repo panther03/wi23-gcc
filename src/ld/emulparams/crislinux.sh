@@ -4,7 +4,7 @@ SCRIPT_NAME=elf
 OUTPUT_FORMAT="elf32-cris"
 NO_REL_RELOCS=yes
 ARCH=cris
-TEMPLATE_NAME=elf32
+TEMPLATE_NAME=elf
 
 ENTRY=_start
 
@@ -16,6 +16,7 @@ GENERATE_SHLIB_SCRIPT=yes
 TEXT_START_ADDR=0x80000
 
 MAXPAGESIZE="CONSTANT (MAXPAGESIZE)"
+COMMONPAGESIZE="CONSTANT (COMMONPAGESIZE)"
 
 # We don't do the hoops through DEFINED to provide [_]*start, as it
 # doesn't work with --gc-sections, and the start-name is pretty fixed

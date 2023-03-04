@@ -1,6 +1,6 @@
 /* Handle shared libraries for GDB, the GNU Debugger.
 
-   Copyright (C) 2000-2013 Free Software Foundation, Inc.
+   Copyright (C) 2000-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -20,10 +20,33 @@
 #ifndef SOLIB_SVR4_H
 #define SOLIB_SVR4_H
 
+#include "solist.h"
+
 struct objfile;
 struct target_so_ops;
 
-extern struct target_so_ops svr4_so_ops;
+extern const struct target_so_ops svr4_so_ops;
+
+/* Link map info to include in an allocated so_list entry.  */
+
+struct lm_info_svr4 : public lm_info_base
+{
+  /* Amount by which addresses in the binary should be relocated to
+     match the inferior.  The direct inferior value is L_ADDR_INFERIOR.
+     When prelinking is involved and the prelink base address changes,
+     we may need a different offset - the recomputed offset is in L_ADDR.
+     It is commonly the same value.  It is cached as we want to warn about
+     the difference and compute it only once.  L_ADDR is valid
+     iff L_ADDR_P.  */
+  CORE_ADDR l_addr = 0, l_addr_inferior = 0;
+  bool l_addr_p = false;
+
+  /* The target location of lm.  */
+  CORE_ADDR lm_addr = 0;
+
+  /* Values read in from inferior's fields of the same name.  */
+  CORE_ADDR l_ld = 0, l_next = 0, l_prev = 0, l_name = 0;
+};
 
 /* Critical offsets and sizes which describe struct r_debug and
    struct link_map on SVR4-like targets.  All offsets and sizes are
@@ -42,6 +65,9 @@ struct link_map_offsets
 
     /* Offset of r_debug.r_ldsomap.  */
     int r_ldsomap_offset;
+
+    /* Offset of r_debug_extended.r_next.  */
+    int r_next_offset;
 
     /* Size of struct link_map (or equivalent), or at least enough of it
        to be able to obtain the fields below.  */

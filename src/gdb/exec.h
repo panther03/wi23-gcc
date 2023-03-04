@@ -1,6 +1,6 @@
 /* Work with executable files, for GDB, the GNU debugger.
 
-   Copyright (C) 2003-2013 Free Software Foundation, Inc.
+   Copyright (C) 2003-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -23,46 +23,44 @@
 #include "target.h"
 #include "progspace.h"
 #include "memrange.h"
+#include "symfile-add-flags.h"
 
 struct target_section;
 struct target_ops;
 struct bfd;
+struct objfile;
 
-extern struct target_ops exec_ops;
+/* Builds a section table, given args BFD.  */
 
-#define exec_bfd current_program_space->ebfd
-#define exec_bfd_mtime current_program_space->ebfd_mtime
-#define exec_filename current_program_space->pspace_exec_filename
+extern target_section_table build_section_table (struct bfd *);
 
-/* Builds a section table, given args BFD, SECTABLE_PTR, SECEND_PTR.
-   Returns 0 if OK, 1 on error.  */
+/* VFORK_CHILD is a child vforked and its program space is shared with its
+   parent.  This pushes the exec target on that inferior's target stack if
+   there are sections in the program space's section table.  */
 
-extern int build_section_table (struct bfd *, struct target_section **,
-				struct target_section **);
+extern void exec_on_vfork (inferior *vfork_child);
 
-/* Resize the section table held by TABLE, by NUM_ADDED.  Returns the
-   old size.  */
+/* Read from mappable read-only sections of BFD executable files.
+   Return TARGET_XFER_OK, if read is successful.  Return
+   TARGET_XFER_EOF if read is done.  Return TARGET_XFER_E_IO
+   otherwise.  */
 
-extern int resize_section_table (struct target_section_table *, int);
-
-/* Appends all read-only memory ranges found in the target section
-   table defined by SECTIONS and SECTIONS_END, starting at (and
-   intersected with) MEMADDR for LEN bytes.  Returns the augmented
-   VEC.  */
-
-extern VEC(mem_range_s) *
-  section_table_available_memory (VEC(mem_range_s) *ranges,
-				  CORE_ADDR memaddr, ULONGEST len,
-				  struct target_section *sections,
-				  struct target_section *sections_end);
+extern enum target_xfer_status
+  exec_read_partial_read_only (gdb_byte *readbuf, ULONGEST offset,
+			       ULONGEST len, ULONGEST *xfered_len);
 
 /* Read or write from mappable sections of BFD executable files.
 
    Request to transfer up to LEN 8-bit bytes of the target sections
    defined by SECTIONS and SECTIONS_END.  The OFFSET specifies the
    starting address.
-   If SECTION_NAME is not NULL, only access sections with that same
-   name.
+
+   The MATCH_CB predicate is optional; when provided it will be called
+   for each section under consideration.  When MATCH_CB evaluates as
+   true, the section remains under consideration; a false result
+   removes it from consideration for performing the memory transfers
+   noted above.  See memory_xfer_partial_1() in target.c for an
+   example.
 
    Return the number of bytes actually transfered, or zero when no
    data is available for the requested range.
@@ -73,33 +71,38 @@ extern VEC(mem_range_s) *
 
    One, and only one, of readbuf or writebuf must be non-NULL.  */
 
-extern int section_table_xfer_memory_partial (gdb_byte *, const gdb_byte *,
-					      ULONGEST, LONGEST,
-					      struct target_section *,
-					      struct target_section *,
-					      const char *);
+extern enum target_xfer_status
+  section_table_xfer_memory_partial (gdb_byte *,
+				     const gdb_byte *,
+				     ULONGEST, ULONGEST, ULONGEST *,
+				     const target_section_table &,
+				     gdb::function_view<bool
+				       (const struct target_section *)> match_cb
+					 = nullptr);
+
+/* Read from mappable read-only sections of BFD executable files.
+   Similar to exec_read_partial_read_only, but return
+   TARGET_XFER_UNAVAILABLE if data is unavailable.  */
+
+extern enum target_xfer_status
+  section_table_read_available_memory (gdb_byte *readbuf, ULONGEST offset,
+				       ULONGEST len, ULONGEST *xfered_len);
 
 /* Set the loaded address of a section.  */
 extern void exec_set_section_address (const char *, int, CORE_ADDR);
-
-/* Remove all target sections owned by OWNER.  */
-
-extern void remove_target_sections (void *owner);
-
-/* Add the sections array defined by [SECTIONS..SECTIONS_END[ to the
-   current set of target sections.  */
-
-extern void add_target_sections (void *owner,
-				 struct target_section *sections,
-				 struct target_section *sections_end);
 
 /* Prints info about all sections defined in the TABLE.  ABFD is
    special cased --- it's filename is omitted; if it is the executable
    file, its entry point is printed.  */
 
-extern void print_section_info (struct target_section_table *table,
+extern void print_section_info (const target_section_table *table,
 				bfd *abfd);
 
-extern void exec_close (void);
+/* Helper function that attempts to open the symbol file at EXEC_FILE_HOST.
+   If successful, it proceeds to add the symbol file as the main symbol file.
 
+   ADD_FLAGS is passed on to the function adding the symbol file.  */
+extern void try_open_exec_file (const char *exec_file_host,
+				struct inferior *inf,
+				symfile_add_flags add_flags);
 #endif

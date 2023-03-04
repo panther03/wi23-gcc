@@ -1,6 +1,5 @@
 /* tc-fr30.h -- Header file for tc-fr30.c.
-   Copyright 1998, 1999, 2000, 2001, 2002, 2003, 2005, 2007, 2009
-   Free Software Foundation, Inc.
+   Copyright (C) 1998-2023 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -45,13 +44,12 @@
 
 #define tc_fix_adjustable(FIX) fr30_fix_adjustable (FIX)
 struct fix;
-extern bfd_boolean fr30_fix_adjustable (struct fix *);
+extern bool fr30_fix_adjustable (struct fix *);
 
 #define tc_gen_reloc gas_cgen_tc_gen_reloc
 
 /* Call md_pcrel_from_section(), not md_pcrel_from().  */
 #define MD_PCREL_FROM_SECTION(FIX, SEC) md_pcrel_from_section (FIX, SEC)
-extern long md_pcrel_from_section (struct fix *, segT);
 
 /* For 8 vs 16 vs 32 bit branch selection.  */
 #define TC_GENERIC_RELAX_TABLE md_relax_table
@@ -59,8 +57,8 @@ extern const struct relax_type md_relax_table[];
 
 /* We need a special version of the TC_START_LABEL macro so that we
    allow the LDI:8, LDI:20, LDI:32 and delay slot instructions to be
-   parsed as such. We need to be able to change the contents of
-   the local variable 'c' which is passed to this macro as 'character'.  */
-#define TC_START_LABEL(character, s, i_l_p)				\
-  ((character) != ':' ? 0 : (character = fr30_is_colon_insn (s)) ? 0 : ((character = ':'), 1))
-extern char fr30_is_colon_insn (char *);
+   parsed as such.  We need to be able to change the contents of the
+   var storing what was at the NUL delimiter.  */
+#define TC_START_LABEL(STR, NUL_CHAR, NEXT_CHAR)		\
+  (NEXT_CHAR == ':' && !fr30_is_colon_insn (STR, &NUL_CHAR))
+extern int fr30_is_colon_insn (char *, char *);

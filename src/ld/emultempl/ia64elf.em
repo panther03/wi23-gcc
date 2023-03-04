@@ -1,5 +1,5 @@
 # This shell script emits a C file. -*- C -*-
-#   Copyright 2003, 2005, 2006, 2007, 2009 Free Software Foundation, Inc.
+#   Copyright (C) 2003-2023 Free Software Foundation, Inc.
 #
 # This file is part of the GNU Binutils.
 #
@@ -19,7 +19,7 @@
 # MA 02110-1301, USA.
 #
 
-# This file is sourced from elf32.em, and defines extra ia64-elf
+# This file is sourced from elf.em, and defines extra ia64-elf
 # specific routines.
 #
 # Define some shell vars to insert bits of code into the standard elf
@@ -27,16 +27,18 @@
 #
 fragment <<EOF
 
+#include "elfxx-ia64.h"
+
 /* None zero if generating binary for Intel Itanium processor.  */
 static int itanium = 0;
 
 static void
-gld${EMULATION_NAME}_after_parse (void)
+ia64elf_after_parse (void)
 {
   link_info.relax_pass = 2;
   bfd_elf${ELFSIZE}_ia64_after_parse (itanium);
 
-  after_parse_default ();
+  ldelf_after_parse ();
 }
 
 EOF
@@ -61,5 +63,5 @@ PARSE_AND_LIST_ARGS_CASES='
       break;
 '
 
-LDEMUL_AFTER_PARSE=gld${EMULATION_NAME}_after_parse
+LDEMUL_AFTER_PARSE=ia64elf_after_parse
 source_em ${srcdir}/emultempl/needrelax.em

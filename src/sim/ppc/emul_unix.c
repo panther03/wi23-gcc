@@ -25,17 +25,9 @@
 /* Note: this module is called via a table.  There is no benefit in
    making it inline */
 
-#include "emul_generic.h"
-#include "emul_unix.h"
+#include "defs.h"
 
-#ifdef HAVE_STRING_H
 #include <string.h>
-#else
-#ifdef HAVE_STRINGS_H
-#include <strings.h>
-#endif
-#endif
-
 #ifdef HAVE_SYS_TYPES_H
 #include <sys/types.h>
 #endif
@@ -60,9 +52,7 @@
 #include <sys/param.h>
 #endif
 
-#ifdef HAVE_SYS_TIME_H
 #include <sys/time.h>
-#endif
 
 #ifndef HAVE_TERMIOS_STRUCTURE
 #undef HAVE_SYS_TERMIOS_H
@@ -125,18 +115,14 @@ int getrusage();
 # endif
 #endif
 
-#ifdef HAVE_UNISTD_H
 #undef MAXPATHLEN		/* sys/param.h might define this also */
 #include <unistd.h>
-#endif
 
-#ifdef HAVE_STDLIB_H
 #include <stdlib.h>
-#endif
+#include <time.h>
 
-#if defined(BSD) && !defined(errno) && (BSD < 199306)	/* here BSD as just a bug */
-extern int errno;
-#endif
+#include "emul_generic.h"
+#include "emul_unix.h"
 
 #ifndef STATIC_INLINE_EMUL_UNIX
 #define STATIC_INLINE_EMUL_UNIX STATIC_INLINE
@@ -162,13 +148,13 @@ struct _os_emul_data {
 
 /* Structures that are common agmonst the UNIX varients */
 struct unix_timeval {
-  signed32 tv_sec;		/* seconds */
-  signed32 tv_usec;		/* microseconds */
+  int32_t tv_sec;		/* seconds */
+  int32_t tv_usec;		/* microseconds */
 };
 
 struct unix_timezone {
-  signed32 tz_minuteswest;	/* minutes west of Greenwich */
-  signed32 tz_dsttime;		/* type of dst correction */
+  int32_t tz_minuteswest;	/* minutes west of Greenwich */
+  int32_t tz_dsttime;		/* type of dst correction */
 };
 
 #define	UNIX_RUSAGE_SELF	0
@@ -178,22 +164,46 @@ struct unix_timezone {
 struct	unix_rusage {
 	struct unix_timeval ru_utime;	/* user time used */
 	struct unix_timeval ru_stime;	/* system time used */
-	signed32 ru_maxrss;		/* maximum resident set size */
-	signed32 ru_ixrss;		/* integral shared memory size */
-	signed32 ru_idrss;		/* integral unshared data size */
-	signed32 ru_isrss;		/* integral unshared stack size */
-	signed32 ru_minflt;		/* any page faults not requiring I/O */
-	signed32 ru_majflt;		/* any page faults requiring I/O */
-	signed32 ru_nswap;		/* swaps */
-	signed32 ru_inblock;		/* block input operations */
-	signed32 ru_oublock;		/* block output operations */
-	signed32 ru_msgsnd;		/* messages sent */
-	signed32 ru_msgrcv;		/* messages received */
-	signed32 ru_nsignals;		/* signals received */
-	signed32 ru_nvcsw;		/* voluntary context switches */
-	signed32 ru_nivcsw;		/* involuntary " */
+	int32_t ru_maxrss;		/* maximum resident set size */
+	int32_t ru_ixrss;		/* integral shared memory size */
+	int32_t ru_idrss;		/* integral unshared data size */
+	int32_t ru_isrss;		/* integral unshared stack size */
+	int32_t ru_minflt;		/* any page faults not requiring I/O */
+	int32_t ru_majflt;		/* any page faults requiring I/O */
+	int32_t ru_nswap;		/* swaps */
+	int32_t ru_inblock;		/* block input operations */
+	int32_t ru_oublock;		/* block output operations */
+	int32_t ru_msgsnd;		/* messages sent */
+	int32_t ru_msgrcv;		/* messages received */
+	int32_t ru_nsignals;		/* signals received */
+	int32_t ru_nvcsw;		/* voluntary context switches */
+	int32_t ru_nivcsw;		/* involuntary " */
 };
 
+
+/* File descriptors 0, 1, and 2 should not be closed.  fd_closed[]
+   tracks whether these descriptors have been closed in do_close()
+   below.  */
+
+static int fd_closed[3];
+
+/* Check for some occurrences of bad file descriptors.  We only check
+   whether fd 0, 1, or 2 are "closed".  By "closed" we mean that these
+   descriptors aren't actually closed, but are considered to be closed
+   by this layer.
+
+   Other checks are performed by the underlying OS call.  */
+
+static int
+fdbad (int fd)
+{
+  if (fd >=0 && fd <= 2 && fd_closed[fd])
+    {
+      errno = EBADF;
+      return -1;
+    }
+  return 0;
+}
 
 static void
 do_unix_exit(os_emul_data *emul,
@@ -232,8 +242,10 @@ do_unix_read(os_emul_data *emul,
   /* check if buffer exists by reading it */
   emul_read_buffer(scratch_buffer, buf, nbytes, processor, cia);
 
+  status = fdbad (d);
   /* read */
-  status = read (d, scratch_buffer, nbytes);
+  if (status == 0)
+    status = read (d, scratch_buffer, nbytes);
 
   emul_write_status(processor, status, errno);
   if (status > 0)
@@ -266,8 +278,10 @@ do_unix_write(os_emul_data *emul,
   emul_read_buffer(scratch_buffer, buf, nbytes,
 		   processor, cia);
 
+  status = fdbad (d);
   /* write */
-  status = write(d, scratch_buffer, nbytes);
+  if (status == 0)
+    status = write(d, scratch_buffer, nbytes);
   emul_write_status(processor, status, errno);
   free(scratch_buffer);
 
@@ -310,7 +324,20 @@ do_unix_close(os_emul_data *emul,
   if (WITH_TRACE && ppc_trace[trace_os_emul])
     printf_filtered ("%d", d);
 
-  status = close(d);
+  status = fdbad (d);
+  if (status == 0)
+    {
+      /* Do not close stdin, stdout, or stderr. GDB may still need access to
+	 these descriptors.  */
+      if (d == 0 || d == 1 || d == 2)
+	{
+	  fd_closed[d] = 1;
+	  status = 0;
+	}
+      else
+	status = close(d);
+    }
+
   emul_write_status(processor, status, errno);
 }
 
@@ -490,7 +517,7 @@ do_unix_dup(os_emul_data *emul,
 	    unsigned_word cia)
 {
   int oldd = cpu_registers(processor)->gpr[arg0];
-  int status = dup(oldd);
+  int status = (fdbad (oldd) < 0) ? -1 : dup(oldd);
   int err = errno;
 
   if (WITH_TRACE && ppc_trace[trace_os_emul])
@@ -512,7 +539,7 @@ do_unix_dup2(os_emul_data *emul,
 {
   int oldd = cpu_registers(processor)->gpr[arg0];
   int newd = cpu_registers(processor)->gpr[arg0+1];
-  int status = dup2(oldd, newd);
+  int status = (fdbad (oldd) < 0) ? -1 : dup2(oldd, newd);
   int err = errno;
 
   if (WITH_TRACE && ppc_trace[trace_os_emul])
@@ -540,7 +567,9 @@ do_unix_lseek(os_emul_data *emul,
   if (WITH_TRACE && ppc_trace[trace_os_emul])
     printf_filtered ("%d %ld %d", fildes, (long)offset, whence);
 
-  status = lseek(fildes, offset, whence);
+  status = fdbad (fildes);
+  if (status == 0)
+    status = lseek(fildes, offset, whence);
   emul_write_status(processor, (int)status, errno);
 }
 #endif
@@ -729,11 +758,7 @@ do_unix_mkdir(os_emul_data *emul,
   if (WITH_TRACE && ppc_trace[trace_os_emul])
     printf_filtered ("0x%lx [%s], 0%3o", (long)path_addr, path, mode);
 
-#ifdef USE_WIN32API
-  status = mkdir(path);
-#else
   status = mkdir(path, mode);
-#endif
   emul_write_status(processor, status, errno);
 }
 #endif
@@ -785,7 +810,7 @@ do_unix_time(os_emul_data *emul,
 }
 #endif
 
-#if !defined(HAVE_GETTIMEOFDAY) || !defined(HAVE_SYS_TIME_H)
+#if !defined(HAVE_GETTIMEOFDAY)
 #define do_unix_gettimeofday 0
 #else
 static void
@@ -1020,17 +1045,16 @@ emul_unix_create(device *root,
 
 /* Solaris specific implementation */
 
-typedef	signed32	solaris_uid_t;
-typedef	signed32	solaris_gid_t;
-typedef signed32	solaris_off_t;
-typedef signed32	solaris_pid_t;
-typedef signed32	solaris_time_t;
-typedef unsigned32	solaris_dev_t;
-typedef unsigned32	solaris_ino_t;
-typedef unsigned32	solaris_mode_t;
-typedef	unsigned32	solaris_nlink_t;
+typedef	int32_t	solaris_uid_t;
+typedef	int32_t	solaris_gid_t;
+typedef int32_t	solaris_off_t;
+typedef int32_t	solaris_pid_t;
+typedef int32_t	solaris_time_t;
+typedef uint32_t	solaris_dev_t;
+typedef uint32_t	solaris_ino_t;
+typedef uint32_t	solaris_mode_t;
+typedef	uint32_t	solaris_nlink_t;
 
-#ifdef HAVE_SYS_STAT_H
 #define	SOLARIS_ST_FSTYPSZ 16		/* array size for file system type name */
 
 /* AIX 7.1 defines st_pad[123] to st_[amc]tim.tv_pad, respectively */
@@ -1040,23 +1064,23 @@ typedef	unsigned32	solaris_nlink_t;
 
 struct solaris_stat {
   solaris_dev_t		st_dev;
-  signed32		st_pad1[3];	/* reserved for network id */
+  int32_t		st_pad1[3];	/* reserved for network id */
   solaris_ino_t		st_ino;
   solaris_mode_t	st_mode;
   solaris_nlink_t 	st_nlink;
   solaris_uid_t 	st_uid;
   solaris_gid_t 	st_gid;
   solaris_dev_t		st_rdev;
-  signed32		st_pad2[2];
+  int32_t		st_pad2[2];
   solaris_off_t		st_size;
-  signed32		st_pad3;	/* future off_t expansion */
+  int32_t		st_pad3;	/* future off_t expansion */
   struct unix_timeval	st_atim;
   struct unix_timeval	st_mtim;
   struct unix_timeval	st_ctim;
-  signed32		st_blksize;
-  signed32		st_blocks;
+  int32_t		st_blksize;
+  int32_t		st_blocks;
   char			st_fstype[SOLARIS_ST_FSTYPSZ];
-  signed32		st_pad4[8];	/* expansion area */
+  int32_t		st_pad4[8];	/* expansion area */
 };
 
 /* Convert from host stat structure to solaris stat structure */
@@ -1104,15 +1128,15 @@ convert_to_solaris_stat(unsigned_word addr,
   target.st_mtim.tv_sec  = H2T_4(host->st_mtime);
   target.st_mtim.tv_usec = 0;
 
-  for (i = 0; i < sizeof (target.st_pad1) / sizeof (target.st_pad1[0]); i++)
+  for (i = 0; i < ARRAY_SIZE (target.st_pad1); i++)
     target.st_pad1[i] = 0;
 
-  for (i = 0; i < sizeof (target.st_pad2) / sizeof (target.st_pad2[0]); i++)
+  for (i = 0; i < ARRAY_SIZE (target.st_pad2); i++)
     target.st_pad2[i] = 0;
 
   target.st_pad3 = 0;
 
-  for (i = 0; i < sizeof (target.st_pad4) / sizeof (target.st_pad4[0]); i++)
+  for (i = 0; i < ARRAY_SIZE (target.st_pad4); i++)
     target.st_pad4[i] = 0;
 
   /* For now, just punt and always say it is a ufs file */
@@ -1120,7 +1144,6 @@ convert_to_solaris_stat(unsigned_word addr,
 
   emul_write_buffer(&target, addr, sizeof(target), processor, cia);
 }
-#endif /* HAVE_SYS_STAT_H */
 
 #ifndef HAVE_STAT
 #define do_solaris_stat 0
@@ -1196,7 +1219,9 @@ do_solaris_fstat(os_emul_data *emul,
   if (WITH_TRACE && ppc_trace[trace_os_emul])
     printf_filtered ("%d, 0x%lx", fildes, (long)stat_pkt);
 
-  status = fstat (fildes, &buf);
+  status = fdbad (fildes);
+  if (status == 0)
+    status = fstat (fildes, &buf);
   if (status == 0)
     convert_to_solaris_stat (stat_pkt, &buf, processor, cia);
 
@@ -1231,12 +1256,12 @@ do_solaris_fstat(os_emul_data *emul,
 /* Convert to/from host termio structure */
 
 struct solaris_termio {
-	unsigned16	c_iflag;		/* input modes */
-	unsigned16	c_oflag;		/* output modes */
-	unsigned16	c_cflag;		/* control modes */
-	unsigned16	c_lflag;		/* line discipline modes */
-	unsigned8	c_line;			/* line discipline */
-	unsigned8	c_cc[SOLARIS_NCC];	/* control chars */
+	uint16_t	c_iflag;		/* input modes */
+	uint16_t	c_oflag;		/* output modes */
+	uint16_t	c_cflag;		/* control modes */
+	uint16_t	c_lflag;		/* line discipline modes */
+	uint8_t	c_line;			/* line discipline */
+	uint8_t	c_cc[SOLARIS_NCC];	/* control chars */
 };
 
 STATIC_INLINE_EMUL_UNIX void
@@ -1306,9 +1331,9 @@ convert_to_solaris_termio(unsigned_word addr,
 #ifdef HAVE_TERMIOS_STRUCTURE
 /* Convert to/from host termios structure */
 
-typedef unsigned32 solaris_tcflag_t;
-typedef unsigned8  solaris_cc_t;
-typedef unsigned32 solaris_speed_t;
+typedef uint32_t solaris_tcflag_t;
+typedef uint8_t  solaris_cc_t;
+typedef uint32_t solaris_speed_t;
 
 struct solaris_termios {
   solaris_tcflag_t	c_iflag;
@@ -1433,6 +1458,10 @@ do_solaris_ioctl(os_emul_data *emul,
 #endif
 #endif
 
+  status = fdbad (fildes);
+  if (status != 0)
+    goto done;
+
   switch (request)
     {
     case 0:					/* make sure we have at least one case */
@@ -1474,6 +1503,7 @@ do_solaris_ioctl(os_emul_data *emul,
 #endif /* HAVE_TERMIOS_STRUCTURE */
     }
 
+done:
   emul_write_status(processor, status, errno);
 
   if (WITH_TRACE && ppc_trace[trace_os_emul])
@@ -1895,11 +1925,11 @@ static char *(solaris_signal_names[]) = {
 
 static emul_syscall emul_solaris_syscalls = {
   solaris_descriptors,
-  sizeof(solaris_descriptors) / sizeof(solaris_descriptors[0]),
+  ARRAY_SIZE (solaris_descriptors),
   solaris_error_names,
-  sizeof(solaris_error_names) / sizeof(solaris_error_names[0]),
+  ARRAY_SIZE (solaris_error_names),
   solaris_signal_names,
-  sizeof(solaris_signal_names) / sizeof(solaris_signal_names[0]),
+  ARRAY_SIZE (solaris_signal_names),
 };
 
 
@@ -1925,7 +1955,9 @@ static void
 emul_solaris_init(os_emul_data *emul_data,
 		  int nr_cpus)
 {
-  /* nothing yet */
+  fd_closed[0] = 0;
+  fd_closed[1] = 0;
+  fd_closed[2] = 0;
 }
 
 static void
@@ -1962,22 +1994,21 @@ const os_emul emul_solaris = {
 
 /* Linux specific implementation */
 
-typedef unsigned32	linux_dev_t;
-typedef unsigned32	linux_ino_t;
-typedef unsigned32	linux_mode_t;
-typedef unsigned16	linux_nlink_t;
-typedef signed32	linux_off_t;
-typedef signed32	linux_pid_t;
-typedef unsigned32	linux_uid_t;
-typedef unsigned32	linux_gid_t;
-typedef unsigned32	linux_size_t;
-typedef signed32	linux_ssize_t;
-typedef signed32	linux_ptrdiff_t;
-typedef signed32	linux_time_t;
-typedef signed32	linux_clock_t;
-typedef signed32	linux_daddr_t;
+typedef uint32_t	linux_dev_t;
+typedef uint32_t	linux_ino_t;
+typedef uint32_t	linux_mode_t;
+typedef uint16_t	linux_nlink_t;
+typedef int32_t	linux_off_t;
+typedef int32_t	linux_pid_t;
+typedef uint32_t	linux_uid_t;
+typedef uint32_t	linux_gid_t;
+typedef uint32_t	linux_size_t;
+typedef int32_t	linux_ssize_t;
+typedef int32_t	linux_ptrdiff_t;
+typedef int32_t	linux_time_t;
+typedef int32_t	linux_clock_t;
+typedef int32_t	linux_daddr_t;
 
-#ifdef HAVE_SYS_STAT_H
 /* For the PowerPC, don't both with the 'old' stat structure, since there
    should be no extant binaries with that structure.  */
 
@@ -1990,16 +2021,16 @@ struct linux_stat {
 	linux_gid_t 	st_gid;
 	linux_dev_t	st_rdev;
 	linux_off_t	st_size;
-	unsigned32  	st_blksize;
-	unsigned32  	st_blocks;
-	unsigned32  	st_atimx;	/* don't use st_{a,c,m}time, that might a macro */
-	unsigned32  	__unused1;	/* defined by the host's stat.h */
-	unsigned32  	st_mtimx;
-	unsigned32  	__unused2;
-	unsigned32  	st_ctimx;
-	unsigned32  	__unused3;
-	unsigned32  	__unused4;
-	unsigned32  	__unused5;
+	uint32_t  	st_blksize;
+	uint32_t  	st_blocks;
+	uint32_t  	st_atimx;	/* don't use st_{a,c,m}time, that might a macro */
+	uint32_t  	__unused1;	/* defined by the host's stat.h */
+	uint32_t  	st_mtimx;
+	uint32_t  	__unused2;
+	uint32_t  	st_ctimx;
+	uint32_t  	__unused3;
+	uint32_t  	__unused4;
+	uint32_t  	__unused5;
 };
 
 /* Convert from host stat structure to solaris stat structure */
@@ -2048,7 +2079,6 @@ convert_to_linux_stat(unsigned_word addr,
 
   emul_write_buffer(&target, addr, sizeof(target), processor, cia);
 }
-#endif /* HAVE_SYS_STAT_H */
 
 #ifndef HAVE_STAT
 #define do_linux_stat 0
@@ -2124,7 +2154,9 @@ do_linux_fstat(os_emul_data *emul,
   if (WITH_TRACE && ppc_trace[trace_os_emul])
     printf_filtered ("%d, 0x%lx", fildes, (long)stat_pkt);
 
-  status = fstat (fildes, &buf);
+  status = fdbad (fildes);
+  if (status == 0)
+    status = fstat (fildes, &buf);
   if (status == 0)
     convert_to_linux_stat (stat_pkt, &buf, processor, cia);
 
@@ -2195,12 +2227,12 @@ do_linux_fstat(os_emul_data *emul,
 /* Convert to/from host termio structure */
 
 struct linux_termio {
-	unsigned16	c_iflag;		/* input modes */
-	unsigned16	c_oflag;		/* output modes */
-	unsigned16	c_cflag;		/* control modes */
-	unsigned16	c_lflag;		/* line discipline modes */
-	unsigned8	c_line;			/* line discipline */
-	unsigned8	c_cc[LINUX_NCC];	/* control chars */
+	uint16_t	c_iflag;		/* input modes */
+	uint16_t	c_oflag;		/* output modes */
+	uint16_t	c_cflag;		/* control modes */
+	uint16_t	c_lflag;		/* line discipline modes */
+	uint8_t	c_line;			/* line discipline */
+	uint8_t	c_cc[LINUX_NCC];	/* control chars */
 };
 
 STATIC_INLINE_EMUL_UNIX void
@@ -2277,9 +2309,9 @@ convert_to_linux_termio(unsigned_word addr,
 #ifdef HAVE_TERMIOS_STRUCTURE
 /* Convert to/from host termios structure */
 
-typedef unsigned32 linux_tcflag_t;
-typedef unsigned8  linux_cc_t;
-typedef unsigned32 linux_speed_t;
+typedef uint32_t linux_tcflag_t;
+typedef uint8_t  linux_cc_t;
+typedef uint32_t linux_speed_t;
 
 struct linux_termios {
   linux_tcflag_t	c_iflag;
@@ -2288,8 +2320,8 @@ struct linux_termios {
   linux_tcflag_t	c_lflag;
   linux_cc_t		c_cc[LINUX_NCCS];
   linux_cc_t		c_line;
-  signed32		c_ispeed;
-  signed32		c_ospeed;
+  int32_t		c_ispeed;
+  int32_t		c_ospeed;
 };
 
 STATIC_INLINE_EMUL_UNIX void
@@ -2388,6 +2420,10 @@ do_linux_ioctl(os_emul_data *emul,
 #endif
 #endif
 
+  status = fdbad (fildes);
+  if (status != 0)
+    goto done;
+
   switch (request)
     {
     case 0:					/* make sure we have at least one case */
@@ -2429,6 +2465,7 @@ do_linux_ioctl(os_emul_data *emul,
 #endif /* HAVE_TERMIOS_STRUCTURE */
     }
 
+done:
   emul_write_status(processor, status, errno);
 
   if (WITH_TRACE && ppc_trace[trace_os_emul])
@@ -2765,11 +2802,11 @@ static char *(linux_signal_names[]) = {
 
 static emul_syscall emul_linux_syscalls = {
   linux_descriptors,
-  sizeof(linux_descriptors) / sizeof(linux_descriptors[0]),
+  ARRAY_SIZE (linux_descriptors),
   linux_error_names,
-  sizeof(linux_error_names) / sizeof(linux_error_names[0]),
+  ARRAY_SIZE (linux_error_names),
   linux_signal_names,
-  sizeof(linux_signal_names) / sizeof(linux_signal_names[0]),
+  ARRAY_SIZE (linux_signal_names),
 };
 
 
@@ -2795,7 +2832,9 @@ static void
 emul_linux_init(os_emul_data *emul_data,
 		int nr_cpus)
 {
-  /* nothing yet */
+  fd_closed[0] = 0;
+  fd_closed[1] = 0;
+  fd_closed[2] = 0;
 }
 
 static void

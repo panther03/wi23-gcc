@@ -1,5 +1,5 @@
 /* Simulator for the moxie processor
-   Copyright (C) 2008-2013 Free Software Foundation, Inc.
+   Copyright (C) 2008-2023 Free Software Foundation, Inc.
    Contributed by Anthony Green
 
 This file is part of GDB, the GNU debugger.
@@ -17,28 +17,27 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "config.h"
+/* This must come before any other includes.  */
+#include "defs.h"
+
 #include <fcntl.h>
 #include <signal.h>
 #include <stdlib.h>
-#include "sysdep.h"
-#include <sys/times.h>
+#include <string.h>
 #include <sys/param.h>
-#include <netinet/in.h>	/* for byte ordering macros */
+#include <unistd.h>
 #include "bfd.h"
-#include "gdb/callback.h"
 #include "libiberty.h"
-#include "gdb/remote-sim.h"
+#include "sim/sim.h"
 
 #include "sim-main.h"
 #include "sim-base.h"
+#include "sim-options.h"
+#include "sim-io.h"
+#include "sim-signal.h"
+#include "target-newlib-syscall.h"
 
-typedef int word;
-typedef unsigned int uword;
-
-host_callback *       callback;
-
-FILE *tracefile;
+#include "moxie-sim.h"
 
 /* Extract the signed 10-bit offset from a 16-bit branch
    instruction.  */
@@ -50,10 +49,14 @@ FILE *tracefile;
    + (sim_core_read_aligned_1 (scpu, cia, read_map, addr+2) << 8) \
    + (sim_core_read_aligned_1 (scpu, cia, read_map, addr+3)))
 
-unsigned long
-moxie_extract_unsigned_integer (addr, len)
-     unsigned char * addr;
-     int len;
+#define EXTRACT_OFFSET(addr)						\
+  (unsigned int)							\
+  (((signed short)							\
+    ((sim_core_read_aligned_1 (scpu, cia, read_map, addr) << 8)		\
+     + (sim_core_read_aligned_1 (scpu, cia, read_map, addr+1))) << 16) >> 16)
+
+static unsigned long
+moxie_extract_unsigned_integer (const unsigned char *addr, int len)
 {
   unsigned long retval;
   unsigned char * p;
@@ -61,7 +64,7 @@ moxie_extract_unsigned_integer (addr, len)
   unsigned char * endaddr = startaddr + len;
  
   if (len > (int) sizeof (unsigned long))
-    printf ("That operation is not available on integers of more than %d bytes.",
+    printf ("That operation is not available on integers of more than %zu bytes.",
 	    sizeof (unsigned long));
  
   /* Start at the most significant end of the integer, and work towards
@@ -74,11 +77,8 @@ moxie_extract_unsigned_integer (addr, len)
   return retval;
 }
 
-void
-moxie_store_unsigned_integer (addr, len, val)
-     unsigned char * addr;
-     int len;
-     unsigned long val;
+static void
+moxie_store_unsigned_integer (unsigned char *addr, int len, unsigned long val)
 {
   unsigned char * p;
   unsigned char * startaddr = (unsigned char *)addr;
@@ -111,12 +111,12 @@ static const char *reg_names[16] =
 
 /* The ordering of the moxie_regset structure is matched in the
    gdb/config/moxie/tm-moxie.h file in the REGISTER_NAMES macro.  */
+/* TODO: This should be moved to sim-main.h:_sim_cpu.  */
 struct moxie_regset
 {
-  word		  regs[NUM_MOXIE_REGS + 1]; /* primary registers */
-  word		  sregs[256];             /* special registers */
-  word            cc;                   /* the condition code reg */
-  int		  exception;
+  int32_t	     regs[NUM_MOXIE_REGS + 1]; /* primary registers */
+  int32_t	     sregs[256];           /* special registers */
+  int32_t	     cc;                   /* the condition code reg */
   unsigned long long insts;                /* instruction counter */
 };
 
@@ -126,23 +126,15 @@ struct moxie_regset
 #define CC_GTU 1<<3
 #define CC_LTU 1<<4
 
+/* TODO: This should be moved to sim-main.h:moxie_sim_cpu.  */
 union
 {
   struct moxie_regset asregs;
-  word asints [1];		/* but accessed larger... */
+  int32_t asints [1];		/* but accessed larger... */
 } cpu;
 
-static char *myname;
-static SIM_OPEN_KIND sim_kind;
-static int issue_messages = 0;
-
-void
-sim_size (int s)
-{
-}
-
 static void
-set_initial_gprs ()
+set_initial_gprs (void)
 {
   int i;
   long space;
@@ -157,75 +149,69 @@ set_initial_gprs ()
     cpu.asregs.sregs[i] = 0;
 }
 
-static void
-interrupt ()
-{
-  cpu.asregs.exception = SIGINT;
-}
-
 /* Write a 1 byte value to memory.  */
 
-static void INLINE 
-wbat (sim_cpu *scpu, word pc, word x, word v)
+static INLINE void
+wbat (sim_cpu *scpu, int32_t pc, int32_t x, int32_t v)
 {
-  address_word cia = CIA_GET (scpu);
+  address_word cia = CPU_PC_GET (scpu);
   
   sim_core_write_aligned_1 (scpu, cia, write_map, x, v);
 }
 
 /* Write a 2 byte value to memory.  */
 
-static void INLINE 
-wsat (sim_cpu *scpu, word pc, word x, word v)
+static INLINE void
+wsat (sim_cpu *scpu, int32_t pc, int32_t x, int32_t v)
 {
-  address_word cia = CIA_GET (scpu);
+  address_word cia = CPU_PC_GET (scpu);
   
   sim_core_write_aligned_2 (scpu, cia, write_map, x, v);
 }
 
 /* Write a 4 byte value to memory.  */
 
-static void INLINE 
-wlat (sim_cpu *scpu, word pc, word x, word v)
+static INLINE void
+wlat (sim_cpu *scpu, int32_t pc, int32_t x, int32_t v)
 {
-  address_word cia = CIA_GET (scpu);
+  address_word cia = CPU_PC_GET (scpu);
 	
   sim_core_write_aligned_4 (scpu, cia, write_map, x, v);
 }
 
 /* Read 2 bytes from memory.  */
 
-static int INLINE 
-rsat (sim_cpu *scpu, word pc, word x)
+static INLINE int
+rsat (sim_cpu *scpu, int32_t pc, int32_t x)
 {
-  address_word cia = CIA_GET (scpu);
+  address_word cia = CPU_PC_GET (scpu);
   
   return (sim_core_read_aligned_2 (scpu, cia, read_map, x));
 }
 
 /* Read 1 byte from memory.  */
 
-static int INLINE 
-rbat (sim_cpu *scpu, word pc, word x)
+static INLINE int
+rbat (sim_cpu *scpu, int32_t pc, int32_t x)
 {
-  address_word cia = CIA_GET (scpu);
+  address_word cia = CPU_PC_GET (scpu);
   
   return (sim_core_read_aligned_1 (scpu, cia, read_map, x));
 }
 
 /* Read 4 bytes from memory.  */
 
-static int INLINE 
-rlat (sim_cpu *scpu, word pc, word x)
+static INLINE int
+rlat (sim_cpu *scpu, int32_t pc, int32_t x)
 {
-  address_word cia = CIA_GET (scpu);
+  address_word cia = CPU_PC_GET (scpu);
   
   return (sim_core_read_aligned_4 (scpu, cia, read_map, x));
 }
 
 #define CHECK_FLAG(T,H) if (tflags & T) { hflags |= H; tflags ^= T; }
 
-unsigned int 
+static unsigned int
 convert_target_flags (unsigned int tflags)
 {
   unsigned int hflags = 0x0;
@@ -246,26 +232,28 @@ convert_target_flags (unsigned int tflags)
   return hflags;
 }
 
-#define TRACE(str) if (tracing) fprintf(tracefile,"0x%08x, %s, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x\n", opc, str, cpu.asregs.regs[0], cpu.asregs.regs[1], cpu.asregs.regs[2], cpu.asregs.regs[3], cpu.asregs.regs[4], cpu.asregs.regs[5], cpu.asregs.regs[6], cpu.asregs.regs[7], cpu.asregs.regs[8], cpu.asregs.regs[9], cpu.asregs.regs[10], cpu.asregs.regs[11], cpu.asregs.regs[12], cpu.asregs.regs[13], cpu.asregs.regs[14], cpu.asregs.regs[15]);
-
-static int tracing = 0;
+/* TODO: Split this up into finger trace levels than just insn.  */
+#define MOXIE_TRACE_INSN(str) \
+  TRACE_INSN (scpu, "0x%08x, %s, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x", \
+	      opc, str, cpu.asregs.regs[0], cpu.asregs.regs[1], \
+	      cpu.asregs.regs[2], cpu.asregs.regs[3], cpu.asregs.regs[4], \
+	      cpu.asregs.regs[5], cpu.asregs.regs[6], cpu.asregs.regs[7], \
+	      cpu.asregs.regs[8], cpu.asregs.regs[9], cpu.asregs.regs[10], \
+	      cpu.asregs.regs[11], cpu.asregs.regs[12], cpu.asregs.regs[13], \
+	      cpu.asregs.regs[14], cpu.asregs.regs[15])
 
 void
-sim_resume (sd, step, siggnal)
-     SIM_DESC sd;
-     int step, siggnal;
+sim_engine_run (SIM_DESC sd,
+		int next_cpu_nr, /* ignore  */
+		int nr_cpus, /* ignore  */
+		int siggnal) /* ignore  */
 {
-  word pc, opc;
-  unsigned long long insts;
+  int32_t pc, opc;
   unsigned short inst;
-  void (* sigsave)();
   sim_cpu *scpu = STATE_CPU (sd, 0); /* FIXME */
-  address_word cia = CIA_GET (scpu);
+  address_word cia = CPU_PC_GET (scpu);
 
-  sigsave = signal (SIGINT, interrupt);
-  cpu.asregs.exception = step ? SIGTRAP: 0;
   pc = cpu.asregs.regs[PC_REGNO];
-  insts = cpu.asregs.insts;
 
   /* Run instructions here. */
   do 
@@ -288,77 +276,77 @@ sim_resume (sd, step, siggnal)
 		{
 		case 0x00: /* beq */
 		  {
-		    TRACE("beq");
+		    MOXIE_TRACE_INSN ("beq");
 		    if (cpu.asregs.cc & CC_EQ)
 		      pc += INST2OFFSET(inst);
 		  }
 		  break;
 		case 0x01: /* bne */
 		  {
-		    TRACE("bne");
+		    MOXIE_TRACE_INSN ("bne");
 		    if (! (cpu.asregs.cc & CC_EQ))
 		      pc += INST2OFFSET(inst);
 		  }
 		  break;
 		case 0x02: /* blt */
 		  {
-		    TRACE("blt");
+		    MOXIE_TRACE_INSN ("blt");
 		    if (cpu.asregs.cc & CC_LT)
 		      pc += INST2OFFSET(inst);
 		  }		  break;
 		case 0x03: /* bgt */
 		  {
-		    TRACE("bgt");
+		    MOXIE_TRACE_INSN ("bgt");
 		    if (cpu.asregs.cc & CC_GT)
 		      pc += INST2OFFSET(inst);
 		  }
 		  break;
 		case 0x04: /* bltu */
 		  {
-		    TRACE("bltu");
+		    MOXIE_TRACE_INSN ("bltu");
 		    if (cpu.asregs.cc & CC_LTU)
 		      pc += INST2OFFSET(inst);
 		  }
 		  break;
 		case 0x05: /* bgtu */
 		  {
-		    TRACE("bgtu");
+		    MOXIE_TRACE_INSN ("bgtu");
 		    if (cpu.asregs.cc & CC_GTU)
 		      pc += INST2OFFSET(inst);
 		  }
 		  break;
 		case 0x06: /* bge */
 		  {
-		    TRACE("bge");
+		    MOXIE_TRACE_INSN ("bge");
 		    if (cpu.asregs.cc & (CC_GT | CC_EQ))
 		      pc += INST2OFFSET(inst);
 		  }
 		  break;
 		case 0x07: /* ble */
 		  {
-		    TRACE("ble");
+		    MOXIE_TRACE_INSN ("ble");
 		    if (cpu.asregs.cc & (CC_LT | CC_EQ))
 		      pc += INST2OFFSET(inst);
 		  }
 		  break;
 		case 0x08: /* bgeu */
 		  {
-		    TRACE("bgeu");
+		    MOXIE_TRACE_INSN ("bgeu");
 		    if (cpu.asregs.cc & (CC_GTU | CC_EQ))
 		      pc += INST2OFFSET(inst);
 		  }
 		  break;
 		case 0x09: /* bleu */
 		  {
-		    TRACE("bleu");
+		    MOXIE_TRACE_INSN ("bleu");
 		    if (cpu.asregs.cc & (CC_LTU | CC_EQ))
 		      pc += INST2OFFSET(inst);
 		  }
 		  break;
 		default:
 		  {
-		    TRACE("SIGILL3");
-		    cpu.asregs.exception = SIGILL;
+		    MOXIE_TRACE_INSN ("SIGILL3");
+		    sim_engine_halt (sd, scpu, NULL, pc, sim_stopped, SIM_SIGILL);
 		    break;
 		  }
 		}
@@ -374,7 +362,8 @@ sim_resume (sd, step, siggnal)
 		    int a = (inst >> 8) & 0xf;
 		    unsigned av = cpu.asregs.regs[a];
 		    unsigned v = (inst & 0xff);
-		    TRACE("inc");
+
+		    MOXIE_TRACE_INSN ("inc");
 		    cpu.asregs.regs[a] = av + v;
 		  }
 		  break;
@@ -383,7 +372,8 @@ sim_resume (sd, step, siggnal)
 		    int a = (inst >> 8) & 0xf;
 		    unsigned av = cpu.asregs.regs[a];
 		    unsigned v = (inst & 0xff);
-		    TRACE("dec");
+
+		    MOXIE_TRACE_INSN ("dec");
 		    cpu.asregs.regs[a] = av - v;
 		  }
 		  break;
@@ -391,7 +381,8 @@ sim_resume (sd, step, siggnal)
 		  {
 		    int a = (inst >> 8) & 0xf;
 		    unsigned v = (inst & 0xff);
-		    TRACE("gsr");
+
+		    MOXIE_TRACE_INSN ("gsr");
 		    cpu.asregs.regs[a] = cpu.asregs.sregs[v];
 		  }
 		  break;
@@ -399,13 +390,14 @@ sim_resume (sd, step, siggnal)
 		  {
 		    int a = (inst >> 8) & 0xf;
 		    unsigned v = (inst & 0xff);
-		    TRACE("ssr");
+
+		    MOXIE_TRACE_INSN ("ssr");
 		    cpu.asregs.sregs[v] = cpu.asregs.regs[a];
 		  }
 		  break;
 		default:
-		  TRACE("SIGILL2");
-		  cpu.asregs.exception = SIGILL;
+		  MOXIE_TRACE_INSN ("SIGILL2");
+		  sim_engine_halt (sd, scpu, NULL, pc, sim_stopped, SIM_SIGILL);
 		  break;
 		}
 	    }
@@ -418,14 +410,15 @@ sim_resume (sd, step, siggnal)
 	    {
 	    case 0x00: /* bad */
 	      opc = opcode;
-	      TRACE("SIGILL0");
-	      cpu.asregs.exception = SIGILL;
+	      MOXIE_TRACE_INSN ("SIGILL0");
+	      sim_engine_halt (sd, scpu, NULL, pc, sim_stopped, SIM_SIGILL);
 	      break;
 	    case 0x01: /* ldi.l (immediate) */
 	      {
 		int reg = (inst >> 4) & 0xf;
-		TRACE("ldi.l");
 		unsigned int val = EXTRACT_WORD(pc+2);
+
+		MOXIE_TRACE_INSN ("ldi.l");
 		cpu.asregs.regs[reg] = val;
 		pc += 4;
 	      }
@@ -434,7 +427,8 @@ sim_resume (sd, step, siggnal)
 	      {
 		int dest  = (inst >> 4) & 0xf;
 		int src = (inst ) & 0xf;
-		TRACE("mov");
+
+		MOXIE_TRACE_INSN ("mov");
 		cpu.asregs.regs[dest] = cpu.asregs.regs[src];
 	      }
 	      break;
@@ -442,7 +436,8 @@ sim_resume (sd, step, siggnal)
  	      {
  		unsigned int fn = EXTRACT_WORD(pc+2);
  		unsigned int sp = cpu.asregs.regs[1];
-		TRACE("jsra");
+
+		MOXIE_TRACE_INSN ("jsra");
  		/* Save a slot for the static chain.  */
 		sp -= 4;
 
@@ -464,7 +459,7 @@ sim_resume (sd, step, siggnal)
  	      {
  		unsigned int sp = cpu.asregs.regs[0];
 
-		TRACE("ret");
+		MOXIE_TRACE_INSN ("ret");
  
  		/* Pop the frame pointer.  */
  		cpu.asregs.regs[0] = rlat (scpu, opc, sp);
@@ -487,7 +482,8 @@ sim_resume (sd, step, siggnal)
 		int b = inst & 0xf;
 		unsigned av = cpu.asregs.regs[a];
 		unsigned bv = cpu.asregs.regs[b];
-		TRACE("add.l");
+
+		MOXIE_TRACE_INSN ("add.l");
 		cpu.asregs.regs[a] = av + bv;
 	      }
 	      break;
@@ -496,7 +492,8 @@ sim_resume (sd, step, siggnal)
 		int a = (inst >> 4) & 0xf;
 		int b = inst & 0xf;
 		int sp = cpu.asregs.regs[a] - 4;
-		TRACE("push");
+
+		MOXIE_TRACE_INSN ("push");
 		wlat (scpu, opc, sp, cpu.asregs.regs[b]);
 		cpu.asregs.regs[a] = sp;
 	      }
@@ -506,7 +503,8 @@ sim_resume (sd, step, siggnal)
 		int a = (inst >> 4) & 0xf;
 		int b = inst & 0xf;
 		int sp = cpu.asregs.regs[a];
-		TRACE("pop");
+
+		MOXIE_TRACE_INSN ("pop");
 		cpu.asregs.regs[b] = rlat (scpu, opc, sp);
 		cpu.asregs.regs[a] = sp + 4;
 	      }
@@ -515,7 +513,8 @@ sim_resume (sd, step, siggnal)
 	      {
 		int reg = (inst >> 4) & 0xf;
 		unsigned int addr = EXTRACT_WORD(pc+2);
-		TRACE("lda.l");
+
+		MOXIE_TRACE_INSN ("lda.l");
 		cpu.asregs.regs[reg] = rlat (scpu, opc, addr);
 		pc += 4;
 	      }
@@ -524,7 +523,8 @@ sim_resume (sd, step, siggnal)
 	      {
 		int reg = (inst >> 4) & 0xf;
 		unsigned int addr = EXTRACT_WORD(pc+2);
-		TRACE("sta.l");
+
+		MOXIE_TRACE_INSN ("sta.l");
 		wlat (scpu, opc, addr, cpu.asregs.regs[reg]);
 		pc += 4;
 	      }
@@ -534,7 +534,8 @@ sim_resume (sd, step, siggnal)
 		int src  = inst & 0xf;
 		int dest = (inst >> 4) & 0xf;
 		int xv;
-		TRACE("ld.l");
+
+		MOXIE_TRACE_INSN ("ld.l");
 		xv = cpu.asregs.regs[src];
 		cpu.asregs.regs[dest] = rlat (scpu, opc, xv);
 	      }
@@ -543,30 +544,33 @@ sim_resume (sd, step, siggnal)
 	      {
 		int dest = (inst >> 4) & 0xf;
 		int val  = inst & 0xf;
-		TRACE("st.l");
+
+		MOXIE_TRACE_INSN ("st.l");
 		wlat (scpu, opc, cpu.asregs.regs[dest], cpu.asregs.regs[val]);
 	      }
 	      break;
 	    case 0x0c: /* ldo.l */
 	      {
-		unsigned int addr = EXTRACT_WORD(pc+2);
+		unsigned int addr = EXTRACT_OFFSET(pc+2);
 		int a = (inst >> 4) & 0xf;
 		int b = inst & 0xf;
-		TRACE("ldo.l");
+
+		MOXIE_TRACE_INSN ("ldo.l");
 		addr += cpu.asregs.regs[b];
 		cpu.asregs.regs[a] = rlat (scpu, opc, addr);
-		pc += 4;
+		pc += 2;
 	      }
 	      break;
 	    case 0x0d: /* sto.l */
 	      {
-		unsigned int addr = EXTRACT_WORD(pc+2);
+		unsigned int addr = EXTRACT_OFFSET(pc+2);
 		int a = (inst >> 4) & 0xf;
 		int b = inst & 0xf;
-		TRACE("sto.l");
+
+		MOXIE_TRACE_INSN ("sto.l");
 		addr += cpu.asregs.regs[a];
 		wlat (scpu, opc, addr, cpu.asregs.regs[b]);
-		pc += 4;
+		pc += 2;
 	      }
 	      break;
 	    case 0x0e: /* cmp */
@@ -577,8 +581,7 @@ sim_resume (sd, step, siggnal)
 		int va = cpu.asregs.regs[a];
 		int vb = cpu.asregs.regs[b]; 
 
-		TRACE("cmp");
-
+		MOXIE_TRACE_INSN ("cmp");
 		if (va == vb)
 		  cc = CC_EQ;
 		else
@@ -594,19 +597,79 @@ sim_resume (sd, step, siggnal)
 	      break;
 	    case 0x0f: /* nop */
 	      break;
-	    case 0x10: /* bad */
-	    case 0x11: /* bad */
-	    case 0x12: /* bad */
-	    case 0x13: /* bad */
-	    case 0x14: /* bad */
-	    case 0x15: /* bad */
+	    case 0x10: /* sex.b */
+	      {
+		int a = (inst >> 4) & 0xf;
+		int b = inst & 0xf;
+		signed char bv = cpu.asregs.regs[b];
+
+		MOXIE_TRACE_INSN ("sex.b");
+		cpu.asregs.regs[a] = (int) bv;
+	      }
+	      break;
+	    case 0x11: /* sex.s */
+	      {
+		int a = (inst >> 4) & 0xf;
+		int b = inst & 0xf;
+		signed short bv = cpu.asregs.regs[b];
+
+		MOXIE_TRACE_INSN ("sex.s");
+		cpu.asregs.regs[a] = (int) bv;
+	      }
+	      break;
+	    case 0x12: /* zex.b */
+	      {
+		int a = (inst >> 4) & 0xf;
+		int b = inst & 0xf;
+		signed char bv = cpu.asregs.regs[b];
+
+		MOXIE_TRACE_INSN ("zex.b");
+		cpu.asregs.regs[a] = (int) bv & 0xff;
+	      }
+	      break;
+	    case 0x13: /* zex.s */
+	      {
+		int a = (inst >> 4) & 0xf;
+		int b = inst & 0xf;
+		signed short bv = cpu.asregs.regs[b];
+
+		MOXIE_TRACE_INSN ("zex.s");
+		cpu.asregs.regs[a] = (int) bv & 0xffff;
+	      }
+	      break;
+	    case 0x14: /* umul.x */
+	      {
+		int a = (inst >> 4) & 0xf;
+		int b = inst & 0xf;
+		unsigned av = cpu.asregs.regs[a];
+		unsigned bv = cpu.asregs.regs[b];
+		unsigned long long r = 
+		  (unsigned long long) av * (unsigned long long) bv;
+
+		MOXIE_TRACE_INSN ("umul.x");
+		cpu.asregs.regs[a] = r >> 32;
+	      }
+	      break;
+	    case 0x15: /* mul.x */
+	      {
+		int a = (inst >> 4) & 0xf;
+		int b = inst & 0xf;
+		unsigned av = cpu.asregs.regs[a];
+		unsigned bv = cpu.asregs.regs[b];
+		signed long long r = 
+		  (signed long long) av * (signed long long) bv;
+
+		MOXIE_TRACE_INSN ("mul.x");
+		cpu.asregs.regs[a] = r >> 32;
+	      }
+	      break;
 	    case 0x16: /* bad */
 	    case 0x17: /* bad */
 	    case 0x18: /* bad */
 	      {
 		opc = opcode;
-		TRACE("SIGILL0");
-		cpu.asregs.exception = SIGILL;
+		MOXIE_TRACE_INSN ("SIGILL0");
+		sim_engine_halt (sd, scpu, NULL, pc, sim_stopped, SIM_SIGILL);
 		break;
 	      }
 	    case 0x19: /* jsr */
@@ -614,7 +677,7 @@ sim_resume (sd, step, siggnal)
 		unsigned int fn = cpu.asregs.regs[(inst >> 4) & 0xf];
 		unsigned int sp = cpu.asregs.regs[1];
 
-		TRACE("jsr");
+		MOXIE_TRACE_INSN ("jsr");
 
  		/* Save a slot for the static chain.  */
 		sp -= 4;
@@ -636,16 +699,17 @@ sim_resume (sd, step, siggnal)
 	    case 0x1a: /* jmpa */
 	      {
 		unsigned int tgt = EXTRACT_WORD(pc+2);
-		TRACE("jmpa");
+
+		MOXIE_TRACE_INSN ("jmpa");
 		pc = tgt - 2;
 	      }
 	      break;
 	    case 0x1b: /* ldi.b (immediate) */
 	      {
 		int reg = (inst >> 4) & 0xf;
-
 		unsigned int val = EXTRACT_WORD(pc+2);
-		TRACE("ldi.b");
+
+		MOXIE_TRACE_INSN ("ldi.b");
 		cpu.asregs.regs[reg] = val;
 		pc += 4;
 	      }
@@ -655,7 +719,8 @@ sim_resume (sd, step, siggnal)
 		int src  = inst & 0xf;
 		int dest = (inst >> 4) & 0xf;
 		int xv;
-		TRACE("ld.b");
+
+		MOXIE_TRACE_INSN ("ld.b");
 		xv = cpu.asregs.regs[src];
 		cpu.asregs.regs[dest] = rbat (scpu, opc, xv);
 	      }
@@ -664,7 +729,8 @@ sim_resume (sd, step, siggnal)
 	      {
 		int reg = (inst >> 4) & 0xf;
 		unsigned int addr = EXTRACT_WORD(pc+2);
-		TRACE("lda.b");
+
+		MOXIE_TRACE_INSN ("lda.b");
 		cpu.asregs.regs[reg] = rbat (scpu, opc, addr);
 		pc += 4;
 	      }
@@ -673,7 +739,8 @@ sim_resume (sd, step, siggnal)
 	      {
 		int dest = (inst >> 4) & 0xf;
 		int val  = inst & 0xf;
-		TRACE("st.b");
+
+		MOXIE_TRACE_INSN ("st.b");
 		wbat (scpu, opc, cpu.asregs.regs[dest], cpu.asregs.regs[val]);
 	      }
 	      break;
@@ -681,7 +748,8 @@ sim_resume (sd, step, siggnal)
 	      {
 		int reg = (inst >> 4) & 0xf;
 		unsigned int addr = EXTRACT_WORD(pc+2);
-		TRACE("sta.b");
+
+		MOXIE_TRACE_INSN ("sta.b");
 		wbat (scpu, opc, addr, cpu.asregs.regs[reg]);
 		pc += 4;
 	      }
@@ -691,7 +759,8 @@ sim_resume (sd, step, siggnal)
 		int reg = (inst >> 4) & 0xf;
 
 		unsigned int val = EXTRACT_WORD(pc+2);
-		TRACE("ldi.s");
+
+		MOXIE_TRACE_INSN ("ldi.s");
 		cpu.asregs.regs[reg] = val;
 		pc += 4;
 	      }
@@ -701,7 +770,8 @@ sim_resume (sd, step, siggnal)
 		int src  = inst & 0xf;
 		int dest = (inst >> 4) & 0xf;
 		int xv;
-		TRACE("ld.s");
+
+		MOXIE_TRACE_INSN ("ld.s");
 		xv = cpu.asregs.regs[src];
 		cpu.asregs.regs[dest] = rsat (scpu, opc, xv);
 	      }
@@ -710,7 +780,8 @@ sim_resume (sd, step, siggnal)
 	      {
 		int reg = (inst >> 4) & 0xf;
 		unsigned int addr = EXTRACT_WORD(pc+2);
-		TRACE("lda.s");
+
+		MOXIE_TRACE_INSN ("lda.s");
 		cpu.asregs.regs[reg] = rsat (scpu, opc, addr);
 		pc += 4;
 	      }
@@ -719,7 +790,8 @@ sim_resume (sd, step, siggnal)
 	      {
 		int dest = (inst >> 4) & 0xf;
 		int val  = inst & 0xf;
-		TRACE("st.s");
+
+		MOXIE_TRACE_INSN ("st.s");
 		wsat (scpu, opc, cpu.asregs.regs[dest], cpu.asregs.regs[val]);
 	      }
 	      break;
@@ -727,7 +799,8 @@ sim_resume (sd, step, siggnal)
 	      {
 		int reg = (inst >> 4) & 0xf;
 		unsigned int addr = EXTRACT_WORD(pc+2);
-		TRACE("sta.s");
+
+		MOXIE_TRACE_INSN ("sta.s");
 		wsat (scpu, opc, addr, cpu.asregs.regs[reg]);
 		pc += 4;
 	      }
@@ -735,7 +808,8 @@ sim_resume (sd, step, siggnal)
 	    case 0x25: /* jmp */
 	      {
 		int reg = (inst >> 4) & 0xf;
-		TRACE("jmp");
+
+		MOXIE_TRACE_INSN ("jmp");
 		pc = cpu.asregs.regs[reg] - 2;
 	      }
 	      break;
@@ -744,7 +818,8 @@ sim_resume (sd, step, siggnal)
 		int a = (inst >> 4) & 0xf;
 		int b = inst & 0xf;
 		int av, bv;
-		TRACE("and");
+
+		MOXIE_TRACE_INSN ("and");
 		av = cpu.asregs.regs[a];
 		bv = cpu.asregs.regs[b];
 		cpu.asregs.regs[a] = av & bv;
@@ -756,7 +831,8 @@ sim_resume (sd, step, siggnal)
 		int b = inst & 0xf;
 		int av = cpu.asregs.regs[a];
 		int bv = cpu.asregs.regs[b];
-		TRACE("lshr");
+
+		MOXIE_TRACE_INSN ("lshr");
 		cpu.asregs.regs[a] = (unsigned) ((unsigned) av >> bv);
 	      }
 	      break;
@@ -766,7 +842,8 @@ sim_resume (sd, step, siggnal)
 		int b = inst & 0xf;
 		int av = cpu.asregs.regs[a];
 		int bv = cpu.asregs.regs[b];
-		TRACE("ashl");
+
+		MOXIE_TRACE_INSN ("ashl");
 		cpu.asregs.regs[a] = av << bv;
 	      }
 	      break;
@@ -776,7 +853,8 @@ sim_resume (sd, step, siggnal)
 		int b = inst & 0xf;
 		unsigned av = cpu.asregs.regs[a];
 		unsigned bv = cpu.asregs.regs[b];
-		TRACE("sub.l");
+
+		MOXIE_TRACE_INSN ("sub.l");
 		cpu.asregs.regs[a] = av - bv;
 	      }
 	      break;
@@ -785,7 +863,8 @@ sim_resume (sd, step, siggnal)
 		int a  = (inst >> 4) & 0xf;
 		int b  = inst & 0xf;
 		int bv = cpu.asregs.regs[b];
-		TRACE("neg");
+
+		MOXIE_TRACE_INSN ("neg");
 		cpu.asregs.regs[a] = - bv;
 	      }
 	      break;
@@ -794,7 +873,8 @@ sim_resume (sd, step, siggnal)
 		int a = (inst >> 4) & 0xf;
 		int b = inst & 0xf;
 		int av, bv;
-		TRACE("or");
+
+		MOXIE_TRACE_INSN ("or");
 		av = cpu.asregs.regs[a];
 		bv = cpu.asregs.regs[b];
 		cpu.asregs.regs[a] = av | bv;
@@ -805,7 +885,8 @@ sim_resume (sd, step, siggnal)
 		int a = (inst >> 4) & 0xf;
 		int b = inst & 0xf;
 		int bv = cpu.asregs.regs[b];
-		TRACE("not");
+
+		MOXIE_TRACE_INSN ("not");
 		cpu.asregs.regs[a] = 0xffffffff ^ bv;
 	      }
 	      break;
@@ -815,7 +896,8 @@ sim_resume (sd, step, siggnal)
 		int b  = inst & 0xf;
 		int av = cpu.asregs.regs[a];
 		int bv = cpu.asregs.regs[b];
-		TRACE("ashr");
+
+		MOXIE_TRACE_INSN ("ashr");
 		cpu.asregs.regs[a] = av >> bv;
 	      }
 	      break;
@@ -824,7 +906,8 @@ sim_resume (sd, step, siggnal)
 		int a = (inst >> 4) & 0xf;
 		int b = inst & 0xf;
 		int av, bv;
-		TRACE("xor");
+
+		MOXIE_TRACE_INSN ("xor");
 		av = cpu.asregs.regs[a];
 		bv = cpu.asregs.regs[b];
 		cpu.asregs.regs[a] = av ^ bv;
@@ -836,48 +919,52 @@ sim_resume (sd, step, siggnal)
 		int b = inst & 0xf;
 		unsigned av = cpu.asregs.regs[a];
 		unsigned bv = cpu.asregs.regs[b];
-		TRACE("mul.l");
+
+		MOXIE_TRACE_INSN ("mul.l");
 		cpu.asregs.regs[a] = av * bv;
 	      }
 	      break;
 	    case 0x30: /* swi */
 	      {
 		unsigned int inum = EXTRACT_WORD(pc+2);
-		TRACE("swi");
+
+		MOXIE_TRACE_INSN ("swi");
 		/* Set the special registers appropriately.  */
 		cpu.asregs.sregs[2] = 3; /* MOXIE_EX_SWI */
 	        cpu.asregs.sregs[3] = inum;
 		switch (inum)
 		  {
-		  case 0x1: /* SYS_exit */
+		  case TARGET_NEWLIB_SYS_exit:
 		    {
-		      cpu.asregs.exception = SIGQUIT;
+		      sim_engine_halt (sd, scpu, NULL, pc, sim_exited,
+				       cpu.asregs.regs[2]);
 		      break;
 		    }
-		  case 0x2: /* SYS_open */
+		  case TARGET_NEWLIB_SYS_open:
 		    {
 		      char fname[1024];
 		      int mode = (int) convert_target_flags ((unsigned) cpu.asregs.regs[3]);
 		      int perm = (int) cpu.asregs.regs[4];
-		      int fd = open (fname, mode, perm);
+		      int fd;
 		      sim_core_read_buffer (sd, scpu, read_map, fname,
 					    cpu.asregs.regs[2], 1024);
+		      fd = sim_io_open (sd, fname, mode);
 		      /* FIXME - set errno */
 		      cpu.asregs.regs[2] = fd;
 		      break;
 		    }
-		  case 0x4: /* SYS_read */
+		  case TARGET_NEWLIB_SYS_read:
 		    {
 		      int fd = cpu.asregs.regs[2];
 		      unsigned len = (unsigned) cpu.asregs.regs[4];
 		      char *buf = malloc (len);
-		      cpu.asregs.regs[2] = read (fd, buf, len);
+		      cpu.asregs.regs[2] = sim_io_read (sd, fd, buf, len);
 		      sim_core_write_buffer (sd, scpu, write_map, buf,
 					     cpu.asregs.regs[3], len);
 		      free (buf);
 		      break;
 		    }
-		  case 0x5: /* SYS_write */
+		  case TARGET_NEWLIB_SYS_write:
 		    {
 		      char *str;
 		      /* String length is at 0x12($fp) */
@@ -885,9 +972,20 @@ sim_resume (sd, step, siggnal)
 		      str = malloc (len);
 		      sim_core_read_buffer (sd, scpu, read_map, str,
 					    cpu.asregs.regs[3], len);
-		      count = write (cpu.asregs.regs[2], str, len);
+		      count = sim_io_write (sd, cpu.asregs.regs[2], str, len);
 		      free (str);
 		      cpu.asregs.regs[2] = count;
+		      break;
+		    }
+		  case TARGET_NEWLIB_SYS_unlink:
+		    {
+		      char fname[1024];
+		      int fd;
+		      sim_core_read_buffer (sd, scpu, read_map, fname,
+					    cpu.asregs.regs[2], 1024);
+		      fd = sim_io_unlink (sd, fname);
+		      /* FIXME - set errno */
+		      cpu.asregs.regs[2] = fd;
 		      break;
 		    }
 		  case 0xffffffff: /* Linux System Call */
@@ -923,7 +1021,8 @@ sim_resume (sd, step, siggnal)
 		int b = inst & 0xf;
 		int av = cpu.asregs.regs[a];
 		int bv = cpu.asregs.regs[b];
-		TRACE("div.l");
+
+		MOXIE_TRACE_INSN ("div.l");
 		cpu.asregs.regs[a] = av / bv;
 	      }
 	      break;
@@ -933,7 +1032,8 @@ sim_resume (sd, step, siggnal)
 		int b = inst & 0xf;
 		unsigned int av = cpu.asregs.regs[a];
 		unsigned int bv = cpu.asregs.regs[b];
-		TRACE("udiv.l");
+
+		MOXIE_TRACE_INSN ("udiv.l");
 		cpu.asregs.regs[a] = (av / bv);
 	      }
 	      break;
@@ -943,7 +1043,8 @@ sim_resume (sd, step, siggnal)
 		int b = inst & 0xf;
 		int av = cpu.asregs.regs[a];
 		int bv = cpu.asregs.regs[b];
-		TRACE("mod.l");
+
+		MOXIE_TRACE_INSN ("mod.l");
 		cpu.asregs.regs[a] = av % bv;
 	      }
 	      break;
@@ -953,114 +1054,84 @@ sim_resume (sd, step, siggnal)
 		int b = inst & 0xf;
 		unsigned int av = cpu.asregs.regs[a];
 		unsigned int bv = cpu.asregs.regs[b];
-		TRACE("umod.l");
+
+		MOXIE_TRACE_INSN ("umod.l");
 		cpu.asregs.regs[a] = (av % bv);
 	      }
 	      break;
 	    case 0x35: /* brk */
-	      TRACE("brk");
-	      cpu.asregs.exception = SIGTRAP;
+	      MOXIE_TRACE_INSN ("brk");
+	      sim_engine_halt (sd, scpu, NULL, pc, sim_stopped, SIM_SIGTRAP);
 	      pc -= 2; /* Adjust pc */
 	      break;
 	    case 0x36: /* ldo.b */
 	      {
-		unsigned int addr = EXTRACT_WORD(pc+2);
+		unsigned int addr = EXTRACT_OFFSET(pc+2);
 		int a = (inst >> 4) & 0xf;
 		int b = inst & 0xf;
-		TRACE("ldo.b");
+
+		MOXIE_TRACE_INSN ("ldo.b");
 		addr += cpu.asregs.regs[b];
 		cpu.asregs.regs[a] = rbat (scpu, opc, addr);
-		pc += 4;
+		pc += 2;
 	      }
 	      break;
 	    case 0x37: /* sto.b */
 	      {
-		unsigned int addr = EXTRACT_WORD(pc+2);
+		unsigned int addr = EXTRACT_OFFSET(pc+2);
 		int a = (inst >> 4) & 0xf;
 		int b = inst & 0xf;
-		TRACE("sto.b");
+
+		MOXIE_TRACE_INSN ("sto.b");
 		addr += cpu.asregs.regs[a];
 		wbat (scpu, opc, addr, cpu.asregs.regs[b]);
-		pc += 4;
+		pc += 2;
 	      }
 	      break;
 	    case 0x38: /* ldo.s */
 	      {
-		unsigned int addr = EXTRACT_WORD(pc+2);
+		unsigned int addr = EXTRACT_OFFSET(pc+2);
 		int a = (inst >> 4) & 0xf;
 		int b = inst & 0xf;
-		TRACE("ldo.s");
+
+		MOXIE_TRACE_INSN ("ldo.s");
 		addr += cpu.asregs.regs[b];
 		cpu.asregs.regs[a] = rsat (scpu, opc, addr);
-		pc += 4;
+		pc += 2;
 	      }
 	      break;
 	    case 0x39: /* sto.s */
 	      {
-		unsigned int addr = EXTRACT_WORD(pc+2);
+		unsigned int addr = EXTRACT_OFFSET(pc+2);
 		int a = (inst >> 4) & 0xf;
 		int b = inst & 0xf;
-		TRACE("sto.s");
+
+		MOXIE_TRACE_INSN ("sto.s");
 		addr += cpu.asregs.regs[a];
 		wsat (scpu, opc, addr, cpu.asregs.regs[b]);
-		pc += 4;
+		pc += 2;
 	      }
 	      break;
 	    default:
 	      opc = opcode;
-	      TRACE("SIGILL1");
-	      cpu.asregs.exception = SIGILL;
+	      MOXIE_TRACE_INSN ("SIGILL1");
+	      sim_engine_halt (sd, scpu, NULL, pc, sim_stopped, SIM_SIGILL);
 	      break;
 	    }
 	}
 
-      insts++;
+      cpu.asregs.insts++;
       pc += 2;
+      cpu.asregs.regs[PC_REGNO] = pc;
 
-    } while (!cpu.asregs.exception);
+      if (sim_events_tick (sd))
+	sim_events_process (sd);
 
-  /* Hide away the things we've cached while executing.  */
-  cpu.asregs.regs[PC_REGNO] = pc;
-  cpu.asregs.insts += insts;		/* instructions done ... */
-
-  signal (SIGINT, sigsave);
+    } while (1);
 }
 
-int
-sim_write (sd, addr, buffer, size)
-     SIM_DESC sd;
-     SIM_ADDR addr;
-     const unsigned char * buffer;
-     int size;
-{
-  sim_cpu *scpu = STATE_CPU (sd, 0); /* FIXME */
-
-  sim_core_write_buffer (sd, scpu, write_map, buffer, addr, size);
-
-  return size;
-}
-
-int
-sim_read (sd, addr, buffer, size)
-     SIM_DESC sd;
-     SIM_ADDR addr;
-     unsigned char * buffer;
-     int size;
-{
-  sim_cpu *scpu = STATE_CPU (sd, 0); /* FIXME */
-
-  sim_core_read_buffer (sd, scpu, read_map, buffer, addr, size);
-  
-  return size;
-}
-
-
-int
-sim_store_register (sd, rn, memory, length)
-     SIM_DESC sd;
-     int rn;
-     unsigned char * memory;
-     int length;
+static int
+moxie_reg_store (SIM_CPU *scpu, int rn, const void *memory, int length)
 {
   if (rn < NUM_MOXIE_REGS && rn >= 0)
     {
@@ -1079,12 +1150,8 @@ sim_store_register (sd, rn, memory, length)
     return 0;
 }
 
-int
-sim_fetch_register (sd, rn, memory, length)
-     SIM_DESC sd;
-     int rn;
-     unsigned char * memory;
-     int length;
+static int
+moxie_reg_fetch (SIM_CPU *scpu, int rn, void *memory, int length)
 {
   if (rn < NUM_MOXIE_REGS && rn >= 0)
     {
@@ -1102,85 +1169,69 @@ sim_fetch_register (sd, rn, memory, length)
     return 0;
 }
 
-
-int
-sim_trace (sd)
-     SIM_DESC sd;
+static sim_cia
+moxie_pc_get (sim_cpu *cpu)
 {
-  if (tracefile == 0)
-    tracefile = fopen("trace.csv", "wb");
-
-  tracing = 1;
-  
-  sim_resume (sd, 0, 0);
-
-  tracing = 0;
-  
-  return 1;
+  return MOXIE_SIM_CPU (cpu)->registers[PCIDX];
 }
 
-void
-sim_stop_reason (sd, reason, sigrc)
-     SIM_DESC sd;
-     enum sim_stop * reason;
-     int * sigrc;
+static void
+moxie_pc_set (sim_cpu *cpu, sim_cia pc)
 {
-  if (cpu.asregs.exception == SIGQUIT)
-    {
-      * reason = sim_exited;
-      * sigrc = cpu.asregs.regs[2];
-    }
-  else
-    {
-      * reason = sim_stopped;
-      * sigrc = cpu.asregs.exception;
-    }
+  MOXIE_SIM_CPU (cpu)->registers[PCIDX] = pc;
 }
 
-
-int
-sim_stop (sd)
-     SIM_DESC sd;
+static void
+free_state (SIM_DESC sd)
 {
-  cpu.asregs.exception = SIGINT;
-  return 1;
+  if (STATE_MODULES (sd) != NULL)
+    sim_module_uninstall (sd);
+  sim_cpu_free_all (sd);
+  sim_state_free (sd);
 }
-
-
-void
-sim_info (sd, verbose)
-     SIM_DESC sd;
-     int verbose;
-{
-  callback->printf_filtered (callback, "\n\n# instructions executed  %llu\n",
-			     cpu.asregs.insts);
-}
-
 
 SIM_DESC
-sim_open (kind, cb, abfd, argv)
-     SIM_OPEN_KIND kind;
-     host_callback * cb;
-     struct bfd * abfd;
-     char ** argv;
+sim_open (SIM_OPEN_KIND kind, host_callback *cb,
+	  struct bfd *abfd, char * const *argv)
 {
+  int i;
   SIM_DESC sd = sim_state_alloc (kind, cb);
   SIM_ASSERT (STATE_MAGIC (sd) == SIM_MAGIC_NUMBER);
 
+  /* Set default options before parsing user options.  */
+  current_target_byte_order = BFD_ENDIAN_BIG;
+
+  /* The cpu data is kept in a separately allocated chunk of memory.  */
+  if (sim_cpu_alloc_all_extra (sd, 0, sizeof (struct moxie_sim_cpu))
+      != SIM_RC_OK)
+    {
+      free_state (sd);
+      return 0;
+    }
+
   if (sim_pre_argv_init (sd, argv[0]) != SIM_RC_OK)
-    return 0;
+    {
+      free_state (sd);
+      return 0;
+    }
+
+  /* The parser will print an error message for us, so we silently return.  */
+  if (sim_parse_args (sd, argv) != SIM_RC_OK)
+    {
+      free_state (sd);
+      return 0;
+    }
 
   sim_do_command(sd," memory region 0x00000000,0x4000000") ; 
   sim_do_command(sd," memory region 0xE0000000,0x10000") ; 
 
-  myname = argv[0];
-  callback = cb;
-  
-  if (kind == SIM_OPEN_STANDALONE)
-    issue_messages = 1;
-  
-  set_initial_gprs ();	/* Reset the GPR registers.  */
-  
+  /* Check for/establish the a reference program image.  */
+  if (sim_analyze_program (sd, STATE_PROG_FILE (sd), abfd) != SIM_RC_OK)
+    {
+      free_state (sd);
+      return 0;
+    }
+
   /* Configure/verify the target byte order and other runtime
      configuration options.  */
   if (sim_config (sd) != SIM_RC_OK)
@@ -1197,17 +1248,21 @@ sim_open (kind, cb, abfd, argv)
       return 0;
     }
 
+  /* CPU specific initialization.  */
+  for (i = 0; i < MAX_NR_PROCESSORS; ++i)
+    {
+      SIM_CPU *cpu = STATE_CPU (sd, i);
+
+      CPU_REG_FETCH (cpu) = moxie_reg_fetch;
+      CPU_REG_STORE (cpu) = moxie_reg_store;
+      CPU_PC_FETCH (cpu) = moxie_pc_get;
+      CPU_PC_STORE (cpu) = moxie_pc_set;
+
+      set_initial_gprs ();	/* Reset the GPR registers.  */
+    }
+
   return sd;
 }
-
-void
-sim_close (sd, quitting)
-     SIM_DESC sd;
-     int quitting;
-{
-  /* nothing to do */
-}
-
 
 /* Load the device tree blob.  */
 
@@ -1218,18 +1273,18 @@ load_dtb (SIM_DESC sd, const char *filename)
   FILE *f = fopen (filename, "rb");
   char *buf;
   sim_cpu *scpu = STATE_CPU (sd, 0); /* FIXME */ 
- if (f == NULL)
-    {
-      printf ("WARNING: ``%s'' could not be opened.\n", filename);
-      return;
-    }
+
+  /* Don't warn as the sim works fine w/out a device tree.  */
+  if (f == NULL)
+    return;
   fseek (f, 0, SEEK_END);
   size = ftell(f);
   fseek (f, 0, SEEK_SET);
   buf = alloca (size);
   if (size != fread (buf, 1, size, f))
     {
-      printf ("ERROR: error reading ``%s''.\n", filename);
+      sim_io_eprintf (sd, "ERROR: error reading ``%s''.\n", filename);
+      fclose (f);
       return;
     }
   sim_core_write_buffer (sd, scpu, write_map, buf, 0xE0000000, size);
@@ -1238,76 +1293,13 @@ load_dtb (SIM_DESC sd, const char *filename)
 }
 
 SIM_RC
-sim_load (sd, prog, abfd, from_tty)
-     SIM_DESC sd;
-     char * prog;
-     bfd * abfd;
-     int from_tty;
+sim_create_inferior (SIM_DESC sd, struct bfd *prog_bfd,
+		     char * const *argv, char * const *env)
 {
-
-  /* Do the right thing for ELF executables; this turns out to be
-     just about the right thing for any object format that:
-       - we crack using BFD routines
-       - follows the traditional UNIX text/data/bss layout
-       - calls the bss section ".bss".   */
-
-  extern bfd * sim_load_file (); /* ??? Don't know where this should live.  */
-  bfd * prog_bfd;
-
-  {
-    bfd * handle;
-    handle = bfd_openr (prog, 0);	/* could be "moxie" */
-    
-    if (!handle)
-      {
-	printf("``%s'' could not be opened.\n", prog);
-	return SIM_RC_FAIL;
-      }
-    
-    /* Makes sure that we have an object file, also cleans gets the 
-       section headers in place.  */
-    if (!bfd_check_format (handle, bfd_object))
-      {
-	/* wasn't an object file */
-	bfd_close (handle);
-	printf ("``%s'' is not appropriate object file.\n", prog);
-	return SIM_RC_FAIL;
-      }
-
-    /* Clean up after ourselves.  */
-    bfd_close (handle);
-  }
-
-  /* from sh -- dac */
-  prog_bfd = sim_load_file (sd, myname, callback, prog, abfd,
-                            sim_kind == SIM_OPEN_DEBUG,
-                            0, sim_write);
-  if (prog_bfd == NULL)
-    return SIM_RC_FAIL;
-  
-  if (abfd == NULL)
-    bfd_close (prog_bfd);
-
-  return SIM_RC_OK;
-}
-
-SIM_RC
-sim_create_inferior (sd, prog_bfd, argv, env)
-     SIM_DESC sd;
-     struct bfd * prog_bfd;
-     char ** argv;
-     char ** env;
-{
-  char ** avp;
+  char * const *avp;
   int l, argc, i, tp;
   sim_cpu *scpu = STATE_CPU (sd, 0); /* FIXME */
 
-  /* Set the initial register set.  */
-  l = issue_messages;
-  issue_messages = 0;
-  set_initial_gprs ();
-  issue_messages = l;
-  
   if (prog_bfd != NULL)
     cpu.asregs.regs[PC_REGNO] = bfd_get_start_address (prog_bfd);
 
@@ -1347,30 +1339,4 @@ sim_create_inferior (sd, prog_bfd, argv, env)
   load_dtb (sd, DTB);
 
   return SIM_RC_OK;
-}
-
-void
-sim_kill (sd)
-     SIM_DESC sd;
-{
-  if (tracefile)
-    fclose(tracefile);
-}
-
-void
-sim_do_command (sd, cmd)
-     SIM_DESC sd;
-     char * cmd;
-{
-  if (sim_args_command (sd, cmd) != SIM_RC_OK)
-    sim_io_printf (sd, 
-		   "Error: \"%s\" is not a valid moxie simulator command.\n",
-		   cmd);
-}
-
-void
-sim_set_callbacks (ptr)
-     host_callback * ptr;
-{
-  callback = ptr; 
 }

@@ -1,6 +1,6 @@
 /* MI Command Set - MI parser.
 
-   Copyright (C) 2000-2013 Free Software Foundation, Inc.
+   Copyright (C) 2000-2023 Free Software Foundation, Inc.
 
    Contributed by Cygnus Solutions (a Red Hat company).
 
@@ -25,8 +25,8 @@
 #include "charset.h"
 
 #include <ctype.h>
-#include "gdb_string.h"
 #include "cli/cli-utils.h"
+#include "language.h"
 
 static const char mi_no_values[] = "--no-values";
 static const char mi_simple_values[] = "--simple-values";
@@ -57,7 +57,7 @@ mi_parse_escape (const char **string_ptr)
       case '6':
       case '7':
 	{
-	  int i = host_hex_value (c);
+	  int i = fromhex (c);
 	  int count = 0;
 
 	  while (++count < 3)
@@ -67,7 +67,7 @@ mi_parse_escape (const char **string_ptr)
 		{
 		  (*string_ptr)++;
 		  i *= 8;
-		  i += host_hex_value (c);
+		  i += fromhex (c);
 		}
 	      else
 		{
@@ -106,12 +106,12 @@ mi_parse_escape (const char **string_ptr)
   return c;
 }
 
-static void
+void
 mi_parse_argv (const char *args, struct mi_parse *parse)
 {
   const char *chp = args;
   int argc = 0;
-  char **argv = xmalloc ((argc + 1) * sizeof (char *));
+  char **argv = XNEWVEC (char *, argc + 1);
 
   argv[argc] = NULL;
   while (1)
@@ -119,7 +119,7 @@ mi_parse_argv (const char *args, struct mi_parse *parse)
       char *arg;
 
       /* Skip leading white space.  */
-      chp = skip_spaces_const (chp);
+      chp = skip_spaces (chp);
       /* Three possibilities: EOF, quoted string, or other text. */
       switch (*chp)
 	{
@@ -165,7 +165,7 @@ mi_parse_argv (const char *args, struct mi_parse *parse)
 		return;
 	      }
 	    /* Create the buffer and copy characters in.  */
-	    arg = xmalloc ((len + 1) * sizeof (char));
+	    arg = XNEWVEC (char, len + 1);
 	    chp = start;
 	    len = 0;
 	    while (*chp != '\0' && *chp != '"')
@@ -195,76 +195,67 @@ mi_parse_argv (const char *args, struct mi_parse *parse)
 		chp++;
 	      }
 	    len = chp - start;
-	    arg = xmalloc ((len + 1) * sizeof (char));
+	    arg = XNEWVEC (char, len + 1);
 	    strncpy (arg, start, len);
 	    arg[len] = '\0';
 	    break;
 	  }
 	}
       /* Append arg to argv.  */
-      argv = xrealloc (argv, (argc + 2) * sizeof (char *));
+      argv = XRESIZEVEC (char *, argv, argc + 2);
       argv[argc++] = arg;
       argv[argc] = NULL;
     }
 }
 
-void
-mi_parse_free (struct mi_parse *parse)
+mi_parse::mi_parse ()
+  : op (MI_COMMAND),
+    command (NULL),
+    token (NULL),
+    cmd (NULL),
+    cmd_start (NULL),
+    args (NULL),
+    argv (NULL),
+    argc (0),
+    all (0),
+    thread_group (-1),
+    thread (-1),
+    frame (-1),
+    language (language_unknown)
 {
-  if (parse == NULL)
-    return;
-  if (parse->command != NULL)
-    xfree (parse->command);
-  if (parse->token != NULL)
-    xfree (parse->token);
-  if (parse->args != NULL)
-    xfree (parse->args);
-  if (parse->argv != NULL)
-    freeargv (parse->argv);
-  xfree (parse);
 }
 
-/* A cleanup that calls mi_parse_free.  */
-
-static void
-mi_parse_cleanup (void *arg)
+mi_parse::~mi_parse ()
 {
-  mi_parse_free (arg);
+  xfree (command);
+  xfree (token);
+  xfree (args);
+  freeargv (argv);
 }
 
-struct mi_parse *
+std::unique_ptr<struct mi_parse>
 mi_parse (const char *cmd, char **token)
 {
   const char *chp;
-  struct mi_parse *parse = XMALLOC (struct mi_parse);
-  struct cleanup *cleanup;
 
-  memset (parse, 0, sizeof (*parse));
-  parse->all = 0;
-  parse->thread_group = -1;
-  parse->thread = -1;
-  parse->frame = -1;
-
-  cleanup = make_cleanup (mi_parse_cleanup, parse);
+  std::unique_ptr<struct mi_parse> parse (new struct mi_parse);
 
   /* Before starting, skip leading white space.  */
-  cmd = skip_spaces_const (cmd);
+  cmd = skip_spaces (cmd);
 
   /* Find/skip any token and then extract it.  */
   for (chp = cmd; *chp >= '0' && *chp <= '9'; chp++)
     ;
-  *token = xmalloc (chp - cmd + 1);
+  *token = (char *) xmalloc (chp - cmd + 1);
   memcpy (*token, cmd, (chp - cmd));
   (*token)[chp - cmd] = '\0';
 
   /* This wasn't a real MI command.  Return it as a CLI_COMMAND.  */
   if (*chp != '-')
     {
-      chp = skip_spaces_const (chp);
+      chp = skip_spaces (chp);
       parse->command = xstrdup (chp);
       parse->op = CLI_COMMAND;
-
-      discard_cleanups (cleanup);
 
       return parse;
     }
@@ -275,24 +266,28 @@ mi_parse (const char *cmd, char **token)
 
     for (; *chp && !isspace (*chp); chp++)
       ;
-    parse->command = xmalloc (chp - tmp + 1);
+    parse->command = (char *) xmalloc (chp - tmp + 1);
     memcpy (parse->command, tmp, chp - tmp);
     parse->command[chp - tmp] = '\0';
   }
 
   /* Find the command in the MI table.  */
-  parse->cmd = mi_lookup (parse->command);
+  parse->cmd = mi_cmd_lookup (parse->command);
   if (parse->cmd == NULL)
-    error (_("Undefined MI command: %s"), parse->command);
+    throw_error (UNDEFINED_COMMAND_ERROR,
+		 _("Undefined MI command: %s"), parse->command);
 
   /* Skip white space following the command.  */
-  chp = skip_spaces_const (chp);
+  chp = skip_spaces (chp);
 
   /* Parse the --thread and --frame options, if present.  At present,
      some important commands, like '-break-*' are implemented by
      forwarding to the CLI layer directly.  We want to parse --thread
      and --frame here, so as not to leave those option in the string
-     that will be passed to CLI.  */
+     that will be passed to CLI.
+
+     Same for the --language option.  */
+
   for (;;)
     {
       const char *option;
@@ -300,6 +295,7 @@ mi_parse (const char *cmd, char **token)
       size_t tgs = sizeof ("--thread-group ") - 1;
       size_t ts = sizeof ("--thread ") - 1;
       size_t fs = sizeof ("--frame ") - 1;
+      size_t ls = sizeof ("--language ") - 1;
 
       if (strncmp (chp, "--all ", as) == 0)
 	{
@@ -309,9 +305,9 @@ mi_parse (const char *cmd, char **token)
       /* See if --all is the last token in the input.  */
       if (strcmp (chp, "--all") == 0)
 	{
-          parse->all = 1;
-          chp += strlen (chp);
-        }
+	  parse->all = 1;
+	  chp += strlen (chp);
+	}
       if (strncmp (chp, "--thread-group ", tgs) == 0)
 	{
 	  char *endp;
@@ -348,30 +344,27 @@ mi_parse (const char *cmd, char **token)
 	  parse->frame = strtol (chp, &endp, 10);
 	  chp = endp;
 	}
+      else if (strncmp (chp, "--language ", ls) == 0)
+	{
+	  option = "--language";
+	  chp += ls;
+	  std::string lang_name = extract_arg (&chp);
+
+	  parse->language = language_enum (lang_name.c_str ());
+	  if (parse->language == language_unknown
+	      || parse->language == language_auto)
+	    error (_("Invalid --language argument: %s"), lang_name.c_str ());
+	}
       else
 	break;
 
       if (*chp != '\0' && !isspace (*chp))
 	error (_("Invalid value for the '%s' option"), option);
-      chp = skip_spaces_const (chp);
+      chp = skip_spaces (chp);
     }
 
-  /* For new argv commands, attempt to return the parsed argument
-     list.  */
-  if (parse->cmd->argv_func != NULL)
-    {
-      mi_parse_argv (chp, parse);
-      if (parse->argv == NULL)
-	error (_("Problem parsing arguments: %s %s"), parse->command, chp);
-    }
-
-  /* FIXME: DELETE THIS */
-  /* For CLI commands, also return the remainder of the
-     command line as a single string. */
-  if (parse->cmd->cli.cmd != NULL)
-    parse->args = xstrdup (chp);
-
-  discard_cleanups (cleanup);
+  /* Save the rest of the arguments for the command.  */
+  parse->args = xstrdup (chp);
 
   /* Fully parsed, flag as an MI command.  */
   parse->op = MI_COMMAND;

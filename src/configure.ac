@@ -1,6 +1,6 @@
 #   Copyright (C) 1992, 1993, 1994, 1995, 1996, 1997, 1998, 1999, 2000,
-#   2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011, 2012
-#   Free Software Foundation, Inc.
+#   2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011, 2012,
+#   2014, 2015, 2016, 2019, 2022 Free Software Foundation, Inc.
 #
 # This file is free software; you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by
@@ -23,16 +23,16 @@ m4_include(config/acx.m4)
 m4_include(config/override.m4)
 m4_include(config/proginstall.m4)
 m4_include(config/elf.m4)
+m4_include(config/gcc-plugin.m4)
+m4_include(config/ax_cxx_compile_stdcxx.m4)
 m4_include([libtool.m4])
 m4_include([ltoptions.m4])
 m4_include([ltsugar.m4])
 m4_include([ltversion.m4])
 m4_include([lt~obsolete.m4])
 m4_include([config/isl.m4])
-m4_include([config/cloog.m4])
 
 AC_INIT(move-if-change)
-AC_PREREQ(2.64)
 AC_DISABLE_OPTION_CHECKING
 
 progname=$0
@@ -126,14 +126,14 @@ extra_host_args=
 # these library is used by various programs built for the build
 # environment
 #
-build_libs="build-libiberty"
+build_libs="build-libiberty build-libcpp"
 
 # these tools are built for the build environment
 build_tools="build-texinfo build-flex build-bison build-m4 build-fixincludes"
 
 # these libraries are used by various programs built for the host environment
-#
-host_libs="intl libiberty opcodes bfd readline tcl tk itcl libgui zlib libbacktrace libcpp libdecnumber gmp mpfr mpc isl cloog libelf libiconv"
+#f
+host_libs="intl libiberty opcodes bfd readline tcl tk itcl libgui zlib libbacktrace libcpp libcody libdecnumber gmp mpfr mpc isl libiconv libctf libsframe"
 
 # these tools are built for the host environment
 # Note, the powerpc-eabi build depends on sim occurring before gdb in order to
@@ -141,12 +141,7 @@ host_libs="intl libiberty opcodes bfd readline tcl tk itcl libgui zlib libbacktr
 # binutils, gas and ld appear in that order because it makes sense to run
 # "make check" in that particular order.
 # If --enable-gold is used, "gold" may replace "ld".
-host_tools="texinfo flex bison binutils gas ld fixincludes gcc cgen sid sim gdb gprof etc expect dejagnu m4 utils guile fastjar gnattools"
-
-# libgcj represents the runtime libraries only used by gcj.
-libgcj="target-libffi \
-	target-zlib \
-	target-libjava"
+host_tools="texinfo flex bison binutils gas ld fixincludes gcc cgen sid sim gdb gdbserver gprof etc expect dejagnu m4 utils guile fastjar gnattools libcc1 gotools c++tools"
 
 # these libraries are built for the target environment, and are built after
 # the host libraries and the host tools (which may be a cross compiler)
@@ -156,20 +151,21 @@ target_libraries="target-libgcc \
 		target-libgloss \
 		target-newlib \
 		target-libgomp \
+		target-liboffloadmic \
 		target-libatomic \
 		target-libitm \
 		target-libstdc++-v3 \
-		target-libmudflap \
 		target-libsanitizer \
 		target-libvtv \
 		target-libssp \
 		target-libquadmath \
 		target-libgfortran \
-		target-boehm-gc \
-		${libgcj} \
+		target-libffi \
 		target-libobjc \
 		target-libada \
-		target-libgo"
+		target-libgo \
+		target-libphobos \
+		target-zlib"
 
 # these tools are built using the target libraries, and are intended to
 # run only in the target environment
@@ -244,11 +240,22 @@ if test x$with_gnu_as = xno ; then
 fi
 
 use_included_zlib=
+AC_ARG_WITH(system-zlib,
+[AS_HELP_STRING([--with-system-zlib], [use installed libz])])
 # Make sure we don't let ZLIB be added if we didn't want it.
 if test x$with_system_zlib = xyes ; then
   use_included_zlib=no
   noconfigdirs="$noconfigdirs zlib"
 fi
+
+# Don't compile the bundled readline/libreadline.a if --with-system-readline
+# is provided.
+if test x$with_system_readline = xyes ; then
+  noconfigdirs="$noconfigdirs readline"
+fi
+
+AC_ARG_WITH(zstd,
+[AS_HELP_STRING([--with-zstd], [Support zstd compressed debug sections (default=auto)])])
 
 # some tools are so dependent upon X11 that if we're not building with X, 
 # it's not even worth trying to configure, much less build, that tool.
@@ -285,6 +292,30 @@ case ${with_newlib} in
   no) skipdirs="${skipdirs} target-newlib" ;;
   yes) skipdirs=`echo " ${skipdirs} " | sed -e 's/ target-newlib / /'` ;;
 esac
+
+AC_ARG_ENABLE(as-accelerator-for,
+[AS_HELP_STRING([--enable-as-accelerator-for=ARG],
+		[build as offload target compiler.
+		Specify offload host triple by ARG])])
+
+AC_ARG_ENABLE(offload-targets,
+[AS_HELP_STRING([--enable-offload-targets=LIST],
+		[enable offloading to devices from comma-separated LIST of
+		TARGET[=DIR]. Use optional path to find offload target compiler
+		during the build])],
+[
+  if test x"$enable_offload_targets" = x; then
+    AC_MSG_ERROR([no offload targets specified])
+  fi
+], [enable_offload_targets=])
+
+AC_ARG_ENABLE(offload-defaulted,
+[AS_HELP_STRING([--enable-offload-defaulted]
+		[If enabled, configured but not installed offload compilers and
+		libgomp plugins are silently ignored.  Useful for distribution
+		compilers where those are in separate optional packages.])],
+[enable_offload_defaulted=$enableval],
+[enable_offload_defaulted=])
 
 # Handle --enable-gold, --enable-ld.
 # --disable-gold [--enable-ld]
@@ -331,7 +362,8 @@ case "${ENABLE_GOLD}" in
     if test "$is_elf" = "yes"; then
       # Check for target supported by gold.
       case "${target}" in
-        i?86-*-* | x86_64-*-* | sparc*-*-* | powerpc*-*-* | arm*-*-* | tilegx*-*-*)
+        i?86-*-* | x86_64-*-* | sparc*-*-* | powerpc*-*-* | arm*-*-* \
+        | aarch64*-*-* | tilegx*-*-* | mips*-*-* | s390*-*-* | loongarch*-*-*)
 	  configdirs="$configdirs gold"
 	  if test x${ENABLE_GOLD} = xdefault; then
 	    default_ld=gold
@@ -373,6 +405,39 @@ case "${ENABLE_LD}" in
     ;;
 esac
 
+AC_ARG_ENABLE(gprofng,
+[AS_HELP_STRING([[--enable-gprofng[=ARG]]],
+		[build gprofng @<:@ARG={yes,no}@:>@])],
+enable_gprofng=$enableval,
+enable_gprofng=yes)
+if test "$enable_gprofng" = "yes"; then
+  case "${target}" in
+    x86_64-*-linux* | i?86-*-linux* | aarch64-*-linux*)
+    configdirs="$configdirs gprofng"
+    ;;
+  esac
+fi
+
+
+# PR gas/19109
+# Decide the default method for compressing debug sections.
+# Provide a configure time option to override our default.
+AC_ARG_ENABLE(compressed_debug_sections,
+[AS_HELP_STRING([--enable-compressed-debug-sections={all,gas,gold,ld,none}],
+		[Enable compressed debug sections for gas, gold or ld by
+		 default])],
+[
+  if test x"$enable_compressed_debug_sections" = xyes; then
+    AC_MSG_ERROR([no program with compressed debug sections specified])
+  fi
+], [enable_compressed_debug_sections=])
+
+# Select default compression algorithm.
+AC_ARG_ENABLE(default_compressed_debug_sections_algorithm,
+[AS_HELP_STRING([--enable-default-compressed-debug-sections-algorithm={zlib,zstd}],
+		[Default compression algorithm for --enable-compressed-debug-sections.])],
+[], [default_compressed_debug_sections_algorithm=])
+
 # Configure extra directories which are host specific
 
 case "${host}" in
@@ -394,6 +459,18 @@ case "${host}" in
     ;;
 esac
 
+# Default to --disable-year2038 until we can handle differences between
+# projects that use gnulib (which understands year 2038) and projects that
+# do not (like BFD).
+AC_ARG_ENABLE(year2038,
+AS_HELP_STRING([--enable-year2038],
+  [enable support for timestamps past the year 2038]),
+ENABLE_YEAR2038=$enableval,
+ENABLE_YEAR2038=no)
+enable_year2038=
+if test "${ENABLE_YEAR2038}" = "no" ; then
+  enable_year2038=no
+fi
 
 AC_ARG_ENABLE(libquadmath,
 AS_HELP_STRING([--disable-libquadmath],
@@ -435,63 +512,47 @@ AS_HELP_STRING([--disable-libstdcxx],
 ENABLE_LIBSTDCXX=$enableval,
 ENABLE_LIBSTDCXX=default)
 [if test "${ENABLE_LIBSTDCXX}" = "no" ; then
-  noconfigdirs="$noconfigdirs libstdc++-v3"
+  noconfigdirs="$noconfigdirs target-libstdc++-v3"
 fi]
 
-# Save it here so that, even in case of --enable-libgcj, if the Java
-# front-end isn't enabled, we still get libgcj disabled.
-libgcj_saved=$libgcj
-case $enable_libgcj in
-yes)
-  # If we reset it here, it won't get added to noconfigdirs in the
-  # target-specific build rules, so it will be forcibly enabled
-  # (unless the Java language itself isn't enabled).
-  libgcj=
-  ;;
-no)
-  # Make sure we get it printed in the list of not supported target libs.
-  # Don't disable libffi, though, other languages use it.
-  noconfigdirs="$noconfigdirs `echo ${libgcj} | sed -e 's/target-libffi//'`"
-  # Clear libgcj_saved so that even if java is enabled libffi won't be
-  # built.
-  libgcj_saved=
-  ;;
-esac
-
-AC_ARG_ENABLE(static-libjava,
-[AS_HELP_STRING([[--enable-static-libjava[=ARG]]],
-		[build static libjava @<:@default=no@:>@])],
-ENABLE_STATIC_LIBJAVA=$enableval,
-ENABLE_STATIC_LIBJAVA=no)
-enable_static_libjava=
-if test "${ENABLE_STATIC_LIBJAVA}" = "yes" ; then
-  enable_static_libjava=yes
-fi
-
-if test x$enable_static_libjava != xyes ; then
-  EXTRA_CONFIGARGS_LIBJAVA=--disable-static
-fi
-AC_SUBST(EXTRA_CONFIGARGS_LIBJAVA)
-
-# Disable libmudflap on some systems.
-if test x$enable_libmudflap = x ; then
-    case "${target}" in
-    *-*-linux* | *-*-gnu* | *-*-k*bsd*-gnu | bfin*-*-uclinux* | *-*-kopensolaris*-gnu)
-        # Enable libmudflap by default in GNU and friends.
-	;;
-    *-*-freebsd*)
-        # Enable libmudflap by default in FreeBSD.
-	;;
+# If this is accelerator compiler and its target is intelmic we enable
+# target liboffloadmic by default.  If this is compiler with offloading
+# for intelmic we enable host liboffloadmic by default.  Otherwise
+# liboffloadmic is disabled by default.
+AC_ARG_ENABLE([liboffloadmic],
+AC_HELP_STRING([[--enable-liboffloadmic[=ARG]]],
+	       [build liboffloadmic @<:@ARG={no,host,target}@:>@]),
+[case "$enableval" in
+  no | host | target)
+    enable_liboffloadmic=$enableval ;;
+  *)
+    AC_MSG_ERROR([--enable-liboffloadmic=no/host/target]) ;;
+esac],
+[if test x"$enable_as_accelerator_for" != x; then
+  case "${target}" in
+    *-intelmic-* | *-intelmicemul-*)
+      enable_liboffloadmic=target
+      extra_liboffloadmic_configure_flags="--enable-liboffloadmic=target"
+      ;;
     *)
-        # Disable it by default everywhere else.
-	noconfigdirs="$noconfigdirs target-libmudflap"
-	;;
+      enable_liboffloadmic=no
+      ;;
+  esac
+else
+  case "${enable_offload_targets}" in
+    *-intelmic-* | *-intelmicemul-*)
+      enable_liboffloadmic=host
+      extra_liboffloadmic_configure_flags="--enable-liboffloadmic=host"
+      ;;
+    *)
+      enable_liboffloadmic=no
+      ;;
     esac
-fi
+fi])
+AC_SUBST(extra_liboffloadmic_configure_flags)
 
-# Disable libgomp on non POSIX hosted systems.
+# Enable libgomp by default on hosted POSIX systems, and a few others.
 if test x$enable_libgomp = x ; then
-    # Enable libgomp by default on hosted POSIX systems.
     case "${target}" in
     *-*-linux* | *-*-gnu* | *-*-k*bsd*-gnu | *-*-kopensolaris*-gnu)
 	;;
@@ -500,6 +561,8 @@ if test x$enable_libgomp = x ; then
     *-*-solaris2* | *-*-hpux11*)
 	;;
     *-*-darwin* | *-*-aix*)
+	;;
+    nvptx*-*-* | amdgcn*-*-*)
 	;;
     *)
 	noconfigdirs="$noconfigdirs target-libgomp"
@@ -517,6 +580,22 @@ if test -d ${srcdir}/libatomic; then
 	then
 	    AC_MSG_RESULT([no])
 	    noconfigdirs="$noconfigdirs target-libatomic"
+	else
+	    AC_MSG_RESULT([yes])
+	fi
+    fi
+fi
+
+# Disable liboffloadmic on unsupported systems.
+if test -d ${srcdir}/liboffloadmic; then
+    if test x$enable_liboffloadmic != xno; then
+	AC_MSG_CHECKING([for liboffloadmic support])
+	if (srcdir=${srcdir}/liboffloadmic; \
+		. ${srcdir}/configure.tgt; \
+		test -n "$UNSUPPORTED")
+	then
+	    AC_MSG_RESULT([no])
+	    noconfigdirs="$noconfigdirs target-liboffloadmic"
 	else
 	    AC_MSG_RESULT([yes])
 	fi
@@ -589,7 +668,14 @@ case "${target}" in
     # No hosted I/O support.
     noconfigdirs="$noconfigdirs target-libssp"
     ;;
+  bpf-*-*)
+    noconfigdirs="$noconfigdirs target-libssp"
+    ;;
   powerpc-*-aix* | rs6000-*-aix*)
+    noconfigdirs="$noconfigdirs target-libssp"
+    ;;
+  pru-*-*)
+    # No hosted I/O support.
     noconfigdirs="$noconfigdirs target-libssp"
     ;;
   rl78-*-*)
@@ -598,14 +684,22 @@ case "${target}" in
     # for explicit misaligned loads.
     noconfigdirs="$noconfigdirs target-libssp"
     ;;
+  visium-*-*)
+    # No hosted I/O support.
+    noconfigdirs="$noconfigdirs target-libssp"
+    ;;
 esac
 
 # Disable libstdc++-v3 for some systems.
-# Allow user to override this if they pass --enable-libstdc++-v3
+# Allow user to override this if they pass --enable-libstdcxx
 if test "${ENABLE_LIBSTDCXX}" = "default" ; then
   case "${target}" in
     *-*-vxworks*)
       # VxWorks uses the Dinkumware C++ library.
+      noconfigdirs="$noconfigdirs target-libstdc++-v3"
+      ;;
+    amdgcn*-*-*)
+      # Not ported/fails to build when using newlib.
       noconfigdirs="$noconfigdirs target-libstdc++-v3"
       ;;
     arm*-wince-pe*)
@@ -615,7 +709,72 @@ if test "${ENABLE_LIBSTDCXX}" = "default" ; then
     avr-*-*)
       noconfigdirs="$noconfigdirs target-libstdc++-v3"
       ;;
+    bpf-*-*)
+      noconfigdirs="$noconfigdirs target-libstdc++-v3"
+      ;;
+    ft32-*-*)
+      noconfigdirs="$noconfigdirs target-libstdc++-v3"
+      ;;
   esac
+fi
+
+# Disable C++ on systems where it is known to not work.
+# For testing, you can override this with --enable-languages=c++.
+case ,${enable_languages}, in
+  *,c++,*)
+    ;;
+  *)
+      case "${target}" in
+        bpf-*-*)
+          unsupported_languages="$unsupported_languages c++"
+          ;;
+      esac
+      ;;
+esac
+
+# Disable Objc on systems where it is known to not work.
+# For testing, you can override this with --enable-languages=objc.
+case ,${enable_languages}, in
+  *,objc,*)
+    ;;
+  *)
+      case "${target}" in
+        bpf-*-*)
+          unsupported_languages="$unsupported_languages objc"
+          ;;
+      esac
+      ;;
+esac
+
+# Disable D on systems where it is known to not work.
+# For testing, you can override this with --enable-languages=d.
+case ,${enable_languages}, in
+  *,d,*)
+    ;;
+  *)
+    case "${target}" in
+      bpf-*-*)
+	unsupported_languages="$unsupported_languages d"
+	;;
+    esac
+    ;;
+esac
+
+# Disable libphobos on unsupported systems.
+# For testing, you can override this with --enable-libphobos.
+if test -d ${srcdir}/libphobos; then
+    if test x$enable_libphobos = x; then
+	AC_MSG_CHECKING([for libphobos support])
+	if (srcdir=${srcdir}/libphobos; \
+		. ${srcdir}/configure.tgt; \
+		test "$LIBPHOBOS_SUPPORTED" != "yes")
+	then
+	    AC_MSG_RESULT([no])
+	    noconfigdirs="$noconfigdirs target-libphobos"
+	else
+	    AC_MSG_RESULT([yes])
+	fi
+    fi
 fi
 
 # Disable Fortran for some systems.
@@ -624,64 +783,12 @@ case "${target}" in
     # See <http://gcc.gnu.org/ml/gcc-patches/2004-11/msg00572.html>.
     unsupported_languages="$unsupported_languages fortran"
     ;;
-esac
-
-# Disable Java if libffi is not supported.
-case "${target}" in
-  aarch64-*-*)
-    ;;
-  alpha*-*-*)
-    ;;
-  arm*-*-*)
-    ;;
-  cris-*-*)
-    ;;
-  frv-*-*)
-    ;;
-  hppa*-*-linux*)
-    ;;
-  hppa*-*-hpux*)
-    ;;
-  i?86-*-*)
-    ;;
-  ia64*-*-*)
-    ;;
-  m32r*-*-*)
-    ;;
-  m68k-*-*)
-    ;;
-  mips*-*-rtems*)
-    ;;
-  mips*-*-linux*)
-    ;;
-  powerpc*-*-linux*)
-    ;;
-  powerpc-*-darwin*)
-    ;;
-  powerpc-*-aix* | rs6000-*-aix*)
-    ;;
-  powerpc-*-freebsd*)
-    ;;
-  powerpc64-*-freebsd*)
-    ;;
-  powerpc*-*-rtems*)
-    ;;
-  s390-*-* | s390x-*-*)
-    ;;
-  sh-*-* | sh[[34]]*-*-*)
-    ;;
-  sh64-*-* | sh5*-*-*)
-    ;;
-  sparc*-*-*)
-    ;;
-  x86_64-*-*)
-    ;;
-  *-*-*)
-    unsupported_languages="$unsupported_languages java"
+  bpf-*-*)
+    unsupported_languages="$unsupported_languages fortran"
     ;;
 esac
 
-# Disable Java, libgcj or related libraries for some systems.
+# Disable libffi for some systems.
 case "${target}" in
   powerpc-*-darwin*)
     ;;
@@ -690,86 +797,110 @@ case "${target}" in
   x86_64-*-darwin[[912]]*)
     ;;
   *-*-darwin*)
-    noconfigdirs="$noconfigdirs ${libgcj}"
+    noconfigdirs="$noconfigdirs target-libffi"
     ;;
   *-*-netware*)
-    noconfigdirs="$noconfigdirs ${libgcj}"
+    noconfigdirs="$noconfigdirs target-libffi"
+    ;;
+  *-*-phoenix*)
+    noconfigdirs="$noconfigdirs target-libffi"
     ;;
   *-*-rtems*)
-    noconfigdirs="$noconfigdirs ${libgcj}"
+    noconfigdirs="$noconfigdirs target-libffi"
     ;;
   *-*-tpf*)
-    noconfigdirs="$noconfigdirs ${libgcj}"
+    noconfigdirs="$noconfigdirs target-libffi"
     ;;
   *-*-uclinux*)
-    noconfigdirs="$noconfigdirs ${libgcj}"
+    noconfigdirs="$noconfigdirs target-libffi"
     ;;
   *-*-vxworks*)
-    noconfigdirs="$noconfigdirs ${libgcj}"
+    noconfigdirs="$noconfigdirs target-libffi"
+    ;;
+  aarch64*-*-freebsd*)
+    noconfigdirs="$noconfigdirs target-libffi"
     ;;
   alpha*-*-*vms*)
-    noconfigdirs="$noconfigdirs ${libgcj}"
+    noconfigdirs="$noconfigdirs target-libffi"
+    ;;
+  arm*-*-freebsd*)
+    noconfigdirs="$noconfigdirs target-libffi"
     ;;
   arm-wince-pe)
-    noconfigdirs="$noconfigdirs ${libgcj}"
+    noconfigdirs="$noconfigdirs target-libffi"
     ;;
   arm*-*-symbianelf*)
-    noconfigdirs="$noconfigdirs ${libgcj}"
+    noconfigdirs="$noconfigdirs target-libffi"
     ;;
-  bfin-*-*)
-    noconfigdirs="$noconfigdirs target-boehm-gc"
+  bpf-*-*)
+    noconfigdirs="$noconfigdirs target-libffi"
     ;;
   cris-*-* | crisv32-*-*)
-    unsupported_languages="$unsupported_languages java"
     case "${target}" in
       *-*-linux*)
 	;;
       *) # See PR46792 regarding target-libffi.
-	noconfigdirs="$noconfigdirs target-libffi target-boehm-gc";;
+	noconfigdirs="$noconfigdirs target-libffi";;
     esac
     ;;
-  hppa*64*-*-linux*)
-    # In this case, it's because the hppa64-linux target is for
-    # the kernel only at this point and has no libc, and thus no
-    # headers, crt*.o, etc., all of which are needed by these.
-    unsupported_languages="$unsupported_languages java"
-    ;;
   hppa*64*-*-hpux*)
-    noconfigdirs="$noconfigdirs ${libgcj}"
+    noconfigdirs="$noconfigdirs target-libffi"
     ;;
   hppa*-hp-hpux11*)
     ;;
   hppa*-*-hpux*)
-    # According to Alexandre Oliva <aoliva@redhat.com>, libjava won't
-    # build on HP-UX 10.20.
-    noconfigdirs="$noconfigdirs ${libgcj}"
+    noconfigdirs="$noconfigdirs target-libffi"
     ;;
   ia64*-*-*vms*)
-    noconfigdirs="$noconfigdirs ${libgcj}"
+    noconfigdirs="$noconfigdirs target-libffi"
     ;;
   i[[3456789]]86-w64-mingw*)
-    noconfigdirs="$noconfigdirs ${libgcj}"
+    noconfigdirs="$noconfigdirs target-libffi"
     ;;
   i[[3456789]]86-*-mingw*)
-    noconfigdirs="$noconfigdirs ${libgcj}"
+    noconfigdirs="$noconfigdirs target-libffi"
     ;;
   x86_64-*-mingw*)
-    noconfigdirs="$noconfigdirs ${libgcj}"
+    noconfigdirs="$noconfigdirs target-libffi"
     ;;
   mmix-*-*)
-    noconfigdirs="$noconfigdirs target-libffi target-boehm-gc"
+    noconfigdirs="$noconfigdirs target-libffi"
     ;;
   powerpc-*-aix*)
-    # copied from rs6000-*-* entry
-    noconfigdirs="$noconfigdirs ${libgcj}"
     ;;
   rs6000-*-aix*)
-    noconfigdirs="$noconfigdirs ${libgcj}"
+    ;;
+  ft32-*-*)
+    noconfigdirs="$noconfigdirs target-libffi"
     ;;
   *-*-lynxos*)
-    noconfigdirs="$noconfigdirs ${libgcj}"
-    ;; 
+    noconfigdirs="$noconfigdirs target-libffi"
+    ;;
 esac
+
+# Disable the go frontend on systems where it is known to not work. Please keep
+# this in sync with contrib/config-list.mk.
+case "${target}" in
+*-*-darwin* | *-*-cygwin* | *-*-mingw* | bpf-* )
+    unsupported_languages="$unsupported_languages go"
+    ;;
+esac
+
+# Only allow gdbserver on some systems.
+if test -d ${srcdir}/gdbserver; then
+    if test x$enable_gdbserver = x; then
+	AC_MSG_CHECKING([for gdbserver support])
+	if (srcdir=${srcdir}/gdbserver; \
+		. ${srcdir}/configure.srv; \
+		test -n "$UNSUPPORTED")
+	then
+	    AC_MSG_RESULT([no])
+	    noconfigdirs="$noconfigdirs gdbserver"
+	else
+	    AC_MSG_RESULT([yes])
+	fi
+    fi
+fi
 
 # Disable libgo for some systems where it is known to not work.
 # For testing, you can easily override this with --enable-libgo.
@@ -782,9 +913,9 @@ if test x$enable_libgo = x; then
     *-*-cygwin* | *-*-mingw*)
 	noconfigdirs="$noconfigdirs target-libgo"
 	;;
-    *-*-aix*)
-	noconfigdirs="$noconfigdirs target-libgo"
-	;;
+    bpf-*-*)
+        noconfigdirs="$noconfigdirs target-libgo"
+        ;;
     esac
 fi
 
@@ -810,6 +941,9 @@ case "${target}" in
   i[[3456789]]86-*-*)
     libgloss_dir=i386
     ;;
+  loongarch*-*-*)
+    libgloss_dir=loongarch
+    ;;
   m68hc11-*-*|m6811-*-*|m68hc12-*-*|m6812-*-*)
     libgloss_dir=m68hc11
     ;;
@@ -821,6 +955,9 @@ case "${target}" in
     ;;
   powerpc*-*-*)
     libgloss_dir=rs6000
+    ;;
+  pru-*-*)
+    libgloss_dir=pru
     ;;
   sparc*-*-*)
     libgloss_dir=sparc
@@ -851,6 +988,9 @@ case "${target}" in
     noconfigdirs="$noconfigdirs target-newlib target-libgloss"
     ;;
   sparc-*-sunos4*)
+    noconfigdirs="$noconfigdirs target-newlib target-libgloss"
+    ;;
+  bpf-*-*)
     noconfigdirs="$noconfigdirs target-newlib target-libgloss"
     ;;
   *-*-aix*)
@@ -897,6 +1037,16 @@ esac
 case "${target}" in
   *-*-chorusos)
     ;;
+  aarch64-*-darwin*)
+    noconfigdirs="$noconfigdirs ld gas gdb gprof"
+    noconfigdirs="$noconfigdirs sim target-rda"
+    ;;
+  amdgcn*-*-*)
+    ;;
+  arm-*-darwin*)
+    noconfigdirs="$noconfigdirs ld gas gdb gprof"
+    noconfigdirs="$noconfigdirs sim target-rda"
+    ;;
   powerpc-*-darwin*)
     noconfigdirs="$noconfigdirs ld gas gdb gprof"
     noconfigdirs="$noconfigdirs sim target-rda"
@@ -916,7 +1066,8 @@ case "${target}" in
   *-*-dragonfly*)
     ;;
   *-*-freebsd*)
-    if test "x$with_gmp" = x && test "x$with_gmp_dir" = x \
+    if test "x$with_gmp" = x \
+	&& ! test -d ${srcdir}/gmp \
 	&& test -f /usr/local/include/gmp.h; then
       with_gmp=/usr/local
     fi
@@ -928,6 +1079,9 @@ case "${target}" in
   *-*-netbsd*)
     ;;
   *-*-netware*)
+    ;;
+  *-*-phoenix*)
+    noconfigdirs="$noconfigdirs target-libgloss"
     ;;
   *-*-rtems*)
     noconfigdirs="$noconfigdirs target-libgloss"
@@ -953,19 +1107,20 @@ case "${target}" in
     # newlib is not 64 bit ready
     noconfigdirs="$noconfigdirs target-newlib target-libgloss"
     ;;
+  bpf-*-*)
+    noconfigdirs="$noconfigdirs target-libobjc target-libbacktrace"
+    ;;
   sh*-*-pe|mips*-*-pe|*arm-wince-pe)
     noconfigdirs="$noconfigdirs tcl tk itcl libgui sim"
     ;;
-  arc-*-*|arceb-*-*)
-    noconfigdirs="$noconfigdirs target-libgloss"
+  arc*-*-*)
+    noconfigdirs="$noconfigdirs sim"
     ;;
   arm-*-pe*)
     noconfigdirs="$noconfigdirs target-libgloss"
     ;;
   arm-*-riscix*)
     noconfigdirs="$noconfigdirs ld target-libgloss"
-    ;;
-  avr-*-rtems*)
     ;;
   avr-*-*)
     if test x${with_avrlibc} != xno; then
@@ -987,8 +1142,11 @@ case "${target}" in
   fr30-*-elf*)
     noconfigdirs="$noconfigdirs gdb"
     ;;
+  ft32-*-*)
+    noconfigdirs="$noconfigdirs target-rda gprof"
+    ;;
   moxie-*-*)
-    noconfigdirs="$noconfigdirs gprof"
+    noconfigdirs="$noconfigdirs"
     ;;
   h8300*-*-*)
     noconfigdirs="$noconfigdirs target-libgloss"
@@ -998,6 +1156,12 @@ case "${target}" in
     ;;
   hppa1.1-*-osf* | hppa1.1-*-bsd* )
     ;;
+  hppa*64*-*-hpux*)
+    noconfigdirs="$noconfigdirs gdb"
+    ;;
+  hppa*-*-hpux11*)
+    noconfigdirs="$noconfigdirs gdb ld"
+    ;;
   hppa*64*-*-linux*)
     ;;
   hppa*-*-linux*)
@@ -1006,9 +1170,6 @@ case "${target}" in
   hppa*-*-lites* | \
   hppa*-*-openbsd* | \
   hppa*64*-*-*)
-    ;;
-  hppa*-hp-hpux11*)
-    noconfigdirs="$noconfigdirs ld"
     ;;
   hppa*-*-pro*)
     ;;
@@ -1024,7 +1185,7 @@ case "${target}" in
     ;;
   ia64*-**-hpux*)
     # No ld support yet.
-    noconfigdirs="$noconfigdirs libgui itcl ld"
+    noconfigdirs="$noconfigdirs gdb libgui itcl ld"
     ;;
   ia64*-*-*vms*)
     # No ld support yet.
@@ -1074,6 +1235,13 @@ case "${target}" in
   mt-*-*)
     noconfigdirs="$noconfigdirs sim"
     ;;
+  nfp-*-*)
+    noconfigdirs="$noconfigdirs ld gas gdb gprof sim"
+    noconfigdirs="$noconfigdirs $target_libraries"
+    ;;
+  pdp11-*-*)
+    noconfigdirs="$noconfigdirs gdb gprof"
+    ;;
   powerpc-*-aix*)
     # copied from rs6000-*-* entry
     noconfigdirs="$noconfigdirs gprof"
@@ -1106,7 +1274,7 @@ case "${target}" in
   microblaze*)
     noconfigdirs="$noconfigdirs gprof"
     ;;
-  mips*-sde-elf* | mips*-mti-elf*)
+  mips*-sde-elf* | mips*-mti-elf* | mips*-img-elf*)
     if test x$with_newlib = xyes; then
       noconfigdirs="$noconfigdirs gprof"
     fi
@@ -1129,7 +1297,10 @@ case "${target}" in
   mips*-*-*)
     noconfigdirs="$noconfigdirs gprof"
     ;;
-  sh-*-* | sh64-*-*)
+  nvptx*-*-*)
+    noconfigdirs="$noconfigdirs target-libssp target-libstdc++-v3 target-libobjc"
+    ;;
+  sh-*-*)
     case "${target}" in
       sh*-*-elf)
          ;;
@@ -1145,7 +1316,7 @@ case "${target}" in
   tic6x-*-*)
     noconfigdirs="$noconfigdirs sim"
     ;;
-  tilepro-*-* | tilegx-*-*)
+  tilepro*-*-* | tilegx*-*-*)
     noconfigdirs="$noconfigdirs sim"
     ;;
   v810-*-*)
@@ -1154,8 +1325,14 @@ case "${target}" in
   vax-*-*)
     noconfigdirs="$noconfigdirs target-newlib target-libgloss"
     ;;
-  wi23-*-*)
-    noconfigdirs="$noconfigdirs gdb sim binutils opcodes gas ld gprof"
+  wasm32-*-*)
+    noconfigdirs="$noconfigdirs ld"
+    ;;
+  loongarch*-*-linux*)
+    ;;
+  loongarch*-*-*)
+    noconfigdirs="$noconfigdirs gprof"
+    ;;
 esac
 
 # If we aren't building newlib, then don't build libgloss, since libgloss
@@ -1179,6 +1356,9 @@ case "${host}" in
   *-mingw*)
     host_makefile_frag="config/mh-mingw"
     ;;
+  alpha*-linux*)
+    host_makefile_frag="config/mh-alpha-linux"
+    ;;
   hppa*-hp-hpux10*)
     host_makefile_frag="config/mh-pa-hpux10"
     ;;
@@ -1188,7 +1368,7 @@ case "${host}" in
   hppa*-*)	
     host_makefile_frag="config/mh-pa"
     ;;
-  *-*-darwin*)
+  i?86-*-darwin[[89]]* | i?86-*-darwin1[[0-7]]* | powerpc*-*-darwin*)
     host_makefile_frag="config/mh-darwin"
     ;;
   powerpc-*-aix*)
@@ -1204,10 +1384,12 @@ if test "${build}" != "${host}" ; then
   AR_FOR_BUILD=${AR_FOR_BUILD-ar}
   AS_FOR_BUILD=${AS_FOR_BUILD-as}
   CC_FOR_BUILD=${CC_FOR_BUILD-gcc}
+  CPP_FOR_BUILD="${CPP_FOR_BUILD-\$(CC_FOR_BUILD) -E}"
   CXX_FOR_BUILD=${CXX_FOR_BUILD-g++}
-  GCJ_FOR_BUILD=${GCJ_FOR_BUILD-gcj}
+  DSYMUTIL_FOR_BUILD=${DSYMUTIL_FOR_BUILD-dsymutil}
   GFORTRAN_FOR_BUILD=${GFORTRAN_FOR_BUILD-gfortran}
   GOC_FOR_BUILD=${GOC_FOR_BUILD-gccgo}
+  GDC_FOR_BUILD=${GDC_FOR_BUILD-gdc}
   DLLTOOL_FOR_BUILD=${DLLTOOL_FOR_BUILD-dlltool}
   LD_FOR_BUILD=${LD_FOR_BUILD-ld}
   NM_FOR_BUILD=${NM_FOR_BUILD-nm}
@@ -1219,9 +1401,10 @@ else
   AS_FOR_BUILD="\$(AS)"
   CC_FOR_BUILD="\$(CC)"
   CXX_FOR_BUILD="\$(CXX)"
-  GCJ_FOR_BUILD="\$(GCJ)"
+  DSYMUTIL_FOR_BUILD="\$(DSYMUTIL)"
   GFORTRAN_FOR_BUILD="\$(GFORTRAN)"
   GOC_FOR_BUILD="\$(GOC)"
+  GDC_FOR_BUILD="\$(GDC)"
   DLLTOOL_FOR_BUILD="\$(DLLTOOL)"
   LD_FOR_BUILD="\$(LD)"
   NM_FOR_BUILD="\$(NM)"
@@ -1230,7 +1413,7 @@ else
   WINDMC_FOR_BUILD="\$(WINDMC)"
 fi
 
-AC_PROG_CC
+AC_PROG_CC_C99
 AC_PROG_CXX
 
 # We must set the default linker to the linker used by gcc for the correct
@@ -1260,11 +1443,11 @@ if test "$GCC" = yes; then
   LDFLAGS="$LDFLAGS -static-libstdc++ -static-libgcc"
   AC_MSG_CHECKING([whether g++ accepts -static-libstdc++ -static-libgcc])
   AC_LANG_PUSH(C++)
-  AC_LINK_IFELSE([
+  AC_LINK_IFELSE([AC_LANG_SOURCE([
 #if (__GNUC__ < 4) || (__GNUC__ == 4 && __GNUC_MINOR__ < 5)
 #error -static-libstdc++ not implemented
 #endif
-int main() {}],
+int main() {}])],
     [AC_MSG_RESULT([yes]); have_static_libs=yes],
     [AC_MSG_RESULT([no])])
   AC_LANG_POP(C++)
@@ -1273,6 +1456,7 @@ int main() {}],
 fi
 
 ACX_PROG_GNAT
+ACX_PROG_GDC
 ACX_PROG_CMP_IGNORE_INITIAL
 
 AC_ARG_ENABLE([bootstrap],
@@ -1318,11 +1502,98 @@ case "$have_compiler:$host:$target:$enable_bootstrap" in
     ;;
 esac
 
+# When bootstrapping with GCC, build stage 1 in C++11 mode to ensure that a
+# C++11 compiler can still start the bootstrap.  Otherwise, if building GCC,
+# require C++11 (or higher).
+if test "$enable_bootstrap:$GXX" = "yes:yes"; then
+  CXX="$CXX -std=c++11"
+elif test "$have_compiler" = yes; then
+  AX_CXX_COMPILE_STDCXX(11)
+
+  if test "${build}" != "${host}"; then
+    AX_CXX_COMPILE_STDCXX(11, [], [], [_FOR_BUILD])
+  fi
+fi
+
+AC_ARG_ENABLE([pgo-build],
+[AS_HELP_STRING([--enable-pgo-build[[=lto]]],
+		[enable the PGO build])],
+[enable_pgo_build=$enableval],
+[enable_pgo_build=no])
+
+# Issue errors and warnings for invalid/strange PGO build combinations.
+case "$have_compiler:$host:$target:$enable_pgo_build" in
+  *:*:*:no) ;;
+
+  # Allow the PGO build only if we aren't building a compiler and
+  # we are in a native configuration.
+  no:$build:$build:yes | no:$build:$build:lto) ;;
+
+  # Disallow the PGO bootstrap if we are building a compiler.
+  yes:*:*:yes | yes:*:*:lto)
+    AC_MSG_ERROR([cannot perform the PGO bootstrap when building a compiler]) ;;
+
+  *)
+    AC_MSG_ERROR([invalid option for --enable-pgo-build])
+    ;;
+esac
+
+if test "$enable_pgo_build" != "no"; then
+  AC_MSG_CHECKING([whether the compiler supports -fprofile-generate])
+  old_CFLAGS="$CFLAGS"
+  PGO_BUILD_GEN_CFLAGS="-fprofile-generate"
+  CFLAGS="$CFLAGS $PGO_BUILD_CFLAGS"
+  AC_COMPILE_IFELSE([AC_LANG_SOURCE([int foo;])],,
+		    [PGO_BUILD_GEN_CFLAGS=])
+  CFLAGS="$old_CFLAGS"
+  if test -n "$PGO_BUILD_GEN_CFLAGS"; then
+    AC_MSG_RESULT([yes])
+    PGO_BUILD_USE_CFLAGS="-fprofile-use"
+  else
+    AC_MSG_RESULT([no])
+    AC_MSG_ERROR([cannot perform the PGO build without -fprofile-generate])
+  fi
+
+  if test "$enable_pgo_build" = "lto"; then
+    AC_MSG_CHECKING([whether the compiler supports -flto=jobserver -ffat-lto-objects])
+    old_CFLAGS="$CFLAGS"
+    PGO_BUILD_LTO_CFLAGS="-flto=jobserver -ffat-lto-objects"
+    CFLAGS="$CFLAGS $PGO_BUILD_LTO_CFLAGS"
+    AC_COMPILE_IFELSE([AC_LANG_SOURCE([int foo;])],,
+		      [PGO_BUILD_LTO_CFLAGS=])
+    CFLAGS="$old_CFLAGS"
+    if test -n "$PGO_BUILD_LTO_CFLAGS"; then
+      AC_MSG_RESULT([yes])
+    else
+      AC_MSG_RESULT([no])
+      AC_MSG_WARN([LTO is disabled for the PGO build])
+    fi
+  fi
+fi
+AC_SUBST(PGO_BUILD_GEN_CFLAGS)
+AC_SUBST(PGO_BUILD_USE_CFLAGS)
+AC_SUBST(PGO_BUILD_LTO_CFLAGS)
+
 # Used for setting $lt_cv_objdir
 _LT_CHECK_OBJDIR
 
 # Check for GMP, MPFR and MPC
-gmplibs="-lmpc -lmpfr -lgmp"
+require_gmp=no
+require_mpc=no
+if test -d ${srcdir}/gcc ; then
+  require_gmp=yes
+  require_mpc=yes
+fi
+if test -d ${srcdir}/gdb ; then
+  if test "x$enable_gdb" != xno; then
+   require_gmp=yes
+  fi
+fi
+
+gmplibs="-lmpfr -lgmp"
+if test x"$require_mpc" = "xyes" ; then
+  gmplibs="-lmpc $gmplibs"
+fi
 gmpinc=
 have_gmp=no
 
@@ -1362,11 +1633,6 @@ fi
 
 # Specify a location for mpfr
 # check for this first so it ends up on the link line before gmp.
-AC_ARG_WITH(mpfr-dir,
-[AS_HELP_STRING([--with-mpfr-dir=PATH], [this option has been REMOVED])],
-[AC_MSG_ERROR([The --with-mpfr-dir=PATH option has been removed.
-Use --with-mpfr=PATH or --with-mpfr-include=PATH plus --with-mpfr-lib=PATH])])
-
 AC_ARG_WITH(mpfr,
 [AS_HELP_STRING([--with-mpfr=PATH],
 		[specify prefix directory for installed MPFR package.
@@ -1391,15 +1657,13 @@ if test "x$with_mpfr_lib" != x; then
 fi
 if test "x$with_mpfr$with_mpfr_include$with_mpfr_lib" = x && test -d ${srcdir}/mpfr; then
   # MPFR v3.1.0 moved the sources into a src sub-directory.
-  if test -d ${srcdir}/mpfr/src; then
-    gmplibs='-L$$r/$(HOST_SUBDIR)/mpfr/src/'"$lt_cv_objdir $gmplibs"
-    gmpinc='-I$$r/$(HOST_SUBDIR)/mpfr/src -I$$s/mpfr/src '"$gmpinc"
-    extra_mpc_mpfr_configure_flags='--with-mpfr-include=$$s/mpfr/src --with-mpfr-lib=$$r/$(HOST_SUBDIR)/mpfr/src/'"$lt_cv_objdir"
-  else
-    gmplibs='-L$$r/$(HOST_SUBDIR)/mpfr/'"$lt_cv_objdir $gmplibs"
-    gmpinc='-I$$r/$(HOST_SUBDIR)/mpfr -I$$s/mpfr '"$gmpinc"
-    extra_mpc_mpfr_configure_flags='--with-mpfr-include=$$s/mpfr --with-mpfr-lib=$$r/$(HOST_SUBDIR)/mpfr/'"$lt_cv_objdir"
+  if ! test -d ${srcdir}/mpfr/src; then
+    AC_MSG_ERROR([dnl
+Building GCC with MPFR in the source tree is only handled for MPFR 3.1.0+.])
   fi
+  gmplibs='-L$$r/$(HOST_SUBDIR)/mpfr/src/'"$lt_cv_objdir $gmplibs"
+  gmpinc='-I$$r/$(HOST_SUBDIR)/mpfr/src -I$$s/mpfr/src '"$gmpinc"
+  extra_mpc_mpfr_configure_flags='--with-mpfr-include=$$s/mpfr/src --with-mpfr-lib=$$r/$(HOST_SUBDIR)/mpfr/src/'"$lt_cv_objdir"
   # Do not test the mpfr version.  Assume that it is sufficient, since
   # it is in the source tree, and the library has not been built yet
   # but it would be included on the link line in the version check below
@@ -1408,11 +1672,6 @@ if test "x$with_mpfr$with_mpfr_include$with_mpfr_lib" = x && test -d ${srcdir}/m
 fi
 
 # Specify a location for gmp
-AC_ARG_WITH(gmp-dir,
-[AS_HELP_STRING([--with-gmp-dir=PATH], [this option has been REMOVED])],
-[AC_MSG_ERROR([The --with-gmp-dir=PATH option has been removed.
-Use --with-gmp=PATH or --with-gmp-include=PATH plus --with-gmp-lib=PATH])])
-
 AC_ARG_WITH(gmp,
 [AS_HELP_STRING([--with-gmp=PATH],
 		[specify prefix directory for the installed GMP package.
@@ -1449,7 +1708,7 @@ if test "x$with_gmp$with_gmp_include$with_gmp_lib" = x && test -d ${srcdir}/gmp;
   have_gmp=yes
 fi
 
-if test -d ${srcdir}/gcc && test "x$have_gmp" = xno; then
+if test "x$require_gmp" = xyes && test "x$have_gmp" = xno; then
   have_gmp=yes
   saved_CFLAGS="$CFLAGS"
   CFLAGS="$CFLAGS $gmpinc"
@@ -1476,12 +1735,12 @@ if test -d ${srcdir}/gcc && test "x$have_gmp" = xno; then
     AC_MSG_CHECKING([for the correct version of mpfr.h])
     AC_TRY_COMPILE([#include <gmp.h>
     #include <mpfr.h>],[
-    #if MPFR_VERSION < MPFR_VERSION_NUM(2,4,0)
+    #if MPFR_VERSION < MPFR_VERSION_NUM(3,1,0)
     choke me
     #endif
     ], [AC_TRY_COMPILE([#include <gmp.h>
     #include <mpfr.h>],[
-    #if MPFR_VERSION < MPFR_VERSION_NUM(2,4,2)
+    #if MPFR_VERSION < MPFR_VERSION_NUM(3,1,6)
     choke me
     #endif
     ], [AC_MSG_RESULT([yes])], [AC_MSG_RESULT([buggy but acceptable])])],
@@ -1489,7 +1748,7 @@ if test -d ${srcdir}/gcc && test "x$have_gmp" = xno; then
   fi
 
   # Check for the MPC header version.
-  if test x"$have_gmp" = xyes ; then
+  if test "x$require_mpc" = xyes && test x"$have_gmp" = xyes ; then
     # Check for the recommended and required versions of MPC.
     AC_MSG_CHECKING([for the correct version of mpc.h])
     AC_TRY_COMPILE([#include <mpc.h>],[
@@ -1508,19 +1767,29 @@ if test -d ${srcdir}/gcc && test "x$have_gmp" = xno; then
   if test x"$have_gmp" = xyes; then
     saved_LIBS="$LIBS"
     LIBS="$LIBS $gmplibs"
-    AC_MSG_CHECKING([for the correct version of the gmp/mpfr/mpc libraries])
-    AC_TRY_LINK([#include <mpc.h>],[
+    AC_MSG_CHECKING([for the correct version of the gmp/mpfr libraries])
+    AC_TRY_LINK([#include <mpfr.h>],[
     mpfr_t n;
     mpfr_t x;
-    mpc_t c;
     int t;
     mpfr_init (n);
     mpfr_init (x);
-    mpfr_atan2 (n, n, x, GMP_RNDN);
-    mpfr_erfc (n, x, GMP_RNDN);
-    mpfr_subnormalize (x, t, GMP_RNDN);
+    mpfr_atan2 (n, n, x, MPFR_RNDN);
+    mpfr_erfc (n, x, MPFR_RNDN);
+    mpfr_subnormalize (x, t, MPFR_RNDN);
     mpfr_clear(n);
     mpfr_clear(x);
+    ], [AC_MSG_RESULT([yes])], [AC_MSG_RESULT([no]); have_gmp=no])
+    LIBS="$saved_LIBS"
+  fi
+
+  # Now check the MPC library
+  if test "x$require_mpc" = xyes && test x"$have_gmp" = xyes; then
+    saved_LIBS="$LIBS"
+    LIBS="$LIBS $gmplibs"
+    AC_MSG_CHECKING([for the correct version of the mpc libraries])
+    AC_TRY_LINK([#include <mpc.h>],[
+    mpc_t c;
     mpc_init2 (c, 53);
     mpc_set_ui_ui (c, 1, 1, MPC_RNDNN);
     mpc_cosh (c, c, MPC_RNDNN);
@@ -1536,15 +1805,23 @@ if test -d ${srcdir}/gcc && test "x$have_gmp" = xno; then
 # The library versions listed in the error message below should match
 # the HARD-minimums enforced above.
   if test x$have_gmp != xyes; then
-    AC_MSG_ERROR([Building GCC requires GMP 4.2+, MPFR 2.4.0+ and MPC 0.8.0+.
+    if test -d ${srcdir}/gcc ; then
+      AC_MSG_ERROR([Building GCC requires GMP 4.2+, MPFR 3.1.0+ and MPC 0.8.0+.
 Try the --with-gmp, --with-mpfr and/or --with-mpc options to specify
 their locations.  Source code for these libraries can be found at
 their respective hosting sites as well as at
-ftp://gcc.gnu.org/pub/gcc/infrastructure/.  See also
+https://gcc.gnu.org/pub/gcc/infrastructure/.  See also
 http://gcc.gnu.org/install/prerequisites.html for additional info.  If
 you obtained GMP, MPFR and/or MPC from a vendor distribution package,
 make sure that you have installed both the libraries and the header
 files.  They may be located in separate packages.])
+    else
+      AC_MSG_ERROR([Building GDB requires GMP 4.2+, and MPFR 3.1.0+.
+Try the --with-gmp and/or --with-mpfr options to specify
+their locations.  If you obtained GMP and/or MPFR from a vendor
+distribution package, make sure that you have installed both the libraries
+and the header files.  They may be located in separate packages.])
+    fi
   fi
 fi
 
@@ -1556,18 +1833,6 @@ AC_SUBST(extra_mpc_gmp_configure_flags)
 AC_SUBST(extra_mpc_mpfr_configure_flags)
 AC_SUBST(extra_isl_gmp_configure_flags)
 
-# Allow host libstdc++ to be specified for static linking with PPL.
-AC_ARG_WITH(host-libstdcxx,
-[AS_HELP_STRING([--with-host-libstdcxx=L],
-		[use linker arguments L to link with libstdc++
-		 when linking with PPL])])
-
-case $with_host_libstdcxx in
-  no|yes)
-    AC_MSG_ERROR([-with-host-libstdcxx needs an argument])
-    ;;
-esac
-
 # Libraries to use for stage1 or when not bootstrapping.
 AC_ARG_WITH(stage1-libs,
 [AS_HELP_STRING([--with-stage1-libs=LIBS], [libraries for stage1])],
@@ -1576,8 +1841,21 @@ AC_ARG_WITH(stage1-libs,
  else
    stage1_libs=$withval
  fi],
-[stage1_libs=$with_host_libstdcxx])
+[stage1_libs=])
 AC_SUBST(stage1_libs)
+
+# Whether or not to use -static-libstdc++ and -static-libgcc.  The
+# default is yes if gcc is being built; no otherwise.  The reason for
+# this default is that gdb is sometimes linked against GNU Source
+# Highlight, which is a shared library that uses C++ exceptions.  In
+# this case, -static-libstdc++ will cause crashes.
+AC_ARG_WITH(static-standard-libraries,
+[AS_HELP_STRING([--with-static-standard-libraries],
+                [use -static-libstdc++ and -static-libgcc (default=auto)])],
+[], [with_static_standard_libraries=auto])
+if test "$with_static_standard_libraries" = auto; then
+  with_static_standard_libraries=$have_compiler
+fi
 
 # Linker flags to use for stage1 or when not bootstrapping.
 AC_ARG_WITH(stage1-ldflags,
@@ -1591,13 +1869,13 @@ AC_ARG_WITH(stage1-ldflags,
  # In stage 1, default to linking libstdc++ and libgcc statically with GCC
  # if supported.  But if the user explicitly specified the libraries to use,
  # trust that they are doing what they want.
- if test "$stage1_libs" = "" -a "$have_static_libs" = yes; then
+ if test "$with_static_standard_libraries" = yes -a "$stage1_libs" = "" \
+     -a "$have_static_libs" = yes; then
    stage1_ldflags="-static-libstdc++ -static-libgcc"
  fi])
 AC_SUBST(stage1_ldflags)
 
-# Libraries to use for stage2 and later builds.  This defaults to the
-# argument passed to --with-host-libstdcxx.
+# Libraries to use for stage2 and later builds.
 AC_ARG_WITH(boot-libs,
 [AS_HELP_STRING([--with-boot-libs=LIBS], [libraries for stage2 and later])],
 [if test "$withval" = "no" -o "$withval" = "yes"; then
@@ -1605,7 +1883,7 @@ AC_ARG_WITH(boot-libs,
  else
    poststage1_libs=$withval
  fi],
-[poststage1_libs=$with_host_libstdcxx])
+[poststage1_libs=])
 AC_SUBST(poststage1_libs)
 
 # Linker flags to use for stage2 and later builds.
@@ -1626,73 +1904,39 @@ AC_ARG_WITH(boot-ldflags,
  fi])
 AC_SUBST(poststage1_ldflags)
 
-# GCC GRAPHITE dependences, ISL and CLOOG which in turn requires ISL.
-# Basic setup is inlined here, actual checks are in config/cloog.m4 and
-# config/isl.m4
+# GCC GRAPHITE dependency isl.
+# Basic setup is inlined here, actual checks are in config/isl.m4
 
-AC_ARG_WITH(cloog,
-  [AS_HELP_STRING(
-    [--with-cloog=PATH],
-    [Specify prefix directory for the installed CLooG-ISL package.
-     Equivalent to --with-cloog-include=PATH/include
-     plus --with-cloog-lib=PATH/lib])])
 AC_ARG_WITH(isl,
   [AS_HELP_STRING(
    [--with-isl=PATH],
-   [Specify prefix directory for the installed ISL package.
+   [Specify prefix directory for the installed isl package.
     Equivalent to --with-isl-include=PATH/include
     plus --with-isl-lib=PATH/lib])])
 
-# Treat either --without-cloog or --without-isl as a request to disable
+# Treat --without-isl as a request to disable
 # GRAPHITE support and skip all following checks.
-if test "x$with_isl" != "xno" &&
-   test "x$with_cloog" != "xno"; then
-  # Check for ISL
+if test "x$with_isl" != "xno"; then
+  # Check for isl
   dnl Provide configure switches and initialize islinc & isllibs
   dnl with user input.
   ISL_INIT_FLAGS
-  dnl The versions of ISL that work for Graphite
-  ISL_CHECK_VERSION(0,11)
-  if test "${gcc_cv_isl}" = no ; then
-    ISL_CHECK_VERSION(0,12)
-  fi
-  dnl Only execute fail-action, if ISL has been requested.
+  dnl The versions of isl that work for Graphite
+  ISL_CHECK_VERSION()
+  dnl Only execute fail-action, if isl has been requested.
   ISL_IF_FAILED([
-    AC_MSG_ERROR([Unable to find a usable ISL.  See config.log for details.])])
-
-  if test "x$gcc_cv_isl" != "xno"; then
-    # Check for CLOOG
-    dnl Provide configure switches and initialize clooginc & clooglibs
-    dnl with user input.
-    CLOOG_INIT_FLAGS
-    dnl The versions of CLooG that work for Graphite.
-    CLOOG_CHECK_VERSION(0,17,0)
-    if test "${gcc_cv_cloog}" = no ; then
-      CLOOG_CHECK_VERSION(0,18,0)
-    fi
-
-    dnl Only execute fail-action, if CLooG has been requested.
-    CLOOG_IF_FAILED([
-      AC_MSG_ERROR([Unable to find a usable CLooG.  See config.log for details.])])
-  fi
+    AC_MSG_ERROR([Unable to find a usable isl.  See config.log for details.])])
 fi
 
-# If either the ISL or the CLooG check failed, disable builds of in-tree
-# variants of both
+# If the isl check failed, disable builds of in-tree variant of isl
 if test "x$with_isl" = xno ||
-   test "x$with_cloog" = xno ||
-   test "x$gcc_cv_cloog" = xno ||
    test "x$gcc_cv_isl" = xno; then
-  noconfigdirs="$noconfigdirs cloog isl"
+  noconfigdirs="$noconfigdirs isl"
   islinc=
-  clooginc=
-  clooglibs=
 fi
 
+AC_SUBST(isllibs)
 AC_SUBST(islinc)
-AC_SUBST(clooglibs)
-AC_SUBST(clooginc)
-
 
 # Check for LTO support.
 AC_ARG_ENABLE(lto,
@@ -1704,7 +1948,7 @@ ACX_ELF_TARGET_IFELSE([# ELF platforms build the lto-plugin always.
   build_lto_plugin=yes
 ],[if test x"$default_enable_lto" = x"yes" ; then
     case $target in
-      *-apple-darwin9* | *-cygwin* | *-mingw*) ;;
+      *-apple-darwin[[912]]* | *-cygwin* | *-mingw* | *djgpp*) ;;
       # On other non-ELF platforms, LTO has yet to be validated.
       *) enable_lto=no ;;
     esac
@@ -1715,7 +1959,7 @@ ACX_ELF_TARGET_IFELSE([# ELF platforms build the lto-plugin always.
   # warn during gcc/ subconfigure; unless you're bootstrapping with
   # -flto it won't be needed until after installation anyway.
     case $target in
-      *-cygwin* | *-mingw* | *-apple-darwin*) ;;
+      *-cygwin* | *-mingw* | *-apple-darwin* | *djgpp*) ;;
       *) if test x"$enable_lto" = x"yes"; then
 	AC_MSG_ERROR([LTO support is not enabled for this target.])
         fi
@@ -1730,6 +1974,39 @@ ACX_ELF_TARGET_IFELSE([# ELF platforms build the lto-plugin always.
   esac
 ])
 
+AC_ARG_ENABLE(linker-plugin-configure-flags,
+  [AS_HELP_STRING([[--enable-linker-plugin-configure-flags=FLAGS]],
+    [additional flags for configuring linker plugins @<:@none@:>@])],
+  extra_linker_plugin_configure_flags=$enableval,
+  extra_linker_plugin_configure_flags=)
+AC_SUBST(extra_linker_plugin_configure_flags)
+AC_ARG_ENABLE(linker-plugin-flags,
+  [AS_HELP_STRING([[--enable-linker-plugin-flags=FLAGS]],
+    [additional flags for configuring and building linker plugins @<:@none@:>@])],
+  extra_linker_plugin_flags=$enableval,
+  extra_linker_plugin_flags=)
+AC_SUBST(extra_linker_plugin_flags)
+
+# Enable --enable-host-shared.
+# Checked early to determine whether jit is an 'all' language
+AC_ARG_ENABLE(host-shared,
+[AS_HELP_STRING([--enable-host-shared],
+		[build host code as shared libraries])],
+[host_shared=$enableval
+ case $host in
+   x86_64-*-darwin* | aarch64-*-darwin*)
+     if test x$host_shared != xyes ; then
+       # PIC is the default, and actually cannot be switched off.
+       echo configure.ac: warning: PIC code is required for the configured target, host-shared setting ignored. 1>&2
+       host_shared=yes
+     fi ;;
+  *) ;;
+ esac],
+[case $host in
+  x86_64-*-darwin* | aarch64-*-darwin*) host_shared=yes ;;
+  *) host_shared=no ;;
+ esac])
+AC_SUBST(host_shared)
 
 # By default, C and C++ are the only stage 1 languages.
 stage1_languages=,c,
@@ -1746,15 +2023,15 @@ if test -d ${srcdir}/gcc; then
   if test x"${enable_languages+set}" != xset; then
     if test x"${LANGUAGES+set}" = xset; then
       enable_languages="${LANGUAGES}"
-        echo configure.in: warning: setting LANGUAGES is deprecated, use --enable-languages instead 1>&2
+        echo configure.ac: warning: setting LANGUAGES is deprecated, use --enable-languages instead 1>&2
     else
-      enable_languages=all
+      enable_languages=default
     fi
   else
     if test x"${enable_languages}" = x ||
        test x"${enable_languages}" = xyes;
        then
-      echo configure.in: --enable-languages needs at least one language argument 1>&2
+      echo configure.ac: --enable-languages needs at least one language argument 1>&2
       exit 1
     fi
   fi
@@ -1764,7 +2041,7 @@ if test -d ${srcdir}/gcc; then
   # and make the substitution.
   case ,${enable_languages}, in
     *,f95,*)
-      echo configure.in: warning: 'f95' as language name is deprecated, use 'fortran' instead 1>&2
+      echo configure.ac: warning: 'f95' as language name is deprecated, use 'fortran' instead 1>&2
       enable_languages=`echo "${enable_languages}" | sed -e 's/f95/fortran/g'`
       ;;
   esac
@@ -1796,10 +2073,16 @@ if test -d ${srcdir}/gcc; then
         language=
         lang_requires=
         lang_requires_boot_languages=
-        . ${lang_frag}
+        # set srcdir during sourcing lang_frag to the gcc dir.
+        # Sadly overriding srcdir on the . line doesn't work in plain sh as it
+        # polutes this shell
+        saved_srcdir=${srcdir}
+        srcdir=${srcdir}/gcc . ${lang_frag}
+        srcdir=${saved_srcdir}
         for other in ${lang_requires} ${lang_requires_boot_languages}; do
           case ,${enable_languages}, in
 	    *,$other,*) ;;
+	    *,default,*) ;;
 	    *,all,*) ;;
 	    *,$language,*)
 	      echo " \`$other' language required by \`$language'; enabling" 1>&2
@@ -1811,6 +2094,7 @@ if test -d ${srcdir}/gcc; then
 	  if test "$other" != "c"; then
 	    case ,${enable_stage1_languages}, in
 	      *,$other,*) ;;
+	      *,default,*) ;;
 	      *,all,*) ;;
 	      *)
 		case ,${enable_languages}, in
@@ -1830,7 +2114,6 @@ if test -d ${srcdir}/gcc; then
   new_enable_languages=,c,
 
   # If LTO is enabled, add the LTO front end.
-  extra_host_libiberty_configure_flags=
   if test "$enable_lto" = "yes" ; then
     case ,${enable_languages}, in
       *,lto,*) ;;
@@ -1838,12 +2121,18 @@ if test -d ${srcdir}/gcc; then
     esac
     if test "${build_lto_plugin}" = "yes" ; then
       configdirs="$configdirs lto-plugin"
-      extra_host_libiberty_configure_flags=--enable-shared
     fi
   fi
-  AC_SUBST(extra_host_libiberty_configure_flags)
 
-  missing_languages=`echo ",$enable_languages," | sed -e s/,all,/,/ -e s/,c,/,/ `
+  # If we're building an offloading compiler, add the LTO front end.
+  if test x"$enable_as_accelerator_for" != x ; then
+    case ,${enable_languages}, in
+      *,lto,*) ;;
+      *) enable_languages="${enable_languages},lto" ;;
+    esac
+  fi
+
+  missing_languages=`echo ",$enable_languages," | sed -e s/,default,/,/ -e s/,all,/,/ -e s/,c,/,/ `
   potential_languages=,c,
 
   enabled_target_libs=
@@ -1864,7 +2153,10 @@ if test -d ${srcdir}/gcc; then
         subdir_requires=
         boot_language=no
         build_by_default=yes
-        . ${lang_frag}
+        # set srcdir during sourcing.  See above about save & restore
+        saved_srcdir=${srcdir}
+        srcdir=${srcdir}/gcc . ${lang_frag}
+        srcdir=${saved_srcdir}
         if test x${language} = x; then
           echo "${lang_frag} doesn't set \$language." 1>&2
           exit 1
@@ -1875,29 +2167,35 @@ if test -d ${srcdir}/gcc; then
 	fi
 
         add_this_lang=no
-        case ,${enable_languages}, in
-          *,${language},*)
-            # Language was explicitly selected; include it
-	    # unless it is C, which is enabled by default.
-	    if test "$language" != "c"; then
+        # C is always enabled, so no need to add it again
+        if test "$language" != "c"; then
+          case ,${enable_languages}, in
+            *,${language},*)
+              # Language was explicitly selected; include it
 	      add_this_lang=yes
-	    fi
-            ;;
-          *,all,*)
-            # 'all' was selected, select it if it is a default language
-	    if test "$language" != "c"; then
+              ;;
+	    *,all,*)
+	      # All languages are enabled
+	      add_this_lang=all
+              ;;
+            *,default,*)
+              # 'default' was selected, select it if it is a default language
 	      add_this_lang=${build_by_default}
-	    fi
-            ;;
-        esac
+              ;;
+          esac
+        fi
 
         # Disable languages that need other directories if these aren't available.
 	for i in $subdir_requires; do
 	  test -f "$srcdir/gcc/$i/config-lang.in" && continue
-	  case ,${enable_languages}, in
-            *,${language},*)
+	  case ${add_this_lang} in
+	    yes)
               # Specifically requested language; tell them.
               AC_MSG_ERROR([The gcc/$i directory contains parts of $language but is missing])
+              ;;
+            all)
+              AC_MSG_WARN([The gcc/$i directory contains parts of $language but is missing])
+              add_this_lang=unsupported
               ;;
             *)
               # Silently disable.
@@ -1907,10 +2205,14 @@ if test -d ${srcdir}/gcc; then
 	done
 
         # Disable Ada if no preexisting GNAT is available.
-        case ,${enable_languages},:${language}:${have_gnat} in
-          *,${language},*:ada:no)
+        case ${add_this_lang}:${language}:${have_gnat} in
+          yes:ada:no)
             # Specifically requested language; tell them.
             AC_MSG_ERROR([GNAT is required to build $language])
+            ;;
+          all:ada:no)
+            AC_MSG_WARN([GNAT is required to build $language])
+            add_this_lang=unsupported
             ;;
           *:ada:no)
             # Silently disable.
@@ -1918,9 +2220,60 @@ if test -d ${srcdir}/gcc; then
             ;;
         esac
 
-	# Disable a language that is unsupported by the target.
-	case " $unsupported_languages " in
-	  *" $language "*)
+        # Disable D if no preexisting GDC is available.
+        case ${add_this_lang}:${language}:${have_gdc} in
+          yes:d:no)
+            # Specifically requested language; tell them.
+            AC_MSG_ERROR([GDC is required to build $language])
+           ;;
+          all:d:no)
+            AC_MSG_WARN([GDC is required to build $language])
+            add_this_lang=unsupported
+            ;;
+          *:d:no)
+            # Silently disable.
+            add_this_lang=unsupported
+            ;;
+        esac
+
+        # Disable jit if -enable-host-shared not specified
+        # but not if building for Mingw. All code in Windows
+        # is position independent code (PIC).
+        case $target in
+          *mingw*) ;;
+          *)
+          case ${add_this_lang}:${language}:${host_shared} in
+            yes:jit:no)
+	           # PR jit/64780: explicitly specify --enable-host-shared
+	    AC_MSG_ERROR([
+Enabling language "jit" requires --enable-host-shared.
+
+--enable-host-shared typically slows the rest of the compiler down by
+a few %, so you must explicitly enable it.
+
+If you want to build both the jit and the regular compiler, it is often
+best to do this via two separate configure/builds, in separate
+directories, to avoid imposing the performance cost of
+--enable-host-shared on the regular compiler.])
+	            ;;
+            all:jit:no)
+	      AC_MSG_WARN([--enable-host-shared required to build $language])
+              add_this_lang=unsupported
+              ;;
+            *:jit:no)
+              # Silently disable.
+              add_this_lang=unsupported
+              ;;
+	        esac
+          ;;
+        esac
+
+        # Disable a language that is unsupported by the target.
+	case "${add_this_lang}: $unsupported_languages " in
+	  no:*) ;;
+	  unsupported:*) ;;
+	  *:*" $language "*)
+	    AC_MSG_WARN([${language} not supported for this target])
 	    add_this_lang=unsupported
 	    ;;
 	esac
@@ -1937,7 +2290,7 @@ if test -d ${srcdir}/gcc; then
 	    noconfigdirs="$noconfigdirs $lang_dirs"
             potential_languages="${potential_languages}${language},"
 	    ;;
-          yes)
+          all|yes)
 	    new_enable_languages="${new_enable_languages}${language},"
             potential_languages="${potential_languages}${language},"
 	    missing_languages=`echo "$missing_languages" | sed "s/,$language,/,/"`
@@ -1950,7 +2303,7 @@ if test -d ${srcdir}/gcc; then
 		  *) stage1_languages="${stage1_languages}${language}," ;;
 		esac
 		# We need to bootstrap any supporting libraries.
-		bootstrap_target_libs="${bootstrap_target_libs}${target_libs},"
+		bootstrap_target_libs=`echo "${bootstrap_target_libs}${target_libs}," | sed "s/ /,/g"`
 		;;
 	    esac
 	    ;;
@@ -2036,33 +2389,61 @@ done
 AC_ARG_ENABLE(objc-gc,
 [AS_HELP_STRING([--enable-objc-gc],
 		[enable use of Boehm's garbage collector with the
-		 GNU Objective-C runtime])],
-[case ,${enable_languages},:${enable_objc_gc}:${noconfigdirs} in
-  *,objc,*:*:yes:*target-boehm-gc*)
-    AC_MSG_ERROR([Boehm's garbage collector was requested yet not supported in this configuration])
-    ;;
-esac])
-
-# Make sure we only build Boehm's garbage collector if required.
-case ,${enable_languages},:${enable_objc_gc} in
-  *,objc,*:yes)
-    # Keep target-boehm-gc if requested for Objective-C.
-    ;;
-  *)
-    # Otherwise remove target-boehm-gc depending on target-libjava.
-    if echo " ${noconfigdirs} " | grep "target-libjava" >/dev/null 2>&1; then
-      noconfigdirs="$noconfigdirs target-boehm-gc"
+		 GNU Objective-C runtime])])
+AC_ARG_WITH([target-bdw-gc],
+[AS_HELP_STRING([--with-target-bdw-gc=PATHLIST],
+		[specify prefix directory for installed bdw-gc package.
+		 Equivalent to --with-target-bdw-gc-include=PATH/include
+		 plus --with-target-bdw-gc-lib=PATH/lib])])
+AC_ARG_WITH([target-bdw-gc-include],
+[AS_HELP_STRING([--with-target-bdw-gc-include=PATHLIST],
+		[specify directories for installed bdw-gc include files])])
+AC_ARG_WITH([target-bdw-gc-lib],
+[AS_HELP_STRING([--with-target-bdw-gc-lib=PATHLIST],
+		[specify directories for installed bdw-gc library])])
+		  
+case ,${enable_languages},:${enable_objc_gc} in *,objc,*:yes|*,objc,*:auto)
+  AC_MSG_CHECKING([for bdw garbage collector])
+  if test "x$with_target_bdw_gc$with_target_bdw_gc_include$with_target_bdw_gc_lib" = x; then
+    dnl no bdw-gw options, assume default locations
+    AC_MSG_RESULT([using bdw-gc in default locations])
+  else
+    dnl bdw-gw options, first error checking, complete checking in libobjc
+    if test "x$with_target_bdw_gc_include" = x && test "x$with_target_bdw_gc_lib" != x; then
+      AC_MSG_ERROR([found --with-target-bdw-gc-lib but --with-target-bdw-gc-include missing])
+    elif test "x$with_target_bdw_gc_include" != x && test "x$with_target_bdw_gc_lib" = x; then
+      AC_MSG_ERROR([found --with-target-bdw-gc-include but --with-target-bdw-gc-lib missing])
+    else
+      AC_MSG_RESULT([using paths configured with --with-target-bdw-gc options])
     fi
+  fi
+esac
+
+# Disable libitm, libsanitizer, libvtv, liboffloadmic if we're not building C++
+case ,${enable_languages}, in
+  *,c++,*)
+    # Disable libitm, libsanitizer if we're not building libstdc++
+    case "${noconfigdirs}" in
+      *target-libstdc++-v3*)
+        noconfigdirs="$noconfigdirs target-libitm target-libsanitizer"
+        ;;
+      *) ;;
+    esac
+    ;;
+  *)
+    noconfigdirs="$noconfigdirs target-liboffloadmic target-libitm target-libsanitizer target-libvtv"
     ;;
 esac
 
-# Disable libitm, libsanitizer, libvtv if we're not building C++
-case ,${enable_languages}, in
-  *,c++,*) ;;
-  *)
-    noconfigdirs="$noconfigdirs target-libitm target-libsanitizer target-libvtv"
-    ;;
-esac
+# If gcc/ is not in the source tree then we'll not be building a
+# target compiler, assume in that case we don't want to build any
+# target libraries or tools.
+#
+# This was added primarily for the benefit for binutils-gdb who reuse
+# this configure script, but don't always have target tools available.
+if test ! -d ${srcdir}/gcc; then
+   skipdirs="${skipdirs} ${target_configdirs}"
+fi
 
 # Remove the entries in $skipdirs and $noconfigdirs from $configdirs,
 # $build_configdirs and $target_configdirs.
@@ -2131,6 +2512,45 @@ for i in ${target_configdirs_all} ; do
     target_configdirs="${target_configdirs} $i"
   fi
 done
+
+# libiberty-linker-plugin is special: it doesn't have its own source directory,
+# so we have to add it after the preceding checks.
+if test x"$extra_linker_plugin_flags$extra_linker_plugin_configure_flags" != x
+then
+  case " $configdirs " in
+    *" libiberty "*)
+      # If we can build libiberty, we can also build libiberty-linker-plugin.
+      configdirs="$configdirs libiberty-linker-plugin"
+      extra_linker_plugin_configure_flags="$extra_linker_plugin_configure_flags \
+        --with-libiberty=../libiberty-linker-plugin";;
+    *)
+      AC_MSG_ERROR([libiberty missing]);;
+  esac
+fi
+
+# Sometimes we have special requirements for the host libiberty.
+extra_host_libiberty_configure_flags=
+case " $configdirs " in
+  *" lto-plugin "* | *" libcc1 "* | *" gdbserver "*)
+    # When these are to be built as shared libraries, the same applies to
+    # libiberty.
+    extra_host_libiberty_configure_flags=--enable-shared
+    ;;
+esac
+AC_SUBST(extra_host_libiberty_configure_flags)
+
+# Sometimes we have special requirements for the host zlib.
+extra_host_zlib_configure_flags=
+case " $configdirs " in
+  *" bfd "*)
+    # When bfd is to be built as a shared library, the same applies to
+    # zlib.
+    if test "$enable_shared" = "yes"; then
+      extra_host_zlib_configure_flags=--enable-host-shared
+    fi
+    ;;
+esac
+AC_SUBST(extra_host_zlib_configure_flags)
 
 # Produce a warning message for the subdirs we can't configure.
 # This isn't especially interesting in the Cygnus tree, but in the individual
@@ -2205,28 +2625,36 @@ AC_SUBST(DEBUG_PREFIX_CFLAGS_FOR_TARGET)
 # gcc) are built with "-O2 -g", so include those options when setting
 # CFLAGS_FOR_TARGET and CXXFLAGS_FOR_TARGET.
 if test "x$CFLAGS_FOR_TARGET" = x; then
-  CFLAGS_FOR_TARGET=$CFLAGS
-  case " $CFLAGS " in
-    *" -O2 "*) ;;
-    *) CFLAGS_FOR_TARGET="-O2 $CFLAGS_FOR_TARGET" ;;
-  esac
-  case " $CFLAGS " in
-    *" -g "* | *" -g3 "*) ;;
-    *) CFLAGS_FOR_TARGET="-g $CFLAGS_FOR_TARGET" ;;
-  esac
+  if test "x${is_cross_compiler}" = xyes; then
+    CFLAGS_FOR_TARGET="-g -O2"
+  else
+    CFLAGS_FOR_TARGET=$CFLAGS
+    case " $CFLAGS " in
+      *" -O2 "*) ;;
+      *) CFLAGS_FOR_TARGET="-O2 $CFLAGS_FOR_TARGET" ;;
+    esac
+    case " $CFLAGS " in
+      *" -g "* | *" -g3 "*) ;;
+      *) CFLAGS_FOR_TARGET="-g $CFLAGS_FOR_TARGET" ;;
+    esac
+  fi
 fi
 AC_SUBST(CFLAGS_FOR_TARGET)
 
 if test "x$CXXFLAGS_FOR_TARGET" = x; then
-  CXXFLAGS_FOR_TARGET=$CXXFLAGS
-  case " $CXXFLAGS " in
-    *" -O2 "*) ;;
-    *) CXXFLAGS_FOR_TARGET="-O2 $CXXFLAGS_FOR_TARGET" ;;
-  esac
-  case " $CXXFLAGS " in
-    *" -g "* | *" -g3 "*) ;;
-    *) CXXFLAGS_FOR_TARGET="-g $CXXFLAGS_FOR_TARGET" ;;
-  esac
+  if test "x${is_cross_compiler}" = xyes; then
+    CXXFLAGS_FOR_TARGET="-g -O2"
+  else
+    CXXFLAGS_FOR_TARGET=$CXXFLAGS
+    case " $CXXFLAGS " in
+      *" -O2 "*) ;;
+      *) CXXFLAGS_FOR_TARGET="-O2 $CXXFLAGS_FOR_TARGET" ;;
+    esac
+    case " $CXXFLAGS " in
+      *" -g "* | *" -g3 "*) ;;
+      *) CXXFLAGS_FOR_TARGET="-g $CXXFLAGS_FOR_TARGET" ;;
+    esac
+  fi
 fi
 AC_SUBST(CXXFLAGS_FOR_TARGET)
 
@@ -2270,7 +2698,7 @@ fi
 # have requested that this magic not happen.
 # 
 # The command line options always override the explicit settings in 
-# configure.in, and the settings in configure.in override this magic.
+# configure.ac, and the settings in configure.ac override this magic.
 #
 # If the default for a toolchain is to use GNU as and ld, and you don't 
 # want to do that, then you should use the --without-gnu-as and
@@ -2360,7 +2788,7 @@ case "${target}" in
   spu-*-*)
     target_makefile_frag="config/mt-spu"
     ;;
-  mips*-sde-elf* | mips*-mti-elf*)
+  mips*-sde-elf* | mips*-mti-elf* | mips*-img-elf*)
     target_makefile_frag="config/mt-sde"
     ;;
   mipsisa*-*-elfoabi*)
@@ -2371,6 +2799,9 @@ case "${target}" in
     ;;
   nios2-*-elf*)
     target_makefile_frag="config/mt-nios2-elf"
+    ;;
+  *-*-linux-android*)
+    target_makefile_frag="config/mt-android"
     ;;
   *-*-linux* | *-*-gnu* | *-*-k*bsd*-gnu | *-*-kopensolaris*-gnu)
     target_makefile_frag="config/mt-gnu"
@@ -2404,7 +2835,7 @@ case "${enable_target_optspace}:${target}" in
   :d30v-*)
     ospace_frag="config/mt-d30v"
     ;;
-  :m32r-* | :d10v-* | :fr30-*)
+  :m32r-* | :d10v-* | :fr30-* | :i?86*-*-elfiamcu)
     ospace_frag="config/mt-ospace"
     ;;
   no:* | :*)
@@ -2474,75 +2905,6 @@ else
   GCC_SHLIB_SUBDIR=
 fi
 
-# Record target_configdirs and the configure arguments for target and
-# build configuration in Makefile.
-target_configdirs=`echo "${target_configdirs}" | sed -e 's/target-//g'`
-build_configdirs=`echo "${build_configdirs}" | sed -e 's/build-//g'`
-
-# If we are building libgomp, bootstrap it.
-if echo " ${target_configdirs} " | grep " libgomp " > /dev/null 2>&1 ; then
-  bootstrap_target_libs=${bootstrap_target_libs}target-libgomp,
-fi
-
-# If we are building libsanitizer, bootstrap it.
-if echo " ${target_configdirs} " | grep " libsanitizer " > /dev/null 2>&1 ; then
-  bootstrap_target_libs=${bootstrap_target_libs}target-libsanitizer,
-fi
-
-# If we are building libvtv, bootstrap it.
-if echo " ${target_configdirs} " | grep " libvtv " > /dev/null 2>&1 ; then
-  bootstrap_target_libs=${bootstrap_target_libs}target-libvtv,
-fi
-
-# Determine whether gdb needs tk/tcl or not.
-# Use 'maybe' since enable_gdbtk might be true even if tk isn't available
-# and in that case we want gdb to be built without tk.  Ugh!
-# In fact I believe gdb is the *only* package directly dependent on tk,
-# so we should be able to put the 'maybe's in unconditionally and
-# leave out the maybe dependencies when enable_gdbtk is false.  I'm not
-# 100% sure that that's safe though.
-
-gdb_tk="maybe-all-tcl maybe-all-tk maybe-all-itcl maybe-all-libgui"
-case "$enable_gdbtk" in
-  no)
-    GDB_TK="" ;;
-  yes)
-    GDB_TK="${gdb_tk}" ;;
-  *)
-    # Only add the dependency on gdbtk when GDBtk is part of the gdb
-    # distro.  Eventually someone will fix this and move Insight, nee
-    # gdbtk to a separate directory.
-    if test -d ${srcdir}/gdb/gdbtk ; then
-      GDB_TK="${gdb_tk}"
-    else
-      GDB_TK=""
-    fi
-    ;;
-esac
-CONFIGURE_GDB_TK=`echo ${GDB_TK} | sed s/-all-/-configure-/g`
-INSTALL_GDB_TK=`echo ${GDB_TK} | sed s/-all-/-install-/g`
-
-# Strip out unwanted targets.
-
-# While at that, we remove Makefiles if we were started for recursive
-# configuration, so that the top-level Makefile reconfigures them,
-# like we used to do when configure itself was recursive.
-
-# Loop over modules.  We used to use the "$extrasub" feature from Autoconf
-# but now we're fixing up the Makefile ourselves with the additional
-# commands passed to AC_CONFIG_FILES.  Use separate variables
-# extrasub-{build,host,target} not because there is any reason to split
-# the substitutions up that way, but only to remain below the limit of
-# 99 commands in a script, for HP-UX sed.
-# Do not nest @if/@endif pairs, because configure will not warn you at all.
-
-case "$enable_bootstrap:$ENABLE_GOLD: $configdirs :,$stage1_languages," in
-  yes:yes:*\ gold\ *:*,c++,*) ;;
-  yes:yes:*\ gold\ *:*)
-    AC_MSG_ERROR([in a combined tree, bootstrapping with --enable-gold requires c++ in stage1_languages])
-    ;;
-esac
-
 # Adjust the toplevel makefile according to whether bootstrap was selected.
 case $enable_bootstrap in
   yes)
@@ -2587,6 +2949,123 @@ fi
 AC_MSG_RESULT($BUILD_CONFIG)
 AC_SUBST(BUILD_CONFIG)
 
+# Use same top-level configure hooks in libgcc/libstdc++/libvtv.
+AC_MSG_CHECKING([for --enable-vtable-verify])
+AC_ARG_ENABLE(vtable-verify,
+[AS_HELP_STRING([--enable-vtable-verify],
+		[Enable vtable verification feature])],
+[case "$enableval" in
+ yes) enable_vtable_verify=yes ;;
+ no)  enable_vtable_verify=no ;;
+ *)   enable_vtable_verify=no;;
+ esac],
+[enable_vtable_verify=no])
+AC_MSG_RESULT($enable_vtable_verify)
+
+# Record target_configdirs and the configure arguments for target and
+# build configuration in Makefile.
+target_configdirs=`echo "${target_configdirs}" | sed -e 's/target-//g'`
+build_configdirs=`echo "${build_configdirs}" | sed -e 's/build-//g'`
+bootstrap_fixincludes=no
+
+# If we are building libgomp, bootstrap it.
+if echo " ${target_configdirs} " | grep " libgomp " > /dev/null 2>&1 ; then
+  bootstrap_target_libs=${bootstrap_target_libs}target-libgomp,
+fi
+
+# If we are building libsanitizer and $BUILD_CONFIG contains bootstrap-asan
+# or bootstrap-ubsan, bootstrap it.
+if echo " ${target_configdirs} " | grep " libsanitizer " > /dev/null 2>&1; then
+  case "$BUILD_CONFIG" in
+    *bootstrap-hwasan* | *bootstrap-asan* | *bootstrap-ubsan* )
+      bootstrap_target_libs=${bootstrap_target_libs}target-libsanitizer,
+      bootstrap_fixincludes=yes
+      ;;
+  esac
+fi
+
+# If we are building libvtv and --enable-vtable-verify, bootstrap it.
+if echo " ${target_configdirs} " | grep " libvtv " > /dev/null 2>&1 &&
+   test "$enable_vtable_verify" != no; then
+  bootstrap_target_libs=${bootstrap_target_libs}target-libvtv,
+fi
+
+# If we are building libatomic and the list of enabled languages includes the
+# D frontend, bootstrap it.
+if echo " ${target_configdirs} " | grep " libatomic " > /dev/null 2>&1; then
+  case ,${enable_languages}, in
+    *,d,*)
+      bootstrap_target_libs=${bootstrap_target_libs}target-libatomic,
+      ;;
+  esac
+fi
+
+# Determine whether gdb needs tk/tcl or not.
+# Use 'maybe' since enable_gdbtk might be true even if tk isn't available
+# and in that case we want gdb to be built without tk.  Ugh!
+# In fact I believe gdb is the *only* package directly dependent on tk,
+# so we should be able to put the 'maybe's in unconditionally and
+# leave out the maybe dependencies when enable_gdbtk is false.  I'm not
+# 100% sure that that's safe though.
+
+gdb_tk="maybe-all-tcl maybe-all-tk maybe-all-itcl maybe-all-libgui"
+case "$enable_gdbtk" in
+  no)
+    GDB_TK="" ;;
+  yes)
+    GDB_TK="${gdb_tk}" ;;
+  *)
+    # Only add the dependency on gdbtk when GDBtk is part of the gdb
+    # distro.  Eventually someone will fix this and move Insight, nee
+    # gdbtk to a separate directory.
+    if test -d ${srcdir}/gdb/gdbtk ; then
+      GDB_TK="${gdb_tk}"
+    else
+      GDB_TK=""
+    fi
+    ;;
+esac
+CONFIGURE_GDB_TK=`echo ${GDB_TK} | sed s/-all-/-configure-/g`
+INSTALL_GDB_TK=`echo ${GDB_TK} | sed s/-all-/-install-/g`
+
+# gdb and gdbserver depend on gnulib and gdbsupport, but as nothing
+# else does, only include them if one of these is built.  The Makefile
+# provides the ordering, so it's enough here to add to the list.
+case " ${configdirs} " in
+  *\ gdb\ *)
+    configdirs="${configdirs} gnulib gdbsupport"
+    ;;
+  *\ gdbserver\ *)
+    configdirs="${configdirs} gnulib gdbsupport"
+    ;;
+  *\ sim\ *)
+    configdirs="${configdirs} gnulib"
+    ;;
+esac
+
+# Strip out unwanted targets.
+
+# While at that, we remove Makefiles if we were started for recursive
+# configuration, so that the top-level Makefile reconfigures them,
+# like we used to do when configure itself was recursive.
+
+# Loop over modules.  We used to use the "$extrasub" feature from Autoconf
+# but now we're fixing up the Makefile ourselves with the additional
+# commands passed to AC_CONFIG_FILES.  Use separate variables
+# extrasub-{build,host,target} not because there is any reason to split
+# the substitutions up that way, but only to remain below the limit of
+# 99 commands in a script, for HP-UX sed.
+
+# Do not nest @if/@endif or @unless/@endunless pairs, because
+# configure will not warn you at all.
+
+case "$enable_bootstrap:$ENABLE_GOLD: $configdirs :,$stage1_languages," in
+  yes:yes:*\ gold\ *:*,c++,*) ;;
+  yes:yes:*\ gold\ *:*)
+    AC_MSG_ERROR([in a combined tree, bootstrapping with --enable-gold requires c++ in stage1_languages])
+    ;;
+esac
+
 extrasub_build=
 for module in ${build_configdirs} ; do
   if test -z "${no_recursion}" \
@@ -2597,8 +3076,10 @@ for module in ${build_configdirs} ; do
   extrasub_build="$extrasub_build
 /^@if build-$module\$/d
 /^@endif build-$module\$/d
+/^@unless build-$module\$/,/^@endunless build-$module\$/d
 /^@if build-$module-$bootstrap_suffix\$/d
-/^@endif build-$module-$bootstrap_suffix\$/d"
+/^@endif build-$module-$bootstrap_suffix\$/d
+/^@unless build-$module-$bootstrap_suffix\$/,/^@endunless build-$module-$bootstrap_suffix\$/d"
 done
 extrasub_host=
 for module in ${configdirs} ; do
@@ -2610,11 +3091,17 @@ for module in ${configdirs} ; do
       fi
     done
   fi
+  case ${module},${bootstrap_fixincludes} in
+    fixincludes,no) host_bootstrap_suffix=no-bootstrap ;;
+    *) host_bootstrap_suffix=$bootstrap_suffix ;;
+  esac
   extrasub_host="$extrasub_host
 /^@if $module\$/d
 /^@endif $module\$/d
-/^@if $module-$bootstrap_suffix\$/d
-/^@endif $module-$bootstrap_suffix\$/d"
+/^@unless $module\$/,/^@endunless $module\$/d
+/^@if $module-$host_bootstrap_suffix\$/d
+/^@endif $module-$host_bootstrap_suffix\$/d
+/^@unless $module-$host_bootstrap_suffix\$/,/^@endunless $module-$host_bootstrap_suffix\$/d"
 done
 extrasub_target=
 for module in ${target_configdirs} ; do
@@ -2633,13 +3120,23 @@ for module in ${target_configdirs} ; do
   extrasub_target="$extrasub_target
 /^@if target-$module\$/d
 /^@endif target-$module\$/d
+/^@unless target-$module\$/,/^@endunless target-$module\$/d
 /^@if target-$module-$target_bootstrap_suffix\$/d
-/^@endif target-$module-$target_bootstrap_suffix\$/d"
+/^@endif target-$module-$target_bootstrap_suffix\$/d
+/^@unless target-$module-$target_bootstrap_suffix\$/,/^@endunless target-$module-$target_bootstrap_suffix\$/d"
 done
 
 # Do the final fixup along with target modules.
 extrasub_target="$extrasub_target
-/^@if /,/^@endif /d"
+/^@if /,/^@endif /d
+/^@unless /d
+/^@endunless /d"
+
+if test "$enable_pgo_build" != "no"; then
+  extrasub_build="$extrasub_build
+/^@if pgo-build\$/d
+/^@endif pgo-build\$/d"
+fi
 
 # Create the serialization dependencies.  This uses a temporary file.
 
@@ -2757,7 +3254,7 @@ changequote(,)
 changequote([,])
 
     case $lib in
-    mpc | mpfr | gmp | cloog)
+    mpc | mpfr | gmp | isl)
       # If we're processing --with-$lib, --with-$lib-include or
       # --with-$lib-lib, for one of the libs above, and target is
       # different from host, don't pass the current argument to any
@@ -2840,8 +3337,14 @@ if test "$silent" = yes; then
   baseargs="$baseargs --silent"
   tbaseargs="$tbaseargs --silent"
 fi
+
 baseargs="$baseargs --disable-option-checking"
 tbaseargs="$tbaseargs --disable-option-checking"
+
+if test "$enable_year2038" = no; then
+  baseargs="$baseargs --disable-year2038"
+  tbaseargs="$tbaseargs --disable-year2038"
+fi
 
 # Record and document user additions to sub configure arguments.
 AC_ARG_VAR([build_configargs],
@@ -2853,8 +3356,10 @@ AC_ARG_VAR([target_configargs],
 
 # For the build-side libraries, we just need to pretend we're native,
 # and not use the same cache file.  Multilibs are neither needed nor
-# desired.
-build_configargs="$build_configargs --cache-file=../config.cache ${baseargs}"
+# desired.  We can't even use the same cache file for all build-side
+# libraries, as they're compiled differently; some with C, some with
+# C++ or with different feature-enabling options.
+build_configargs="$build_configargs --cache-file=./config.cache ${baseargs}"
 
 # For host modules, accept cache file option, or specification as blank.
 case "${cache_file}" in
@@ -2880,6 +3385,26 @@ target_configargs="$target_configargs ${tbaseargs}"
 if test x${is_cross_compiler} = xyes ; then
   target_configargs="--with-cross-host=${host_noncanonical} ${target_configargs}"
 fi
+
+# Special user-friendly check for native x86_64-linux build, if
+# multilib is not explicitly enabled.
+case "$target:$have_compiler:$host:$target:$enable_multilib" in
+  x86_64-*linux*:yes:$build:$build:)
+    # Make sure we have a development environment that handles 32-bit
+    dev64=no
+    echo "int main () { return 0; }" > conftest.c
+    ${CC} -m32 -o conftest ${CFLAGS} ${CPPFLAGS} ${LDFLAGS} conftest.c
+    if test $? = 0 ; then
+      if test -s conftest || test -s conftest.exe ; then
+	dev64=yes
+      fi
+    fi 
+    rm -f conftest*
+    if test x${dev64} != xyes ; then
+      AC_MSG_ERROR([I suspect your system does not have 32-bit development libraries (libc and headers). If you have them, rerun configure with --enable-multilib. If you do not have them, and want to build a 64-bit-only compiler, rerun configure with --disable-multilib.])
+    fi
+    ;;
+esac
 
 # Default to --enable-multilib.
 if test x${enable_multilib} = x ; then
@@ -2987,6 +3512,7 @@ esac
 # our build compiler if desired.
 if test x"${build}" = x"${host}" ; then
   CFLAGS_FOR_BUILD=${CFLAGS_FOR_BUILD-${CFLAGS}}
+  CPPFLAGS_FOR_BUILD=${CPPFLAGS_FOR_BUILD-${CPPFLAGS}}
   CXXFLAGS_FOR_BUILD=${CXXFLAGS_FOR_BUILD-${CXXFLAGS}}
   LDFLAGS_FOR_BUILD=${LDFLAGS_FOR_BUILD-${LDFLAGS}}
 fi
@@ -3010,6 +3536,17 @@ fi
 case "${target}" in
   mep*)
     FLAGS_FOR_TARGET="$FLAGS_FOR_TARGET -mlibrary"
+    ;;
+  # The VxWorks support for shared libraries is getting in
+  # incrementally.  Make sure it doesn't get activated implicitly:
+  *vxworks*)
+    if test "${enable_shared-unset}" = unset ; then
+      enable_shared=no
+      # So the build of libraries knows ...
+      target_configargs="${target_configargs} --disable-shared"
+      # So gcc knows ...
+      host_configargs="${host_configargs} --disable-shared"
+    fi
     ;;
 esac
 
@@ -3053,12 +3590,15 @@ AC_SUBST(AR_FOR_BUILD)
 AC_SUBST(AS_FOR_BUILD)
 AC_SUBST(CC_FOR_BUILD)
 AC_SUBST(CFLAGS_FOR_BUILD)
+AC_SUBST(CPP_FOR_BUILD)
+AC_SUBST(CPPFLAGS_FOR_BUILD)
 AC_SUBST(CXXFLAGS_FOR_BUILD)
 AC_SUBST(CXX_FOR_BUILD)
 AC_SUBST(DLLTOOL_FOR_BUILD)
-AC_SUBST(GCJ_FOR_BUILD)
+AC_SUBST(DSYMUTIL_FOR_BUILD)
 AC_SUBST(GFORTRAN_FOR_BUILD)
 AC_SUBST(GOC_FOR_BUILD)
+AC_SUBST(GDC_FOR_BUILD)
 AC_SUBST(LDFLAGS_FOR_BUILD)
 AC_SUBST(LD_FOR_BUILD)
 AC_SUBST(NM_FOR_BUILD)
@@ -3135,6 +3675,7 @@ esac
 NCN_STRICT_CHECK_TOOLS(AR, ar)
 NCN_STRICT_CHECK_TOOLS(AS, as)
 NCN_STRICT_CHECK_TOOLS(DLLTOOL, dlltool)
+NCN_STRICT_CHECK_TOOLS(DSYMUTIL, dsymutil)
 NCN_STRICT_CHECK_TOOLS(LD, ld)
 NCN_STRICT_CHECK_TOOLS(LIPO, lipo)
 NCN_STRICT_CHECK_TOOLS(NM, nm)
@@ -3144,11 +3685,29 @@ NCN_STRICT_CHECK_TOOLS(WINDRES, windres)
 NCN_STRICT_CHECK_TOOLS(WINDMC, windmc)
 NCN_STRICT_CHECK_TOOLS(OBJCOPY, objcopy)
 NCN_STRICT_CHECK_TOOLS(OBJDUMP, objdump)
+NCN_STRICT_CHECK_TOOLS(OTOOL, otool)
 NCN_STRICT_CHECK_TOOLS(READELF, readelf)
 AC_SUBST(CC)
 AC_SUBST(CXX)
 AC_SUBST(CFLAGS)
 AC_SUBST(CXXFLAGS)
+AC_SUBST(GDC)
+AC_SUBST(GDCFLAGS)
+AC_SUBST(PKG_CONFIG_PATH)
+
+GCC_PLUGIN_OPTION(PLUGIN_OPTION)
+AR_PLUGIN_OPTION=
+RANLIB_PLUGIN_OPTION=
+if test -n "$PLUGIN_OPTION"; then
+  if $AR --help 2>&1 | grep -q "\--plugin"; then
+    AR_PLUGIN_OPTION="$PLUGIN_OPTION"
+  fi
+  if $RANLIB --help 2>&1 | grep -q "\--plugin"; then
+    RANLIB_PLUGIN_OPTION="$PLUGIN_OPTION"
+  fi
+fi
+AC_SUBST(AR_PLUGIN_OPTION)
+AC_SUBST(RANLIB_PLUGIN_OPTION)
 
 # Target tools.
 AC_ARG_WITH([build-time-tools], 
@@ -3166,17 +3725,20 @@ AC_ARG_WITH([build-time-tools],
 NCN_STRICT_CHECK_TARGET_TOOLS(CC_FOR_TARGET, cc gcc)
 NCN_STRICT_CHECK_TARGET_TOOLS(CXX_FOR_TARGET, c++ g++ cxx gxx)
 NCN_STRICT_CHECK_TARGET_TOOLS(GCC_FOR_TARGET, gcc, ${CC_FOR_TARGET})
-NCN_STRICT_CHECK_TARGET_TOOLS(GCJ_FOR_TARGET, gcj)
 NCN_STRICT_CHECK_TARGET_TOOLS(GFORTRAN_FOR_TARGET, gfortran)
 NCN_STRICT_CHECK_TARGET_TOOLS(GOC_FOR_TARGET, gccgo)
+NCN_STRICT_CHECK_TARGET_TOOLS(GDC_FOR_TARGET, gdc)
 
 ACX_CHECK_INSTALLED_TARGET_TOOL(AR_FOR_TARGET, ar)
 ACX_CHECK_INSTALLED_TARGET_TOOL(AS_FOR_TARGET, as)
 ACX_CHECK_INSTALLED_TARGET_TOOL(DLLTOOL_FOR_TARGET, dlltool)
+ACX_CHECK_INSTALLED_TARGET_TOOL(DSYMUTIL_FOR_TARGET, dsymutil)
 ACX_CHECK_INSTALLED_TARGET_TOOL(LD_FOR_TARGET, ld)
 ACX_CHECK_INSTALLED_TARGET_TOOL(LIPO_FOR_TARGET, lipo)
 ACX_CHECK_INSTALLED_TARGET_TOOL(NM_FOR_TARGET, nm)
+ACX_CHECK_INSTALLED_TARGET_TOOL(OBJCOPY_FOR_TARGET, objcopy)
 ACX_CHECK_INSTALLED_TARGET_TOOL(OBJDUMP_FOR_TARGET, objdump)
+ACX_CHECK_INSTALLED_TARGET_TOOL(OTOOL_FOR_TARGET, otool)
 ACX_CHECK_INSTALLED_TARGET_TOOL(RANLIB_FOR_TARGET, ranlib)
 ACX_CHECK_INSTALLED_TARGET_TOOL(READELF_FOR_TARGET, readelf)
 ACX_CHECK_INSTALLED_TARGET_TOOL(STRIP_FOR_TARGET, strip)
@@ -3196,17 +3758,20 @@ GCC_TARGET_TOOL(c++ for libstdc++, RAW_CXX_FOR_TARGET, CXX,
 		[gcc/xgcc -shared-libgcc -B$$r/$(HOST_SUBDIR)/gcc -nostdinc++ -L$$r/$(TARGET_SUBDIR)/libstdc++-v3/src -L$$r/$(TARGET_SUBDIR)/libstdc++-v3/src/.libs -L$$r/$(TARGET_SUBDIR)/libstdc++-v3/libsupc++/.libs],
 		c++)
 GCC_TARGET_TOOL(dlltool, DLLTOOL_FOR_TARGET, DLLTOOL, [binutils/dlltool])
+GCC_TARGET_TOOL(dsymutil, DSYMUTIL_FOR_TARGET, DSYMUTIL)
 GCC_TARGET_TOOL(gcc, GCC_FOR_TARGET, , [gcc/xgcc -B$$r/$(HOST_SUBDIR)/gcc/])
-GCC_TARGET_TOOL(gcj, GCJ_FOR_TARGET, GCJ,
-		[gcc/gcj -B$$r/$(HOST_SUBDIR)/gcc/], java)
 GCC_TARGET_TOOL(gfortran, GFORTRAN_FOR_TARGET, GFORTRAN,
 		[gcc/gfortran -B$$r/$(HOST_SUBDIR)/gcc/], fortran)
 GCC_TARGET_TOOL(gccgo, GOC_FOR_TARGET, GOC,
 		[gcc/gccgo -B$$r/$(HOST_SUBDIR)/gcc/], go)
+GCC_TARGET_TOOL(gdc, GDC_FOR_TARGET, GDC,
+		[gcc/gdc -B$$r/$(HOST_SUBDIR)/gcc/], d)
 GCC_TARGET_TOOL(ld, LD_FOR_TARGET, LD, [ld/ld-new])
 GCC_TARGET_TOOL(lipo, LIPO_FOR_TARGET, LIPO)
 GCC_TARGET_TOOL(nm, NM_FOR_TARGET, NM, [binutils/nm-new])
+GCC_TARGET_TOOL(objcopy, OBJCOPY_FOR_TARGET, OBJCOPY, [binutils/objcopy])
 GCC_TARGET_TOOL(objdump, OBJDUMP_FOR_TARGET, OBJDUMP, [binutils/objdump])
+GCC_TARGET_TOOL(otool, OTOOL_FOR_TARGET, OTOOL)
 GCC_TARGET_TOOL(ranlib, RANLIB_FOR_TARGET, RANLIB, [binutils/ranlib])
 GCC_TARGET_TOOL(readelf, READELF_FOR_TARGET, READELF, [binutils/readelf])
 GCC_TARGET_TOOL(strip, STRIP_FOR_TARGET, STRIP, [binutils/strip-new])
@@ -3282,7 +3847,20 @@ AC_ARG_ENABLE(stage1-checking,
 		[choose additional checking for stage1 of the compiler])],
 [stage1_checking=--enable-checking=${enable_stage1_checking}],
 [if test "x$enable_checking" = xno || test "x$enable_checking" = x; then
-  stage1_checking=--enable-checking=yes,types
+  # For --disable-checking or implicit --enable-checking=release, avoid
+  # setting --enable-checking=gc in the default stage1 checking for LTO
+  # bootstraps.  See PR62077.
+  case $BUILD_CONFIG in
+    *lto*)
+      stage1_checking=--enable-checking=release,misc,gimple,rtlflag,tree,types;;
+    *)
+      stage1_checking=--enable-checking=yes,types;;
+  esac
+  if test "x$enable_checking" = x && \
+     test -d ${srcdir}/gcc && \
+     test x"`cat ${srcdir}/gcc/DEV-PHASE`" = xexperimental; then
+    stage1_checking=--enable-checking=yes,types,extra
+  fi
 else
   stage1_checking=--enable-checking=$enable_checking,types
 fi])
@@ -3291,32 +3869,33 @@ AC_SUBST(stage1_checking)
 # Enable -Werror in bootstrap stage2 and later.
 AC_ARG_ENABLE(werror,
 [AS_HELP_STRING([--enable-werror],
-		[enable -Werror in bootstrap stage2 and later])], [],
-[if test -d ${srcdir}/gcc && test x"`cat $srcdir/gcc/DEV-PHASE`" = xexperimental; then
-  enable_werror=yes
-else
-  enable_werror=no
-fi])
+		[enable -Werror in bootstrap stage2 and later])],
+[
 case ${enable_werror} in
   yes) stage2_werror_flag="--enable-werror-always" ;;
   *) stage2_werror_flag="" ;;
 esac
-AC_SUBST(stage2_werror_flag)
+],
+[
+if test -d ${srcdir}/gcc && test x"`cat $srcdir/gcc/DEV-PHASE`" = xexperimental; then
+  case $BUILD_CONFIG in
+  bootstrap-debug)
+      stage2_werror_flag="--enable-werror-always" ;;
+  "")
+      stage2_werror_flag="--enable-werror-always" ;;
+  esac
+fi
+])
 
-# Enable --enable-host-shared.
-AC_ARG_ENABLE(host-shared,
-[AS_HELP_STRING([--enable-host-shared],
-		[build host code as shared libraries])],
-[host_shared=$enableval], [host_shared=no])
-AC_SUBST(host_shared)
+AC_SUBST(stage2_werror_flag)
 
 # Specify what files to not compare during bootstrap.
 
 compare_exclusions="gcc/cc*-checksum\$(objext) | gcc/ada/*tools/*"
 case "$target" in
   hppa*64*-*-hpux*) ;;
-  hppa*-*-hpux*) compare_exclusions="gcc/cc*-checksum\$(objext) | */libgcc/lib2funcs* | gcc/ada/*tools/*" ;;
-  powerpc*-ibm-aix*) compare_exclusions="gcc/cc*-checksum\$(objext) | gcc/ada/*tools/* | *libgomp*\$(objext)" ;;
+  hppa*-*-hpux*) compare_exclusions="$compare_exclusions | */libgcc/lib2funcs* | gcc/function-tests.o" ;;
+  powerpc*-ibm-aix*) compare_exclusions="$compare_exclusions | *libgomp*\$(objext)" ;;
 esac
 AC_SUBST(compare_exclusions)
 

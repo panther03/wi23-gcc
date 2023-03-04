@@ -1,5 +1,5 @@
 /* tc-h8300.c -- Assemble code for the Renesas H8/300
-   Copyright 1991-2013 Free Software Foundation, Inc.
+   Copyright (C) 1991-2023 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -28,14 +28,15 @@
 #define h8_opcodes ops
 #include "opcode/h8300.h"
 #include "safe-ctype.h"
-
-#ifdef OBJ_ELF
 #include "elf/h8.h"
-#endif
 
 const char comment_chars[] = ";";
 const char line_comment_chars[] = "#";
+#ifdef TE_LINUX
+const char line_separator_chars[] = "!";
+#else
 const char line_separator_chars[] = "";
+#endif
 
 static void sbranch (int);
 static void h8300hmode (int);
@@ -50,6 +51,8 @@ int Hmode;
 int Smode;
 int Nmode;
 int SXmode;
+
+static int default_mach = bfd_mach_h8300;
 
 #define PSIZE (Hmode && !Nmode ? L_32 : L_16)
 
@@ -146,7 +149,7 @@ h8300_elf_section (int push)
   static const char * known_data_sections [] = { ".rodata", ".tdata", ".tbss" };
   static const char * known_data_prefixes [] = { ".debug", ".zdebug", ".gnu.warning" };
   char * saved_ilp = input_line_pointer;
-  char * name;
+  const char * name;
 
   name = obj_elf_section_name ();
   if (name == NULL)
@@ -164,8 +167,7 @@ h8300_elf_section (int push)
 
       if (i < 0)
 	for (i = ARRAY_SIZE (known_data_prefixes); i--;)
-	  if (strncmp (name, known_data_prefixes[i],
-		       strlen (known_data_prefixes[i])) == 0)
+	  if (startswith (name, known_data_prefixes[i]))
 	    break;
 
       if (i < 0)
@@ -206,12 +208,10 @@ const pseudo_typeS md_pseudo_table[] =
   {"page",    listing_eject, 0},
   {"program", s_ignore, 0},
 
-#ifdef OBJ_ELF
   {"section",   h8300_elf_section, 0},
   {"section.s", h8300_elf_section, 0},
   {"sect",      h8300_elf_section, 0},
   {"sect.s",    h8300_elf_section, 0},
-#endif
 
   {0, 0, 0}
 };
@@ -223,7 +223,7 @@ const char EXP_CHARS[] = "eE";
    or    0d1.2345e12.  */
 const char FLT_CHARS[] = "rRsSfFdDxXpP";
 
-static struct hash_control *opcode_hash_control;	/* Opcode mnemonics.  */
+static htab_t opcode_hash_control;	/* Opcode mnemonics.  */
 
 /* This function is called once, at assembler startup time.  This
    should set up all the tables, etc. that the MD part of the assembler
@@ -235,19 +235,16 @@ md_begin (void)
   unsigned int nopcodes;
   struct h8_opcode *p, *p1;
   struct h8_instruction *pi;
-  char prev_buffer[100];
   int idx = 0;
 
-  if (!bfd_set_arch_mach (stdoutput, bfd_arch_h8300, bfd_mach_h8300))
+  if (!bfd_set_arch_mach (stdoutput, bfd_arch_h8300, default_mach))
     as_warn (_("could not set architecture and machine"));
 
-  opcode_hash_control = hash_new ();
-  prev_buffer[0] = 0;
+  opcode_hash_control = str_htab_create ();
 
   nopcodes = sizeof (h8_opcodes) / sizeof (struct h8_opcode);
-  
-  h8_instructions = (struct h8_instruction *)
-    xmalloc (nopcodes * sizeof (struct h8_instruction));
+
+  h8_instructions = XNEWVEC (struct h8_instruction, nopcodes);
 
   pi = h8_instructions;
   p1 = h8_opcodes;
@@ -260,14 +257,14 @@ md_begin (void)
     {
       struct h8_opcode *first_skipped = 0;
       int len, cmplen = 0;
-      char *src = p1->name;
+      const char *src = p1->name;
       char *dst, *buffer;
 
       if (p1->name == 0)
 	break;
       /* Strip off any . part when inserting the opcode and only enter
 	 unique codes into the hash table.  */
-      dst = buffer = malloc (strlen (src) + 1);
+      dst = buffer = notes_alloc (strlen (src) + 1);
       while (*src)
 	{
 	  if (*src == '.')
@@ -283,8 +280,7 @@ md_begin (void)
       len = dst - buffer;
       if (cmplen == 0)
 	cmplen = len;
-      hash_insert (opcode_hash_control, buffer, (char *) pi);
-      strcpy (prev_buffer, buffer);
+      str_hash_insert (opcode_hash_control, buffer, pi, 0);
       idx++;
 
       for (p = p1; p->name; p++)
@@ -349,7 +345,7 @@ static void clever_message (const struct h8_instruction *, struct h8_op *);
 static void fix_operand_size (struct h8_op *, int);
 static void build_bytes (const struct h8_instruction *, struct h8_op *);
 static void do_a_fix_imm (int, int, struct h8_op *, int, const struct h8_instruction *);
-static void check_operand (struct h8_op *, unsigned int, char *);
+static void check_operand (struct h8_op *, unsigned int, const char *);
 static const struct h8_instruction * get_specific (const struct h8_instruction *, struct h8_op *, int) ;
 static char *get_operands (unsigned, char *, struct h8_op *);
 static void get_operand (char **, struct h8_op *, int);
@@ -378,7 +374,7 @@ parse_reg (char *src, op_type *mode, unsigned int *reg, int direction)
   char *end;
   int len;
 
-  /* Cribbed from get_symbol_end.  */
+  /* Cribbed from get_symbol_name.  */
   if (!is_name_beginner (*src) || *src == '\001')
     return 0;
   end = src + 1;
@@ -392,36 +388,36 @@ parse_reg (char *src, op_type *mode, unsigned int *reg, int direction)
       *reg = 7;
       return len;
     }
-  if (len == 3 && 
-      TOLOWER (src[0]) == 'c' && 
-      TOLOWER (src[1]) == 'c' && 
+  if (len == 3 &&
+      TOLOWER (src[0]) == 'c' &&
+      TOLOWER (src[1]) == 'c' &&
       TOLOWER (src[2]) == 'r')
     {
       *mode = CCR;
       *reg = 0;
       return len;
     }
-  if (len == 3 && 
-      TOLOWER (src[0]) == 'e' && 
-      TOLOWER (src[1]) == 'x' && 
+  if (len == 3 &&
+      TOLOWER (src[0]) == 'e' &&
+      TOLOWER (src[1]) == 'x' &&
       TOLOWER (src[2]) == 'r')
     {
       *mode = EXR;
       *reg = 1;
       return len;
     }
-  if (len == 3 && 
-      TOLOWER (src[0]) == 'v' && 
-      TOLOWER (src[1]) == 'b' && 
+  if (len == 3 &&
+      TOLOWER (src[0]) == 'v' &&
+      TOLOWER (src[1]) == 'b' &&
       TOLOWER (src[2]) == 'r')
     {
       *mode = VBR;
       *reg = 6;
       return len;
     }
-  if (len == 3 && 
-      TOLOWER (src[0]) == 's' && 
-      TOLOWER (src[1]) == 'b' && 
+  if (len == 3 &&
+      TOLOWER (src[0]) == 's' &&
+      TOLOWER (src[1]) == 'b' &&
       TOLOWER (src[2]) == 'r')
     {
       *mode = SBR;
@@ -615,7 +611,7 @@ get_operand (char **ptr, struct h8_op *op, int direction)
 
   /* Gross.  Gross.  ldm and stm have a format not easily handled
      by get_operand.  We deal with it explicitly here.  */
-  if (TOLOWER (src[0]) == 'e' && TOLOWER (src[1]) == 'r' && 
+  if (TOLOWER (src[0]) == 'e' && TOLOWER (src[1]) == 'r' &&
       ISDIGIT (src[2]) && src[3] == '-' &&
       TOLOWER (src[4]) == 'e' && TOLOWER (src[5]) == 'r' && ISDIGIT (src[6]))
     {
@@ -758,7 +754,7 @@ get_operand (char **ptr, struct h8_op *op, int direction)
 		}
 	      if (mode
 		  && src[len + 2] == ','
-		  && TOLOWER (src[len + 3]) != 'p' 
+		  && TOLOWER (src[len + 3]) != 'p'
 		  && TOLOWER (src[len + 4]) != 'c'
 		  && src[len + 5] != ')')
 		{
@@ -820,7 +816,7 @@ get_operand (char **ptr, struct h8_op *op, int direction)
 	    op->mode |= DISP | direction;
 	  src = skip_colonthing (src, &op->mode);
 
-	  if (*src != ')' && '(')
+	  if (*src != ')')
 	    {
 	      as_bad (_("expected @(exp, reg16)"));
 	      return;
@@ -872,10 +868,10 @@ get_operand (char **ptr, struct h8_op *op, int direction)
       *ptr = parse_exp (src + 1, op);
       return;
     }
-  else if (strncmp (src, "mach", 4) == 0 || 
-	   strncmp (src, "macl", 4) == 0 ||
-	   strncmp (src, "MACH", 4) == 0 || 
-	   strncmp (src, "MACL", 4) == 0)
+  else if (startswith (src, "mach") ||
+	   startswith (src, "macl") ||
+	   startswith (src, "MACH") ||
+	   startswith (src, "MACL"))
     {
       op->reg = TOLOWER (src[3]) == 'l';
       op->mode = MACREG;
@@ -973,7 +969,7 @@ get_mova_operands (char *op_end, struct h8_op *operand)
     }
   else if ((operand[1].mode & MODE) == LOWREG)
     {
-      switch (operand[1].mode & SIZE) 
+      switch (operand[1].mode & SIZE)
 	{
 	case L_8:
 	  operand[0].mode = (operand[0].mode & ~MODE) | INDEXB;
@@ -1280,7 +1276,7 @@ get_specific (const struct h8_instruction *instruction,
 }
 
 static void
-check_operand (struct h8_op *operand, unsigned int width, char *string)
+check_operand (struct h8_op *operand, unsigned int width, const char *string)
 {
   if (operand->exp.X_add_symbol == 0
       && operand->exp.X_op_symbol == 0)
@@ -1334,7 +1330,7 @@ do_a_fix_imm (int offset, int nibble, struct h8_op *operand, int relaxmode, cons
   int where;
   char *bytes = frag_now->fr_literal + offset;
 
-  char *t = ((operand->mode & MODE) == IMM) ? "#" : "@";
+  const char *t = ((operand->mode & MODE) == IMM) ? "#" : "@";
 
   if (operand->exp.X_add_symbol == 0)
     {
@@ -1367,7 +1363,6 @@ do_a_fix_imm (int offset, int nibble, struct h8_op *operand, int relaxmode, cons
 	  check_operand (operand, 0xffff, t);
 	  bytes[0] |= operand->exp.X_add_number >> 8;
 	  bytes[1] |= operand->exp.X_add_number >> 0;
-#ifdef OBJ_ELF
 	  /* MOVA needs both relocs to relax the second operand properly.  */
 	  if (relaxmode != 0
 	      && (OP_KIND(this_try->opcode->how) == O_MOVAB
@@ -1377,7 +1372,6 @@ do_a_fix_imm (int offset, int nibble, struct h8_op *operand, int relaxmode, cons
 	      idx = BFD_RELOC_16;
 	      fix_new_exp (frag_now, offset, 2, &operand->exp, 0, idx);
 	    }
-#endif
 	  break;
 	case L_24:
 	  check_operand (operand, 0xffffff, t);
@@ -1394,11 +1388,9 @@ do_a_fix_imm (int offset, int nibble, struct h8_op *operand, int relaxmode, cons
 	  bytes[3] |= operand->exp.X_add_number >> 0;
 	  if (relaxmode != 0)
 	    {
-#ifdef OBJ_ELF
 	      if ((operand->mode & MODE) == DISP && relaxmode == 1)
 		idx = BFD_RELOC_H8_DISP32A16;
 	      else
-#endif
 		idx = (relaxmode == 2) ? R_MOV24B1 : R_MOVL1;
 	      fix_new_exp (frag_now, offset, 4, &operand->exp, 0, idx);
 	    }
@@ -1413,12 +1405,9 @@ do_a_fix_imm (int offset, int nibble, struct h8_op *operand, int relaxmode, cons
 	case L_32:
 	  size = 4;
 	  where = (operand->mode & SIZE) == L_24 ? -1 : 0;
-#ifdef OBJ_ELF
 	  if ((operand->mode & MODE) == DISP && relaxmode == 1)
 	    idx = BFD_RELOC_H8_DISP32A16;
-	  else
-#endif
-	  if (relaxmode == 2)
+	  else if (relaxmode == 2)
 	    idx = R_MOV24B1;
 	  else if (relaxmode == 1)
 	    idx = R_MOVL1;
@@ -1427,6 +1416,7 @@ do_a_fix_imm (int offset, int nibble, struct h8_op *operand, int relaxmode, cons
 	  break;
 	default:
 	  as_bad (_("Can't work out size of operand.\n"));
+	  /* Fall through.  */
 	case L_16:
 	case L_16U:
 	  size = 2;
@@ -1477,12 +1467,12 @@ build_bytes (const struct h8_instruction *this_try, struct h8_op *operand)
   if (!Hmode && this_try->opcode->available != AV_H8)
     as_warn (_("Opcode `%s' with these operand types not available in H8/300 mode"),
 	     this_try->opcode->name);
-  else if (!Smode 
-	   && this_try->opcode->available != AV_H8 
+  else if (!Smode
+	   && this_try->opcode->available != AV_H8
 	   && this_try->opcode->available != AV_H8H)
     as_warn (_("Opcode `%s' with these operand types not available in H8/300H mode"),
 	     this_try->opcode->name);
-  else if (!SXmode 
+  else if (!SXmode
 	   && this_try->opcode->available != AV_H8
 	   && this_try->opcode->available != AV_H8H
 	   && this_try->opcode->available != AV_H8S)
@@ -1650,17 +1640,9 @@ build_bytes (const struct h8_instruction *this_try, struct h8_op *operand)
       int x_mode = x & MODE;
 
       if (x_mode == IMM || x_mode == DISP)
-	{
-#ifndef OBJ_ELF
-	  /* Remove MEMRELAX flag added in h8300.h on mov with
-	     addressing mode "register indirect with displacement".  */
-	  if (x_mode == DISP)
-	    x &= ~MEMRELAX;
-#endif
-	  do_a_fix_imm (output - frag_now->fr_literal + op_at[i] / 2,
-			op_at[i] & 1, operand + i, (x & MEMRELAX) != 0,
-			this_try);
-	}
+	do_a_fix_imm (output - frag_now->fr_literal + op_at[i] / 2,
+		      op_at[i] & 1, operand + i, (x & MEMRELAX) != 0,
+		      this_try);
       else if (x_mode == ABS)
 	do_a_fix_imm (output - frag_now->fr_literal + op_at[i] / 2,
 		      op_at[i] & 1, operand + i,
@@ -1679,14 +1661,6 @@ build_bytes (const struct h8_instruction *this_try, struct h8_op *operand)
 	  if (operand[i].exp.X_add_number & 1)
 	    as_warn (_("branch operand has odd offset (%lx)\n"),
 		     (unsigned long) operand->exp.X_add_number);
-#ifndef OBJ_ELF
-	  /* The COFF port has always been off by one, changing it
-	     now would be an incompatible change, so we leave it as-is.
-
-	     We don't want to do this for ELF as we want to be
-	     compatible with the proposed ELF format from Hitachi.  */
-	  operand[i].exp.X_add_number -= 1;
-#endif
 	  if (size16)
 	    {
 	      operand[i].exp.X_add_number =
@@ -1738,11 +1712,10 @@ build_bytes (const struct h8_instruction *this_try, struct h8_op *operand)
 	  int where = 0;
 	  bfd_reloc_code_real_type reloc_type = R_JMPL1;
 
-#ifdef OBJ_ELF
 	  /* To be compatible with the proposed H8 ELF format, we
 	     want the relocation's offset to point to the first byte
 	     that will be modified, not to the start of the instruction.  */
-	  
+
 	  if ((operand->mode & SIZE) == L_32)
 	    {
 	      where = 2;
@@ -1750,12 +1723,11 @@ build_bytes (const struct h8_instruction *this_try, struct h8_op *operand)
 	    }
 	  else
 	    where = 1;
-#endif
 
 	  /* This jmp may be a jump or a branch.  */
 
-	  check_operand (operand + i, 
-			 SXmode ? 0xffffffff : Hmode ? 0xffffff : 0xffff, 
+	  check_operand (operand + i,
+			 SXmode ? 0xffffffff : Hmode ? 0xffffff : 0xffff,
 			 "@");
 
 	  if (operand[i].exp.X_add_number & 1)
@@ -1885,7 +1857,7 @@ fix_operand_size (struct h8_op *operand, int size)
 	   is safe.  get_specific() will relax L_24 into L_32 where
 	   necessary.  */
 	if (Hmode
-	    && !Nmode 
+	    && !Nmode
 	    && ((((addressT) operand->exp.X_add_number + 0x8000)
 		 & 0xffffffff) > 0xffff
 		|| operand->exp.X_add_symbol != 0
@@ -1964,7 +1936,7 @@ md_assemble (char *str)
       *slash = TOLOWER (*slash);
 
   instruction = (const struct h8_instruction *)
-    hash_find (opcode_hash_control, op_start);
+    str_hash_find (opcode_hash_control, op_start);
 
   if (instruction == NULL)
     {
@@ -2095,31 +2067,122 @@ md_undefined_symbol (char *name ATTRIBUTE_UNUSED)
 
 /* Various routines to kill one day.  */
 
-char *
+const char *
 md_atof (int type, char *litP, int *sizeP)
 {
-  return ieee_md_atof (type, litP, sizeP, TRUE);
+  return ieee_md_atof (type, litP, sizeP, true);
 }
 
 #define OPTION_H_TICK_HEX      (OPTION_MD_BASE)
+#define OPTION_MACH            (OPTION_MD_BASE+1)
 
 const char *md_shortopts = "";
-struct option md_longopts[] = {
+struct option md_longopts[] =
+{
   { "h-tick-hex", no_argument,	      NULL, OPTION_H_TICK_HEX  },
+  { "mach", required_argument, NULL, OPTION_MACH },
   {NULL, no_argument, NULL, 0}
 };
 
 size_t md_longopts_size = sizeof (md_longopts);
 
-int
-md_parse_option (int c ATTRIBUTE_UNUSED, char *arg ATTRIBUTE_UNUSED)
+struct mach_func
 {
+  const char *name;
+  void (*func) (void);
+};
+
+static void
+mach_h8300h (void)
+{
+  Hmode = 1;
+  Smode = 0;
+  Nmode = 0;
+  SXmode = 0;
+  default_mach = bfd_mach_h8300h;
+}
+
+static void
+mach_h8300hn (void)
+{
+  Hmode = 1;
+  Smode = 0;
+  Nmode = 1;
+  SXmode = 0;
+  default_mach = bfd_mach_h8300hn;
+}
+
+static void
+mach_h8300s (void)
+{
+  Hmode = 1;
+  Smode = 1;
+  Nmode = 0;
+  SXmode = 0;
+  default_mach = bfd_mach_h8300s;
+}
+
+static void
+mach_h8300sn (void)
+{
+  Hmode = 1;
+  Smode = 1;
+  Nmode = 1;
+  SXmode = 0;
+  default_mach = bfd_mach_h8300sn;
+}
+
+static void
+mach_h8300sx (void)
+{
+  Hmode = 1;
+  Smode = 1;
+  Nmode = 0;
+  SXmode = 1;
+  default_mach = bfd_mach_h8300sx;
+}
+
+static void
+mach_h8300sxn (void)
+{
+  Hmode = 1;
+  Smode = 1;
+  Nmode = 1;
+  SXmode = 1;
+  default_mach = bfd_mach_h8300sxn;
+}
+
+const struct mach_func mach_table[] =
+{
+  {"h8300h",  mach_h8300h},
+  {"h8300hn", mach_h8300hn},
+  {"h8300s",  mach_h8300s},
+  {"h8300sn", mach_h8300sn},
+  {"h8300sx", mach_h8300sx},
+  {"h8300sxn", mach_h8300sxn}
+};
+
+int
+md_parse_option (int c ATTRIBUTE_UNUSED, const char *arg ATTRIBUTE_UNUSED)
+{
+  unsigned int i;
   switch (c)
     {
     case OPTION_H_TICK_HEX:
       enable_h_tick_hex = 1;
       break;
-
+    case OPTION_MACH:
+      for (i = 0; i < sizeof(mach_table) / sizeof(struct mach_func); i++)
+	{
+	  if (strcasecmp (arg, mach_table[i].name) == 0)
+	    {
+	      mach_table[i].func();
+	      break;
+	    }
+	}
+      if (i >= sizeof(mach_table) / sizeof(struct mach_func))
+	as_bad (_("Invalid argument to --mach option: %s"), arg);
+      break;
     default:
       return 0;
     }
@@ -2127,8 +2190,14 @@ md_parse_option (int c ATTRIBUTE_UNUSED, char *arg ATTRIBUTE_UNUSED)
 }
 
 void
-md_show_usage (FILE *stream ATTRIBUTE_UNUSED)
+md_show_usage (FILE *stream)
 {
+  fprintf (stream, _(" H8300-specific assembler options:\n"));
+  fprintf (stream, _("\
+  -mach=<name>             Set the H8300 machine type to one of:\n\
+                           h8300h, h8300hn, h8300s, h8300sn, h8300sx, h8300sxn\n"));
+  fprintf (stream, _("\
+  -h-tick-hex              Support H'00 style hex constants\n"));
 }
 
 void tc_aout_fix_to_chars (void);
@@ -2152,8 +2221,8 @@ md_convert_frag (bfd *headers ATTRIBUTE_UNUSED,
 valueT
 md_section_align (segT segment, valueT size)
 {
-  int align = bfd_get_section_alignment (stdoutput, segment);
-  return ((size + (1 << align) - 1) & (-1 << align));
+  int align = bfd_section_alignment (segment);
+  return ((size + (1 << align) - 1) & (-1U << align));
 }
 
 void
@@ -2226,14 +2295,13 @@ tc_gen_reloc (asection *section ATTRIBUTE_UNUSED, fixS *fixp)
       if ((S_GET_SEGMENT (fixp->fx_addsy) != S_GET_SEGMENT (fixp->fx_subsy))
 	  || S_GET_SEGMENT (fixp->fx_addsy) == undefined_section)
 	{
-	  as_bad_where (fixp->fx_file, fixp->fx_line,
-			_("Difference of symbols in different sections is not supported"));
+	  as_bad_subtract (fixp);
 	  return NULL;
 	}
     }
 
-  rel = xmalloc (sizeof (arelent));
-  rel->sym_ptr_ptr = xmalloc (sizeof (asymbol *));
+  rel = XNEW (arelent);
+  rel->sym_ptr_ptr = XNEW (asymbol *);
   *rel->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
   rel->address = fixp->fx_frag->fr_address + fixp->fx_where;
   rel->addend = fixp->fx_offset;

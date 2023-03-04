@@ -1,6 +1,6 @@
 /* Test program for SSE registers.
 
-   Copyright 2004-2013 Free Software Foundation, Inc.
+   Copyright 2004-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -18,14 +18,17 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 #include <stdio.h>
-#include "i386-cpuid.h"
+#include "nat/x86-cpuid.h"
+
+/* Align sufficient to be able to use movaps.  */
+#define ALIGN 16
 
 typedef struct {
-  float f[4];
+  _Alignas (ALIGN) float f[4];
 } v4sf_t;
 
 
-v4sf_t data[] =
+v4sf_t data_orig[] =
   {
     { {  0.0,  0.25,  0.50,  0.75 } },
     { {  1.0,  1.25,  1.50,  1.75 } },
@@ -51,9 +54,9 @@ v4sf_t data[] =
 int
 have_sse (void)
 {
-  int edx;
+  unsigned int edx;
 
-  if (!i386_cpuid (1, NULL, NULL, NULL, &edx))
+  if (!x86_cpuid (1, NULL, NULL, NULL, &edx))
     return 0;
 
   if (edx & bit_SSE)
@@ -62,9 +65,16 @@ have_sse (void)
     return 0;
 }
 
+#include "../lib/precise-aligned-alloc.c"
+
 int
 main (int argc, char **argv)
 {
+  void *allocated_ptr;
+  v4sf_t *data
+    = precise_aligned_dup (ALIGN, sizeof (data_orig), &allocated_ptr,
+			   data_orig);
+
   if (have_sse ())
     {
       asm ("movaps 0(%0), %%xmm0\n\t"
@@ -123,6 +133,8 @@ main (int argc, char **argv)
 
       puts ("Bye!"); /* second breakpoint here */
     }
+
+  free (allocated_ptr);
 
   return 0;
 }

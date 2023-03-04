@@ -54,7 +54,7 @@ SECTIONS
   {
     *(.text .stub .text.* .gnu.linkonce.t.*)
     KEEP (*(.text.*personality*))
-    /* .gnu.warning sections are handled specially by elf32.em.  */
+    /* .gnu.warning sections are handled specially by elf.em.  */
     *(.gnu.warning)
     *(.glue_7t) *(.glue_7)
   } =0
@@ -149,7 +149,7 @@ SECTIONS
    /* Align here to ensure that the .bss section occupies space up to
       _end.  Align after .bss to ensure correct alignment even if the
       .bss section disappears because there are no input sections.  */
-   . = ALIGN(32 / 8);
+   . = ALIGN(. != 0 ? 32 / 8 : 1);
   }
   . = ALIGN(32 / 8);
   _end = .;

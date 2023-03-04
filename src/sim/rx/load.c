@@ -1,6 +1,6 @@
 /* load.c --- loading object files into the RX simulator.
 
-Copyright (C) 2005-2013 Free Software Foundation, Inc.
+Copyright (C) 2005-2023 Free Software Foundation, Inc.
 Contributed by Red Hat, Inc.
 
 This file is part of the GNU simulators.
@@ -18,19 +18,18 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
+/* This must come before any other includes.  */
+#include "defs.h"
 
-#include "config.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "bfd.h"
-#include "libbfd.h"
 #include "cpu.h"
 #include "mem.h"
 #include "load.h"
-#include "elf/internal.h"
-#include "elf/common.h"
+#include "bfd/elf-bfd.h"
 
 /* Helper function for invoking a GDB-specified printf.  */
 static void
@@ -53,7 +52,7 @@ find_section_name_by_offset (bfd *abfd, file_ptr filepos)
 
   for (s = abfd->sections; s; s = s->next)
     if (s->filepos == filepos)
-      return bfd_get_section_name (abfd, s);
+      return bfd_section_name (s);
 
   return "(unknown)";
 }
@@ -130,13 +129,16 @@ rx_load (bfd *prog, host_callback *callback)
 
       base = p->p_paddr;
       if (verbose > 1)
-	fprintf (stderr, "[load segment: lma=%08x vma=%08x size=%08x]\n",
-		 (int) base, (int) p->p_vaddr, (int) size);
+	fprintf (stderr,
+		 "[load segment: lma=%08" PRIx64 " vma=%08" PRIx64 " "
+		 "size=%08" PRIx64 "]\n",
+		 (uint64_t) base, (uint64_t) p->p_vaddr, (uint64_t) size);
       if (callback)
 	xprintf (callback,
-	         "Loading section %s, size %#lx lma %08lx vma %08lx\n",
+	         "Loading section %s, size %#" PRIx64 " lma %08" PRIx64
+		 " vma %08" PRIx64 "\n",
 	         find_section_name_by_offset (prog, p->p_offset),
-		 size, base, p->p_vaddr);
+		 (uint64_t) size, (uint64_t) base, (uint64_t) p->p_vaddr);
 
       buf = malloc (size);
       if (buf == NULL)
@@ -146,14 +148,15 @@ rx_load (bfd *prog, host_callback *callback)
 	}
       
       offset = p->p_offset;
-      if (prog->iovec->bseek (prog, offset, SEEK_SET) != 0)
+      if (bfd_seek (prog, offset, SEEK_SET) != 0)
 	{
 	  fprintf (stderr, "Failed to seek to offset %lx\n", (long) offset);
 	  continue;
 	}
-      if (prog->iovec->bread (prog, buf, size) != size)
+      if (bfd_bread (buf, size, prog) != size)
 	{
-	  fprintf (stderr, "Failed to read %lx bytes\n", size);
+	  fprintf (stderr, "Failed to read %" PRIx64 " bytes\n",
+		   (uint64_t) size);
 	  continue;
 	}
 

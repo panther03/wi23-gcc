@@ -5,16 +5,20 @@
    exit unless/until gdb sets the variable to non-zero.)
    */
 #include <stdio.h>
+#include <unistd.h>
 
-int  should_exit = 0;
+int  bidule = 0;
+volatile int  should_exit = 0;
 
 int main ()
 {
   int  local_i = 0;
 
+  alarm (60);
+
   while (! should_exit)
     {
       local_i++;
     }
-  return 0;
+  return 0; /* postloop */
 }

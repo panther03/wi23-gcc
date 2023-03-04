@@ -34,6 +34,7 @@
 
 	.global main
 	gdbasm_declare main
+	comment "mark: main enter"
 	gdbasm_enter
 
 	comment "Call a macro that consists of several lines of assembler code."
@@ -84,3 +85,4 @@
 	gdbasm_datavar	staticvar	5
 
 	.include "note.inc"
+	.section	.note.GNU-stack,"",@progbits

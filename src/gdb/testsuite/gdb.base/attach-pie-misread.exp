@@ -1,4 +1,4 @@
-# Copyright 2010-2013 Free Software Foundation, Inc.
+# Copyright 2010-2023 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -14,10 +14,9 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 # This test only works on GNU/Linux.
-if { ![isnative] || [is_remote host] || [target_info exists use_gdb_stub]
-     || ![istarget *-linux*] || [skip_shlib_tests]} {
-    continue
-}
+require !use_gdb_stub isnative allow_shlib_tests
+require {!is_remote host}
+require {istarget *-linux*}
 
 load_lib prelink-support.exp
 
@@ -25,7 +24,8 @@ standard_testfile .c
 set genfile [standard_output_file ${testfile}-gen.h]
 set executable $testfile
 
-if {[build_executable_own_libs ${testfile}.exp $executable $srcfile [list additional_flags=-fPIE ldflags=-pie]] == ""} {
+if {[build_executable_own_libs ${testfile}.exp $executable $srcfile \
+	 {pie}] == ""} {
     return -1
 }
 
@@ -95,9 +95,12 @@ if {$result == 0} {
     fail $test
 }
 
-set prelink_args [build_executable_own_libs ${test}.exp $executable $srcfile [list "additional_flags=-fPIE -DGEN=\"$genfile\"" "ldflags=-pie"]]
-if {$prelink_args == ""} {
-    return -1
+with_test_prefix "rebuild with DGEN defined" {
+    set prelink_args [build_executable_own_libs ${testfile}.exp $executable $srcfile \
+			  [list pie "additional_flags=-DGEN=\"$genfile\""]]
+    if {$prelink_args == ""} {
+	return -1
+    }
 }
 
 # x86_64 file has 25MB, no need to keep it.
@@ -118,7 +121,7 @@ verbose -log "first_offset is $first_offset"
 
 set test "first offset is non-zero"
 if {$first_offset == 0} {
-    fail "$test (-fPIE -pie in effect?)"
+    fail "$test (failing because PIE is not effect?)"
 } else {
     pass $test
 }
@@ -126,25 +129,25 @@ if {$first_offset == 0} {
 set test "start inferior"
 gdb_exit
 
-set res [remote_spawn host $binfile]
-if { $res < 0 || $res == "" } {
+set test_spawn_id [remote_spawn host $binfile]
+if { $test_spawn_id < 0 || $test_spawn_id == "" } {
     perror "Spawning $binfile failed."
     fail $test
     return
 }
-set pid [exp_pid -i $res]
+set testpid [spawn_id_get_pid $test_spawn_id]
 gdb_expect {
     -re "sleeping\r\n" {
 	pass $test
     }
     eof {
 	fail "$test (eof)"
-	remote_exec host "kill -9 $pid"
+	wait -i $test_spawn_id
 	return
     }
     timeout {
 	fail "$test (timeout)"
-	remote_exec host "kill -9 $pid"
+	kill_wait_spawned_process $test_spawn_id
 	return
     }
 }
@@ -176,8 +179,8 @@ foreach align_mult {1 2} { with_test_prefix "shift-by-$align_mult" {
     clean_restart $executable
 
     set test "attach"
-    gdb_test_multiple "attach $pid" $test {
-	-re "Attaching to program: .*, process $pid\r\n" {
+    gdb_test_multiple "attach $testpid" $test {
+	-re "Attaching to program: .*, process $testpid\r\n" {
 	    # Missing "$gdb_prompt $" is intentional.
 	    pass $test
 	}
@@ -196,4 +199,4 @@ foreach align_mult {1 2} { with_test_prefix "shift-by-$align_mult" {
     gdb_test "detach" "Detaching from program: .*"
 }}
 
-remote_exec host "kill -9 $pid"
+kill_wait_spawned_process $test_spawn_id

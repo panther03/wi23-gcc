@@ -1,6 +1,6 @@
 // gold.h -- general definitions for gold   -*- C++ -*-
 
-// Copyright 2006, 2007, 2008, 2009, 2010, 2011 Free Software Foundation, Inc.
+// Copyright (C) 2006-2023 Free Software Foundation, Inc.
 // Written by Ian Lance Taylor <iant@google.com>.
 
 // This file is part of gold.
@@ -99,6 +99,10 @@ gold_warning(const char* msg, ...) ATTRIBUTE_PRINTF_1;
 extern void
 gold_info(const char* msg, ...) ATTRIBUTE_PRINTF_1;
 
+// This function is called to print a trace message.
+extern void
+gold_trace(const char* msg, ...) ATTRIBUTE_PRINTF_1;
+
 // This function is called to emit an error message and then
 // immediately exit with fallback status (e.g., when
 // --incremental-update fails and the link needs to be restarted
@@ -159,7 +163,7 @@ gold_nomem() ATTRIBUTE_NORETURN;
 #if defined(__GNUC__) && GCC_VERSION < 4003
 #define FUNCTION_NAME static_cast<const char*>(__FUNCTION__)
 #else 
-#define FUNCTION_NAME __FUNCTION__
+#define FUNCTION_NAME __func__
 #endif
 
 // This macro and function are used in cases which can not arise if
@@ -255,8 +259,8 @@ inline bool
 is_cident(const char* name)
 {
   return (name[strspn(name,
-	 	      ("0123456789"
-		       "ABCDEFGHIJKLMNOPWRSTUVWXYZ"
+		      ("0123456789"
+		       "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 		       "abcdefghijklmnopqrstuvwxyz"
 		       "_"))]
 	  == '\0');

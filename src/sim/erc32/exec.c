@@ -1,31 +1,29 @@
-/*
- * This file is part of SIS.
- * 
- * SIS, SPARC instruction simulator V1.8 Copyright (C) 1995 Jiri Gaisler,
- * European Space Agency
- * 
- * This program is free software; you can redistribute it and/or modify it under
- * the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 3 of the License, or (at your option)
- * any later version.
- * 
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- * 
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, see <http://www.gnu.org/licenses/>.
- * 
- */
+/* This file is part of SIS (SPARC instruction simulator)
 
-#include "config.h"
+   Copyright (C) 1995-2023 Free Software Foundation, Inc.
+   Contributed by Jiri Gaisler, European Space Agency
+
+   This program is free software; you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation; either version 3 of the License, or
+   (at your option) any later version.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
+
+   You should have received a copy of the GNU General Public License
+   along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
+
+/* This must come before any other includes.  */
+#include "defs.h"
+
 #include "sis.h"
-#include "end.h"
 #include <math.h>
 #include <stdio.h>
 
-extern int32    sis_verbose, sparclite;
+extern int32_t    sis_verbose, sparclite;
 int ext_irl = 0;
 
 /* Load/store interlock delay */
@@ -220,29 +218,25 @@ int ext_irl = 0;
 
 /* Forward declarations */
 
-static uint32	sub_cc PARAMS ((uint32 psr, int32 operand1, int32 operand2,
-				int32 result));
-static uint32	add_cc PARAMS ((uint32 psr, int32 operand1, int32 operand2,
-				int32 result));
-static void	log_cc PARAMS ((int32 result, struct pstate *sregs));
-static int	fpexec PARAMS ((uint32 op3, uint32 rd, uint32 rs1, uint32 rs2,
-				struct pstate *sregs));
-static int	chk_asi PARAMS ((struct pstate *sregs, uint32 *asi, uint32 op3));
+static uint32_t	sub_cc (uint32_t psr, int32_t operand1, int32_t operand2,
+			int32_t result);
+static uint32_t	add_cc (uint32_t psr, int32_t operand1, int32_t operand2,
+			int32_t result);
+static void	log_cc (int32_t result, struct pstate *sregs);
+static int	fpexec (uint32_t op3, uint32_t rd, uint32_t rs1, uint32_t rs2,
+			struct pstate *sregs);
+static int	chk_asi (struct pstate *sregs, uint32_t *asi, uint32_t op3);
 
 
 extern struct estate ebase;
-extern int32    nfp,ift;
+extern int32_t    nfp,ift;
 
 #ifdef ERRINJ
-extern uint32 errtt, errftt;
+extern uint32_t errtt, errftt;
 #endif
 
-static uint32
-sub_cc(psr, operand1, operand2, result)
-    uint32          psr;
-    int32           operand1;
-    int32           operand2;
-    int32           result;
+static uint32_t
+sub_cc(uint32_t psr, int32_t operand1, int32_t operand2, int32_t result)
 {
     psr = ((psr & ~PSR_N) | ((result >> 8) & PSR_N));
     if (result)
@@ -253,15 +247,11 @@ sub_cc(psr, operand1, operand2, result)
 			   (~operand1 & operand2 & result)) >> 10) & PSR_V);
     psr = (psr & ~PSR_C) | ((((~operand1 & operand2) |
 			 ((~operand1 | operand2) & result)) >> 11) & PSR_C);
-    return (psr);
+    return psr;
 }
 
-uint32
-add_cc(psr, operand1, operand2, result)
-    uint32          psr;
-    int32           operand1;
-    int32           operand2;
-    int32           result;
+uint32_t
+add_cc(uint32_t psr, int32_t operand1, int32_t operand2, int32_t result)
 {
     psr = ((psr & ~PSR_N) | ((result >> 8) & PSR_N));
     if (result)
@@ -272,13 +262,11 @@ add_cc(psr, operand1, operand2, result)
 			  (~operand1 & ~operand2 & result)) >> 10) & PSR_V);
     psr = (psr & ~PSR_C) | ((((operand1 & operand2) |
 			 ((operand1 | operand2) & ~result)) >> 11) & PSR_C);
-    return(psr);
+    return psr;
 }
 
 static void
-log_cc(result, sregs)
-    int32           result;
-    struct pstate  *sregs;
+log_cc(int32_t result, struct pstate *sregs)
 {
     sregs->psr &= ~(PSR_CC);	/* Zero CC bits */
     sregs->psr = (sregs->psr | ((result >> 8) & PSR_N));
@@ -288,21 +276,21 @@ log_cc(result, sregs)
 
 /* Add two unsigned 32-bit integers, and calculate the carry out. */
 
-static uint32
-add32 (uint32 n1, uint32 n2, int *carry)
+static uint32_t
+add32 (uint32_t n1, uint32_t n2, int *carry)
 {
-  uint32 result = n1 + n2;
+  uint32_t result = n1 + n2;
 
-  *carry = result < n1 || result < n1;
-  return(result);
+  *carry = result < n1 || result < n2;
+  return result;
 }
 
 /* Multiply two 32-bit integers.  */
 
 static void
-mul64 (uint32 n1, uint32 n2, uint32 *result_hi, uint32 *result_lo, int msigned)
+mul64 (uint32_t n1, uint32_t n2, uint32_t *result_hi, uint32_t *result_lo, int msigned)
 {
-  uint32 lo, mid1, mid2, hi, reg_lo, reg_hi;
+  uint32_t lo, mid1, mid2, hi, reg_lo, reg_hi;
   int carry;
   int sign = 0;
 
@@ -350,39 +338,68 @@ mul64 (uint32 n1, uint32 n2, uint32 *result_hi, uint32 *result_lo, int msigned)
    that the host compiler supports long long operations.  */
 
 static void
-div64 (uint32 n1_hi, uint32 n1_low, uint32 n2, uint32 *result, int msigned)
+div64 (uint32_t n1_hi, uint32_t n1_low, uint32_t n2, uint32_t *result, int msigned)
 {
-  uint64 n1;
+  uint64_t n1;
 
-  n1 = ((uint64) n1_hi) << 32;
-  n1 |= ((uint64) n1_low) & 0xffffffff;
+  n1 = ((uint64_t) n1_hi) << 32;
+  n1 |= ((uint64_t) n1_low) & 0xffffffff;
 
   if (msigned)
     {
-      int64 n1_s = (int64) n1;
-      int32 n2_s = (int32) n2;
+      int64_t n1_s = (int64_t) n1;
+      int32_t n2_s = (int32_t) n2;
       n1_s = n1_s / n2_s;
-      n1 = (uint64) n1_s;
+      n1 = (uint64_t) n1_s;
     }
   else
     n1 = n1 / n2;
 
-  *result = (uint32) (n1 & 0xffffffff);
+  *result = (uint32_t) (n1 & 0xffffffff);
 }
 
 
+static int
+extract_short (uint32_t data, uint32_t address)
+{
+    return ((data >> ((2 - (address & 2)) * 8)) & 0xffff);
+}
+
+static int
+extract_short_signed (uint32_t data, uint32_t address)
+{
+    uint32_t tmp = ((data >> ((2 - (address & 2)) * 8)) & 0xffff);
+    if (tmp & 0x8000)
+        tmp |= 0xffff0000;
+    return tmp;
+}
+
+static int
+extract_byte (uint32_t data, uint32_t address)
+{
+    return ((data >> ((3 - (address & 3)) * 8)) & 0xff);
+}
+
+static int
+extract_byte_signed (uint32_t data, uint32_t address)
+{
+    uint32_t tmp = ((data >> ((3 - (address & 3)) * 8)) & 0xff);
+    if (tmp & 0x80)
+        tmp |= 0xffffff00;
+    return tmp;
+}
+
 int
-dispatch_instruction(sregs)
-    struct pstate  *sregs;
+dispatch_instruction(struct pstate *sregs)
 {
 
-    uint32          cwp, op, op2, op3, asi, rd, cond, rs1,
+    uint32_t          cwp, op, op2, op3, asi, rd, cond, rs1,
                     rs2;
-    uint32          ldep, icc;
-    int32           operand1, operand2, *rdd, result, eicc,
+    uint32_t          ldep, icc, data, *rdd;
+    int32_t           operand1, operand2, result, eicc,
                     new_cwp;
-    int32           pc, npc, data, address, ws, mexc, fcc;
-    int32	    ddata[2];
+    int32_t           pc, npc, address, ws, mexc, fcc;
+    uint32_t	    ddata[2];
 
     sregs->ninst++;
     cwp = ((sregs->psr & PSR_CWP) << 4);
@@ -690,7 +707,7 @@ dispatch_instruction(sregs)
 	    case DIVScc:
 		{
 		  int sign;
-		  uint32 result, remainder;
+		  uint32_t result, remainder;
 		  int c0, y31;
 
 		  if (!sparclite) {
@@ -716,8 +733,8 @@ dispatch_instruction(sregs)
 		     even in cases where the divisor is subtracted
 		     from the remainder.  FIXME: get the true story
 		     from Fujitsu. */
-		  c0 = result < (uint32) remainder
-		       || result < (uint32) operand2;
+		  c0 = result < (uint32_t) remainder
+		       || result < (uint32_t) operand2;
 
 		  if (result & 0x80000000)
 		    sregs->psr |= PSR_N;
@@ -756,7 +773,7 @@ dispatch_instruction(sregs)
 		break;
 	    case SMULCC:
 		{
-		  uint32 result;
+		  uint32_t result;
 
 		  mul64 (rs1, operand2, &sregs->y, &result, 1);
 
@@ -780,7 +797,7 @@ dispatch_instruction(sregs)
 		break;
 	    case UMULCC:
 		{
-		  uint32 result;
+		  uint32_t result;
 
 		  mul64 (rs1, operand2, &sregs->y, &result, 0);
 
@@ -814,7 +831,7 @@ dispatch_instruction(sregs)
 		break;
 	    case SDIVCC:
 		{
-		  uint32 result;
+		  uint32_t result;
 
 		  if (sparclite) {
 		     sregs->trap = TRAP_UNIMP;
@@ -861,7 +878,7 @@ dispatch_instruction(sregs)
 		break;
 	    case UDIVCC:
 		{
-		  uint32 result;
+		  uint32_t result;
 
 		  if (sparclite) {
 		     sregs->trap = TRAP_UNIMP;
@@ -1078,7 +1095,8 @@ dispatch_instruction(sregs)
 		    sregs->trap = TRAP_PRIVI;
 		    break;
 		}
-		sregs->psr = (rs1 ^ operand2) & 0x00f03fff;
+		sregs->psr = (sregs->psr & 0xff000000) |
+			((rs1 ^ operand2) & 0x00f03fff);
 		break;
 	    case WRWIM:
 		if (!(sregs->psr & PSR_S)) {
@@ -1150,7 +1168,7 @@ dispatch_instruction(sregs)
 
 	    case SCAN:
 		{
-		  uint32 result, mask;
+		  uint32_t result, mask;
 		  int i;
 
 		  if (!sparclite) {
@@ -1214,8 +1232,10 @@ dispatch_instruction(sregs)
 		else
 		    rdd = &(sregs->g[rd]);
 	    }
-	    mexc = memory_read(asi, address, ddata, 3, &ws);
-	    sregs->hold += ws * 2;
+	    mexc = memory_read (asi, address, ddata, 2, &ws);
+	    sregs->hold += ws;
+	    mexc |= memory_read (asi, address+4, &ddata[1], 2, &ws);
+	    sregs->hold += ws;
 	    sregs->icnt = T_LDD;
 	    if (mexc) {
 		sregs->trap = TRAP_DEXC;
@@ -1253,6 +1273,7 @@ dispatch_instruction(sregs)
 		sregs->trap = TRAP_DEXC;
 		break;
 	    }
+	    data = extract_byte (data, address);
 	    *rdd = data;
 	    data = 0x0ff;
 	    mexc = memory_write(asi, address, &data, 0, &ws);
@@ -1275,8 +1296,10 @@ dispatch_instruction(sregs)
 		sregs->trap = TRAP_DEXC;
 		break;
 	    }
-	    if ((op3 == LDSB) && (data & 0x80))
-		data |= 0xffffff00;
+	    if (op3 == LDSB)
+	        data = extract_byte_signed (data, address);
+	    else
+	        data = extract_byte (data, address);
 	    *rdd = data;
 	    break;
 	case LDSHA:
@@ -1294,8 +1317,10 @@ dispatch_instruction(sregs)
 		sregs->trap = TRAP_DEXC;
 		break;
 	    }
-	    if ((op3 == LDSH) && (data & 0x8000))
-		data |= 0xffff0000;
+	    if (op3 == LDSH)
+	        data = extract_short_signed (data, address);
+	    else
+	        data = extract_short (data, address);
 	    *rdd = data;
 	    break;
 	case LDF:
@@ -1320,7 +1345,7 @@ dispatch_instruction(sregs)
 	    if (mexc) {
 		sregs->trap = TRAP_DEXC;
 	    } else {
-		sregs->fs[rd] = *((float32 *) & data);
+		memcpy (&sregs->fs[rd], &data, sizeof (sregs->fs[rd]));
 	    }
 	    break;
 	case LDDF:
@@ -1338,19 +1363,22 @@ dispatch_instruction(sregs)
 		    ((sregs->frs2 >> 1) == (rd >> 1)))
 		    sregs->fhold += (sregs->ftime - ebase.simtime);
 	    }
-	    mexc = memory_read(asi, address, ddata, 3, &ws);
-	    sregs->hold += ws * 2;
+	    mexc = memory_read (asi, address, ddata, 2, &ws);
+	    sregs->hold += ws;
+	    mexc |= memory_read (asi, address+4, &ddata[1], 2, &ws);
+	    sregs->hold += ws;
 	    sregs->icnt = T_LDD;
 	    if (mexc) {
 		sregs->trap = TRAP_DEXC;
 	    } else {
 		rd &= 0x1E;
 		sregs->flrd = rd;
-		sregs->fs[rd] = *((float32 *) & ddata[0]);
+		memcpy (&sregs->fs[rd], &ddata[0], sizeof (sregs->fs[rd]));
 #ifdef STAT
 		sregs->nload++;	/* Double load counts twice */
 #endif
-		sregs->fs[rd + 1] = *((float32 *) & ddata[1]);
+		memcpy (&sregs->fs[rd + 1], &ddata[1],
+			sizeof (sregs->fs[rd + 1]));
 		sregs->ltime = ebase.simtime + sregs->icnt + FLSTHOLD +
 			       sregs->hold + sregs->fhold;
 	    }
@@ -1501,7 +1529,7 @@ dispatch_instruction(sregs)
 		if (sregs->frd == rd)
 		    sregs->fhold += (sregs->ftime - ebase.simtime);
 	    }
-	    mexc = memory_write(asi, address, &sregs->fsi[rd], 2, &ws);
+	    mexc = memory_write(asi, address, (uint32_t *)&sregs->fsi[rd], 2, &ws);
 	    sregs->hold += ws;
 	    if (mexc) {
 		sregs->trap = TRAP_DEXC;
@@ -1521,7 +1549,7 @@ dispatch_instruction(sregs)
 		if ((sregs->frd == rd) || (sregs->frd + 1 == rd))
 		    sregs->fhold += (sregs->ftime - ebase.simtime);
 	    }
-	    mexc = memory_write(asi, address, &sregs->fsi[rd], 3, &ws);
+	    mexc = memory_write(asi, address, (uint32_t *)&sregs->fsi[rd], 3, &ws);
 	    sregs->hold += ws;
 	    sregs->icnt = T_STD;
 #ifdef STAT
@@ -1584,7 +1612,7 @@ dispatch_instruction(sregs)
 	sregs->pc = pc;
 	sregs->npc = npc;
     }
-    return (0);
+    return 0;
 }
 
 #define T_FABSs		2
@@ -1635,22 +1663,20 @@ dispatch_instruction(sregs)
 
 
 static int
-fpexec(op3, rd, rs1, rs2, sregs)
-    uint32          op3, rd, rs1, rs2;
-    struct pstate  *sregs;
+fpexec(uint32_t op3, uint32_t rd, uint32_t rs1, uint32_t rs2, struct pstate *sregs)
 {
-    uint32          opf, tem, accex;
-    int32           fcc;
-    uint32          ldadj;
+    uint32_t          opf, tem, accex;
+    int32_t           fcc;
+    uint32_t          ldadj;
 
     if (sregs->fpstate == FP_EXC_MODE) {
 	sregs->fsr = (sregs->fsr & ~FSR_TT) | FP_SEQ_ERR;
 	sregs->fpstate = FP_EXC_PE;
-	return (0);
+	return 0;
     }
     if (sregs->fpstate == FP_EXC_PE) {
 	sregs->fpstate = FP_EXC_MODE;
-	return (TRAP_FPEXC);
+	return TRAP_FPEXC;
     }
     opf = (sregs->inst >> 5) & 0x1ff;
 
@@ -1692,11 +1718,11 @@ fpexec(op3, rd, rs1, rs2, sregs)
     /* SPARC is big-endian - swap double floats if host is little-endian */
     /* This is ugly - I know ... */
 
-    /* FIXME: should use (CURRENT_HOST_BYTE_ORDER == CURRENT_TARGET_BYTE_ORDER)
+    /* FIXME: should use (HOST_BYTE_ORDER == CURRENT_TARGET_BYTE_ORDER)
        but what about machines where float values are different endianness
        from integer values? */
 
-#ifdef HOST_LITTLE_ENDIAN_FLOAT
+#ifdef HOST_LITTLE_ENDIAN
     rs1 &= 0x1f;
     switch (opf) {
 	case FADDd:
@@ -1874,7 +1900,7 @@ fpexec(op3, rd, rs1, rs2, sregs)
 
     accex = get_accex();
 
-#ifdef HOST_LITTLE_ENDIAN_FLOAT
+#ifdef HOST_LITTLE_ENDIAN
     switch (opf) {
     case FADDd:
     case FDIVd:
@@ -1910,44 +1936,40 @@ fpexec(op3, rd, rs1, rs2, sregs)
     }
     clear_accex();
 
-    return (0);
+    return 0;
 
 
 }
 
 static int
-chk_asi(sregs, asi, op3)
-    struct pstate  *sregs;
-    uint32 *asi, op3;
-
+chk_asi(struct pstate *sregs, uint32_t *asi, uint32_t op3)
 {
     if (!(sregs->psr & PSR_S)) {
 	sregs->trap = TRAP_PRIVI;
-	return (0);
+	return 0;
     } else if (sregs->inst & INST_I) {
 	sregs->trap = TRAP_UNIMP;
-	return (0);
+	return 0;
     } else
 	*asi = (sregs->inst >> 5) & 0x0ff;
-    return(1);
+    return 1;
 }
 
 int
-execute_trap(sregs)
-    struct pstate  *sregs;
+execute_trap(struct pstate *sregs)
 {
-    int32           cwp;
+    int32_t           cwp;
 
     if (sregs->trap == 256) {
 	sregs->pc = 0;
 	sregs->npc = 4;
 	sregs->trap = 0;
     } else if (sregs->trap == 257) {
-	    return (ERROR);
+	    return ERROR;
     } else {
 
 	if ((sregs->psr & PSR_ET) == 0)
-	    return (ERROR);
+	    return ERROR;
 
 	sregs->tbr = (sregs->tbr & 0xfffff000) | (sregs->trap << 4);
 	sregs->trap = 0;
@@ -1974,15 +1996,14 @@ execute_trap(sregs)
     }
 
 
-    return (0);
+    return 0;
 
 }
 
 extern struct irqcell irqarr[16];
 
 int
-check_interrupts(sregs)
-    struct pstate  *sregs;
+check_interrupts(struct pstate *sregs)
 {
 #ifdef ERRINJ
     if (errtt) {
@@ -1997,21 +2018,20 @@ check_interrupts(sregs)
 	if (sregs->trap == 0) {
 	    sregs->trap = 16 + ext_irl;
 	    irqarr[ext_irl & 0x0f].callback(irqarr[ext_irl & 0x0f].arg);
-	    return(1);
+	    return 1;
 	}
     }
-    return(0);
+    return 0;
 }
 
 void
-init_regs(sregs)
-    struct pstate  *sregs;
+init_regs(struct pstate *sregs)
 {
     sregs->pc = 0;
     sregs->npc = 4;
     sregs->trap = 0;
     sregs->psr &= 0x00f03fdf;
-    sregs->psr |= 0x080;	/* Set supervisor bit */
+    sregs->psr |= 0x11000080;	/* Set supervisor bit */
     sregs->breakpoint = 0;
     sregs->annul = 0;
     sregs->fpstate = FP_EXE_MODE;
@@ -2021,12 +2041,12 @@ init_regs(sregs)
     sregs->err_mode = 0;
     ext_irl = 0;
     sregs->g[0] = 0;
-#ifdef HOST_LITTLE_ENDIAN_FLOAT
+#ifdef HOST_LITTLE_ENDIAN
     sregs->fdp = (float32 *) sregs->fd;
-    sregs->fsi = (int32 *) sregs->fs;
+    sregs->fsi = (int32_t *) sregs->fs;
 #else
     sregs->fs = (float32 *) sregs->fd;
-    sregs->fsi = (int32 *) sregs->fd;
+    sregs->fsi = (int32_t *) sregs->fd;
 #endif
     sregs->fsr = 0;
     sregs->fpu_pres = !nfp;

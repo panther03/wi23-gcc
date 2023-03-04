@@ -1,5 +1,5 @@
 /* CRIS exception, interrupt, and trap (EIT) support
-   Copyright (C) 2004-2013 Free Software Foundation, Inc.
+   Copyright (C) 2004-2023 Free Software Foundation, Inc.
    Contributed by Axis Communications.
 
 This file is part of the GNU simulators.
@@ -17,27 +17,29 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
+/* This must come before any other includes.  */
+#include "defs.h"
+
+#include "portability.h"
 #include "sim-main.h"
+#include "sim-syscall.h"
 #include "sim-options.h"
+#include "sim-signal.h"
+#include "sim/callback.h"
 #include "bfd.h"
 /* FIXME: get rid of targ-vals.h usage everywhere else.  */
 
+#include <stdlib.h>
 #include <stdarg.h>
-#ifdef HAVE_ERRNO_H
 #include <errno.h>
-#endif
-#ifdef HAVE_UNISTD_H
 #include <unistd.h>
-#endif
 #ifdef HAVE_FCNTL_H
 #include <fcntl.h>
 #endif
 #ifdef HAVE_SYS_PARAM_H
 #include <sys/param.h>
 #endif
-#ifdef HAVE_SYS_STAT_H
 #include <sys/stat.h>
-#endif
 /* For PATH_MAX, originally. */
 #ifdef HAVE_LIMITS_H
 #include <limits.h>
@@ -154,7 +156,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 /* Milliseconds since start of run.  We use the number of syscalls to
    avoid introducing noise in the execution time.  */
-#define TARGET_TIME_MS(cpu) ((cpu)->syscalls)
+#define TARGET_TIME_MS(cpu) (CRIS_SIM_CPU (cpu)->syscalls)
 
 /* Seconds as in time(2).  */
 #define TARGET_TIME(cpu) (TARGET_EPOCH + TARGET_TIME_MS (cpu) / 1000)
@@ -263,21 +265,21 @@ static const char stat_map[] =
 
 static const CB_TARGET_DEFS_MAP syscall_map[] =
 {
-  { CB_SYS_open, TARGET_SYS_open },
-  { CB_SYS_close, TARGET_SYS_close },
-  { CB_SYS_read, TARGET_SYS_read },
-  { CB_SYS_write, TARGET_SYS_write },
-  { CB_SYS_lseek, TARGET_SYS_lseek },
-  { CB_SYS_unlink, TARGET_SYS_unlink },
-  { CB_SYS_getpid, TARGET_SYS_getpid },
-  { CB_SYS_fstat, TARGET_SYS_fstat64 },
-  { CB_SYS_lstat, TARGET_SYS_lstat64 },
-  { CB_SYS_stat, TARGET_SYS_stat64 },
-  { CB_SYS_pipe, TARGET_SYS_pipe },
-  { CB_SYS_rename, TARGET_SYS_rename },
-  { CB_SYS_truncate, TARGET_SYS_truncate },
-  { CB_SYS_ftruncate, TARGET_SYS_ftruncate },
-  { 0, -1 }
+  { "open", CB_SYS_open, TARGET_SYS_open },
+  { "close", CB_SYS_close, TARGET_SYS_close },
+  { "read", CB_SYS_read, TARGET_SYS_read },
+  { "write", CB_SYS_write, TARGET_SYS_write },
+  { "lseek", CB_SYS_lseek, TARGET_SYS_lseek },
+  { "unlink", CB_SYS_unlink, TARGET_SYS_unlink },
+  { "getpid", CB_SYS_getpid, TARGET_SYS_getpid },
+  { "fstat", CB_SYS_fstat, TARGET_SYS_fstat64 },
+  { "lstat", CB_SYS_lstat, TARGET_SYS_lstat64 },
+  { "stat", CB_SYS_stat, TARGET_SYS_stat64 },
+  { "pipe", CB_SYS_pipe, TARGET_SYS_pipe },
+  { "rename", CB_SYS_rename, TARGET_SYS_rename },
+  { "truncate", CB_SYS_truncate, TARGET_SYS_truncate },
+  { "ftruncate", CB_SYS_ftruncate, TARGET_SYS_ftruncate },
+  { 0, -1, -1 }
 };
 
 /* An older, 32-bit-only stat mapping.  */
@@ -290,9 +292,9 @@ static const char stat32_map[] =
    newlib Linux mapping.  */
 static const CB_TARGET_DEFS_MAP syscall_stat32_map[] =
 {
-  { CB_SYS_fstat, TARGET_SYS_fstat },
-  { CB_SYS_stat, TARGET_SYS_stat },
-  { 0, -1 }
+  { "fstat", CB_SYS_fstat, TARGET_SYS_fstat },
+  { "stat", CB_SYS_stat, TARGET_SYS_stat },
+  { 0, -1, -1 }
 };
 
 /* Giving the true value for the running sim process will lead to
@@ -311,378 +313,378 @@ static const CB_TARGET_DEFS_MAP syscall_stat32_map[] =
 static const CB_TARGET_DEFS_MAP errno_map[] =
 {
 #ifdef EPERM
-  { EPERM, 1 },
+  { "EPERM", EPERM, 1 },
 #endif
 #ifdef ENOENT
-  { ENOENT, 2 },
+  { "ENOENT", ENOENT, 2 },
 #endif
 #ifdef ESRCH
-  { ESRCH, 3 },
+  { "ESRCH", ESRCH, 3 },
 #endif
 #ifdef EINTR
-  { EINTR, 4 },
+  { "EINTR", EINTR, 4 },
 #endif
 #ifdef EIO
-  { EIO, 5 },
+  { "EIO", EIO, 5 },
 #endif
 #ifdef ENXIO
-  { ENXIO, 6 },
+  { "ENXIO", ENXIO, 6 },
 #endif
 #ifdef E2BIG
-  { E2BIG, 7 },
+  { "E2BIG", E2BIG, 7 },
 #endif
 #ifdef ENOEXEC
-  { ENOEXEC, 8 },
+  { "ENOEXEC", ENOEXEC, 8 },
 #endif
 #ifdef EBADF
-  { EBADF, 9 },
+  { "EBADF", EBADF, 9 },
 #endif
 #ifdef ECHILD
-  { ECHILD, 10 },
+  { "ECHILD", ECHILD, 10 },
 #endif
 #ifdef EAGAIN
-  { EAGAIN, 11 },
+  { "EAGAIN", EAGAIN, 11 },
 #endif
 #ifdef ENOMEM
-  { ENOMEM, 12 },
+  { "ENOMEM", ENOMEM, 12 },
 #endif
 #ifdef EACCES
-  { EACCES, 13 },
+  { "EACCES", EACCES, 13 },
 #endif
 #ifdef EFAULT
-  { EFAULT, 14 },
+  { "EFAULT", EFAULT, 14 },
 #endif
 #ifdef ENOTBLK
-  { ENOTBLK, 15 },
+  { "ENOTBLK", ENOTBLK, 15 },
 #endif
 #ifdef EBUSY
-  { EBUSY, 16 },
+  { "EBUSY", EBUSY, 16 },
 #endif
 #ifdef EEXIST
-  { EEXIST, 17 },
+  { "EEXIST", EEXIST, 17 },
 #endif
 #ifdef EXDEV
-  { EXDEV, 18 },
+  { "EXDEV", EXDEV, 18 },
 #endif
 #ifdef ENODEV
-  { ENODEV, 19 },
+  { "ENODEV", ENODEV, 19 },
 #endif
 #ifdef ENOTDIR
-  { ENOTDIR, 20 },
+  { "ENOTDIR", ENOTDIR, 20 },
 #endif
 #ifdef EISDIR
-  { EISDIR, 21 },
+  { "EISDIR", EISDIR, 21 },
 #endif
 #ifdef EINVAL
-  { EINVAL, 22 },
+  { "EINVAL", EINVAL, 22 },
 #endif
 #ifdef ENFILE
-  { ENFILE, 23 },
+  { "ENFILE", ENFILE, 23 },
 #endif
 #ifdef EMFILE
-  { EMFILE, 24 },
+  { "EMFILE", EMFILE, 24 },
 #endif
 #ifdef ENOTTY
-  { ENOTTY, 25 },
+  { "ENOTTY", ENOTTY, 25 },
 #endif
 #ifdef ETXTBSY
-  { ETXTBSY, 26 },
+  { "ETXTBSY", ETXTBSY, 26 },
 #endif
 #ifdef EFBIG
-  { EFBIG, 27 },
+  { "EFBIG", EFBIG, 27 },
 #endif
 #ifdef ENOSPC
-  { ENOSPC, 28 },
+  { "ENOSPC", ENOSPC, 28 },
 #endif
 #ifdef ESPIPE
-  { ESPIPE, 29 },
+  { "ESPIPE", ESPIPE, 29 },
 #endif
 #ifdef EROFS
-  { EROFS, 30 },
+  { "EROFS", EROFS, 30 },
 #endif
 #ifdef EMLINK
-  { EMLINK, 31 },
+  { "EMLINK", EMLINK, 31 },
 #endif
 #ifdef EPIPE
-  { EPIPE, 32 },
+  { "EPIPE", EPIPE, 32 },
 #endif
 #ifdef EDOM
-  { EDOM, 33 },
+  { "EDOM", EDOM, 33 },
 #endif
 #ifdef ERANGE
-  { ERANGE, 34 },
+  { "ERANGE", ERANGE, 34 },
 #endif
 #ifdef EDEADLK
-  { EDEADLK, 35 },
+  { "EDEADLK", EDEADLK, 35 },
 #endif
 #ifdef ENAMETOOLONG
-  { ENAMETOOLONG, 36 },
+  { "ENAMETOOLONG", ENAMETOOLONG, 36 },
 #endif
 #ifdef ENOLCK
-  { ENOLCK, 37 },
+  { "ENOLCK", ENOLCK, 37 },
 #endif
 #ifdef ENOSYS
-  { ENOSYS, 38 },
+  { "ENOSYS", ENOSYS, 38 },
 #endif
 #ifdef ENOTEMPTY
-  { ENOTEMPTY, 39 },
+  { "ENOTEMPTY", ENOTEMPTY, 39 },
 #endif
 #ifdef ELOOP
-  { ELOOP, 40 },
+  { "ELOOP", ELOOP, 40 },
 #endif
 #ifdef EWOULDBLOCK
-  { EWOULDBLOCK, 11 },
+  { "EWOULDBLOCK", EWOULDBLOCK, 11 },
 #endif
 #ifdef ENOMSG
-  { ENOMSG, 42 },
+  { "ENOMSG", ENOMSG, 42 },
 #endif
 #ifdef EIDRM
-  { EIDRM, 43 },
+  { "EIDRM", EIDRM, 43 },
 #endif
 #ifdef ECHRNG
-  { ECHRNG, 44 },
+  { "ECHRNG", ECHRNG, 44 },
 #endif
 #ifdef EL2NSYNC
-  { EL2NSYNC, 45 },
+  { "EL2NSYNC", EL2NSYNC, 45 },
 #endif
 #ifdef EL3HLT
-  { EL3HLT, 46 },
+  { "EL3HLT", EL3HLT, 46 },
 #endif
 #ifdef EL3RST
-  { EL3RST, 47 },
+  { "EL3RST", EL3RST, 47 },
 #endif
 #ifdef ELNRNG
-  { ELNRNG, 48 },
+  { "ELNRNG", ELNRNG, 48 },
 #endif
 #ifdef EUNATCH
-  { EUNATCH, 49 },
+  { "EUNATCH", EUNATCH, 49 },
 #endif
 #ifdef ENOCSI
-  { ENOCSI, 50 },
+  { "ENOCSI", ENOCSI, 50 },
 #endif
 #ifdef EL2HLT
-  { EL2HLT, 51 },
+  { "EL2HLT", EL2HLT, 51 },
 #endif
 #ifdef EBADE
-  { EBADE, 52 },
+  { "EBADE", EBADE, 52 },
 #endif
 #ifdef EBADR
-  { EBADR, 53 },
+  { "EBADR", EBADR, 53 },
 #endif
 #ifdef EXFULL
-  { EXFULL, 54 },
+  { "EXFULL", EXFULL, 54 },
 #endif
 #ifdef ENOANO
-  { ENOANO, 55 },
+  { "ENOANO", ENOANO, 55 },
 #endif
 #ifdef EBADRQC
-  { EBADRQC, 56 },
+  { "EBADRQC", EBADRQC, 56 },
 #endif
 #ifdef EBADSLT
-  { EBADSLT, 57 },
+  { "EBADSLT", EBADSLT, 57 },
 #endif
 #ifdef EDEADLOCK
-  { EDEADLOCK, 35 },
+  { "EDEADLOCK", EDEADLOCK, 35 },
 #endif
 #ifdef EBFONT
-  { EBFONT, 59 },
+  { "EBFONT", EBFONT, 59 },
 #endif
 #ifdef ENOSTR
-  { ENOSTR, 60 },
+  { "ENOSTR", ENOSTR, 60 },
 #endif
 #ifdef ENODATA
-  { ENODATA, 61 },
+  { "ENODATA", ENODATA, 61 },
 #endif
 #ifdef ETIME
-  { ETIME, 62 },
+  { "ETIME", ETIME, 62 },
 #endif
 #ifdef ENOSR
-  { ENOSR, 63 },
+  { "ENOSR", ENOSR, 63 },
 #endif
 #ifdef ENONET
-  { ENONET, 64 },
+  { "ENONET", ENONET, 64 },
 #endif
 #ifdef ENOPKG
-  { ENOPKG, 65 },
+  { "ENOPKG", ENOPKG, 65 },
 #endif
 #ifdef EREMOTE
-  { EREMOTE, 66 },
+  { "EREMOTE", EREMOTE, 66 },
 #endif
 #ifdef ENOLINK
-  { ENOLINK, 67 },
+  { "ENOLINK", ENOLINK, 67 },
 #endif
 #ifdef EADV
-  { EADV, 68 },
+  { "EADV", EADV, 68 },
 #endif
 #ifdef ESRMNT
-  { ESRMNT, 69 },
+  { "ESRMNT", ESRMNT, 69 },
 #endif
 #ifdef ECOMM
-  { ECOMM, 70 },
+  { "ECOMM", ECOMM, 70 },
 #endif
 #ifdef EPROTO
-  { EPROTO, 71 },
+  { "EPROTO", EPROTO, 71 },
 #endif
 #ifdef EMULTIHOP
-  { EMULTIHOP, 72 },
+  { "EMULTIHOP", EMULTIHOP, 72 },
 #endif
 #ifdef EDOTDOT
-  { EDOTDOT, 73 },
+  { "EDOTDOT", EDOTDOT, 73 },
 #endif
 #ifdef EBADMSG
-  { EBADMSG, 74 },
+  { "EBADMSG", EBADMSG, 74 },
 #endif
 #ifdef EOVERFLOW
-  { EOVERFLOW, 75 },
+  { "EOVERFLOW", EOVERFLOW, 75 },
 #endif
 #ifdef ENOTUNIQ
-  { ENOTUNIQ, 76 },
+  { "ENOTUNIQ", ENOTUNIQ, 76 },
 #endif
 #ifdef EBADFD
-  { EBADFD, 77 },
+  { "EBADFD", EBADFD, 77 },
 #endif
 #ifdef EREMCHG
-  { EREMCHG, 78 },
+  { "EREMCHG", EREMCHG, 78 },
 #endif
 #ifdef ELIBACC
-  { ELIBACC, 79 },
+  { "ELIBACC", ELIBACC, 79 },
 #endif
 #ifdef ELIBBAD
-  { ELIBBAD, 80 },
+  { "ELIBBAD", ELIBBAD, 80 },
 #endif
 #ifdef ELIBSCN
-  { ELIBSCN, 81 },
+  { "ELIBSCN", ELIBSCN, 81 },
 #endif
 #ifdef ELIBMAX
-  { ELIBMAX, 82 },
+  { "ELIBMAX", ELIBMAX, 82 },
 #endif
 #ifdef ELIBEXEC
-  { ELIBEXEC, 83 },
+  { "ELIBEXEC", ELIBEXEC, 83 },
 #endif
 #ifdef EILSEQ
-  { EILSEQ, 84 },
+  { "EILSEQ", EILSEQ, 84 },
 #endif
 #ifdef ERESTART
-  { ERESTART, 85 },
+  { "ERESTART", ERESTART, 85 },
 #endif
 #ifdef ESTRPIPE
-  { ESTRPIPE, 86 },
+  { "ESTRPIPE", ESTRPIPE, 86 },
 #endif
 #ifdef EUSERS
-  { EUSERS, 87 },
+  { "EUSERS", EUSERS, 87 },
 #endif
 #ifdef ENOTSOCK
-  { ENOTSOCK, 88 },
+  { "ENOTSOCK", ENOTSOCK, 88 },
 #endif
 #ifdef EDESTADDRREQ
-  { EDESTADDRREQ, 89 },
+  { "EDESTADDRREQ", EDESTADDRREQ, 89 },
 #endif
 #ifdef EMSGSIZE
-  { EMSGSIZE, 90 },
+  { "EMSGSIZE", EMSGSIZE, 90 },
 #endif
 #ifdef EPROTOTYPE
-  { EPROTOTYPE, 91 },
+  { "EPROTOTYPE", EPROTOTYPE, 91 },
 #endif
 #ifdef ENOPROTOOPT
-  { ENOPROTOOPT, 92 },
+  { "ENOPROTOOPT", ENOPROTOOPT, 92 },
 #endif
 #ifdef EPROTONOSUPPORT
-  { EPROTONOSUPPORT, 93 },
+  { "EPROTONOSUPPORT", EPROTONOSUPPORT, 93 },
 #endif
 #ifdef ESOCKTNOSUPPORT
-  { ESOCKTNOSUPPORT, 94 },
+  { "ESOCKTNOSUPPORT", ESOCKTNOSUPPORT, 94 },
 #endif
 #ifdef EOPNOTSUPP
-  { EOPNOTSUPP, 95 },
+  { "EOPNOTSUPP", EOPNOTSUPP, 95 },
 #endif
 #ifdef EPFNOSUPPORT
-  { EPFNOSUPPORT, 96 },
+  { "EPFNOSUPPORT", EPFNOSUPPORT, 96 },
 #endif
 #ifdef EAFNOSUPPORT
-  { EAFNOSUPPORT, 97 },
+  { "EAFNOSUPPORT", EAFNOSUPPORT, 97 },
 #endif
 #ifdef EADDRINUSE
-  { EADDRINUSE, 98 },
+  { "EADDRINUSE", EADDRINUSE, 98 },
 #endif
 #ifdef EADDRNOTAVAIL
-  { EADDRNOTAVAIL, 99 },
+  { "EADDRNOTAVAIL", EADDRNOTAVAIL, 99 },
 #endif
 #ifdef ENETDOWN
-  { ENETDOWN, 100 },
+  { "ENETDOWN", ENETDOWN, 100 },
 #endif
 #ifdef ENETUNREACH
-  { ENETUNREACH, 101 },
+  { "ENETUNREACH", ENETUNREACH, 101 },
 #endif
 #ifdef ENETRESET
-  { ENETRESET, 102 },
+  { "ENETRESET", ENETRESET, 102 },
 #endif
 #ifdef ECONNABORTED
-  { ECONNABORTED, 103 },
+  { "ECONNABORTED", ECONNABORTED, 103 },
 #endif
 #ifdef ECONNRESET
-  { ECONNRESET, 104 },
+  { "ECONNRESET", ECONNRESET, 104 },
 #endif
 #ifdef ENOBUFS
-  { ENOBUFS, 105 },
+  { "ENOBUFS", ENOBUFS, 105 },
 #endif
 #ifdef EISCONN
-  { EISCONN, 106 },
+  { "EISCONN", EISCONN, 106 },
 #endif
 #ifdef ENOTCONN
-  { ENOTCONN, 107 },
+  { "ENOTCONN", ENOTCONN, 107 },
 #endif
 #ifdef ESHUTDOWN
-  { ESHUTDOWN, 108 },
+  { "ESHUTDOWN", ESHUTDOWN, 108 },
 #endif
 #ifdef ETOOMANYREFS
-  { ETOOMANYREFS, 109 },
+  { "ETOOMANYREFS", ETOOMANYREFS, 109 },
 #endif
 #ifdef ETIMEDOUT
-  { ETIMEDOUT, 110 },
+  { "ETIMEDOUT", ETIMEDOUT, 110 },
 #endif
 #ifdef ECONNREFUSED
-  { ECONNREFUSED, 111 },
+  { "ECONNREFUSED", ECONNREFUSED, 111 },
 #endif
 #ifdef EHOSTDOWN
-  { EHOSTDOWN, 112 },
+  { "EHOSTDOWN", EHOSTDOWN, 112 },
 #endif
 #ifdef EHOSTUNREACH
-  { EHOSTUNREACH, 113 },
+  { "EHOSTUNREACH", EHOSTUNREACH, 113 },
 #endif
 #ifdef EALREADY
-  { EALREADY, 114 },
+  { "EALREADY", EALREADY, 114 },
 #endif
 #ifdef EINPROGRESS
-  { EINPROGRESS, 115 },
+  { "EINPROGRESS", EINPROGRESS, 115 },
 #endif
 #ifdef ESTALE
-  { ESTALE, 116 },
+  { "ESTALE", ESTALE, 116 },
 #endif
 #ifdef EUCLEAN
-  { EUCLEAN, 117 },
+  { "EUCLEAN", EUCLEAN, 117 },
 #endif
 #ifdef ENOTNAM
-  { ENOTNAM, 118 },
+  { "ENOTNAM", ENOTNAM, 118 },
 #endif
 #ifdef ENAVAIL
-  { ENAVAIL, 119 },
+  { "ENAVAIL", ENAVAIL, 119 },
 #endif
 #ifdef EISNAM
-  { EISNAM, 120 },
+  { "EISNAM", EISNAM, 120 },
 #endif
 #ifdef EREMOTEIO
-  { EREMOTEIO, 121 },
+  { "EREMOTEIO", EREMOTEIO, 121 },
 #endif
 #ifdef EDQUOT
-  { EDQUOT, 122 },
+  { "EDQUOT", EDQUOT, 122 },
 #endif
 #ifdef ENOMEDIUM
-  { ENOMEDIUM, 123 },
+  { "ENOMEDIUM", ENOMEDIUM, 123 },
 #endif
 #ifdef EMEDIUMTYPE
-  { EMEDIUMTYPE, 124 },
+  { "EMEDIUMTYPE", EMEDIUMTYPE, 124 },
 #endif
-  { 0, -1 }
+  { 0, 0, 0 }
 };
 
 /* Extracted by applying
@@ -702,57 +704,57 @@ static const CB_TARGET_DEFS_MAP errno_map[] =
 
 static const CB_TARGET_DEFS_MAP open_map[] = {
 #ifdef O_ACCMODE
-  { O_ACCMODE, TARGET_O_ACCMODE },
+  { "O_ACCMODE", O_ACCMODE, TARGET_O_ACCMODE },
 #endif
 #ifdef O_RDONLY
-  { O_RDONLY, TARGET_O_RDONLY },
+  { "O_RDONLY", O_RDONLY, TARGET_O_RDONLY },
 #endif
 #ifdef O_WRONLY
-  { O_WRONLY, TARGET_O_WRONLY },
+  { "O_WRONLY", O_WRONLY, TARGET_O_WRONLY },
 #endif
 #ifdef O_RDWR
-  { O_RDWR, 0x2 },
+  { "O_RDWR", O_RDWR, 0x2 },
 #endif
 #ifdef O_CREAT
-  { O_CREAT, 0x40 },
+  { "O_CREAT", O_CREAT, 0x40 },
 #endif
 #ifdef O_EXCL
-  { O_EXCL, 0x80 },
+  { "O_EXCL", O_EXCL, 0x80 },
 #endif
 #ifdef O_NOCTTY
-  { O_NOCTTY, 0x100 },
+  { "O_NOCTTY", O_NOCTTY, 0x100 },
 #endif
 #ifdef O_TRUNC
-  { O_TRUNC, 0x200 },
+  { "O_TRUNC", O_TRUNC, 0x200 },
 #endif
 #ifdef O_APPEND
-  { O_APPEND, 0x400 },
+  { "O_APPEND", O_APPEND, 0x400 },
 #endif
 #ifdef O_NONBLOCK
-  { O_NONBLOCK, 0x800 },
+  { "O_NONBLOCK", O_NONBLOCK, 0x800 },
 #endif
 #ifdef O_NDELAY
-  { O_NDELAY, 0x0 },
+  { "O_NDELAY", O_NDELAY, 0x0 },
 #endif
 #ifdef O_SYNC
-  { O_SYNC, 0x1000 },
+  { "O_SYNC", O_SYNC, 0x1000 },
 #endif
 #ifdef FASYNC
-  { FASYNC, 0x2000 },
+  { "FASYNC", FASYNC, 0x2000 },
 #endif
 #ifdef O_DIRECT
-  { O_DIRECT, 0x4000 },
+  { "O_DIRECT", O_DIRECT, 0x4000 },
 #endif
 #ifdef O_LARGEFILE
-  { O_LARGEFILE, 0x8000 },
+  { "O_LARGEFILE", O_LARGEFILE, 0x8000 },
 #endif
 #ifdef O_DIRECTORY
-  { O_DIRECTORY, 0x10000 },
+  { "O_DIRECTORY", O_DIRECTORY, 0x10000 },
 #endif
 #ifdef O_NOFOLLOW
-  { O_NOFOLLOW, 0x20000 },
+  { "O_NOFOLLOW", O_NOFOLLOW, 0x20000 },
 #endif
-  { -1, -1 }
+  { 0, -1, -1 }
 };
 
 /* Let's be less drastic and more traceable.  FIXME: mark as noreturn.  */
@@ -763,10 +765,6 @@ static const CB_TARGET_DEFS_MAP open_map[] = {
 /* Needed for the cris_pipe_nonempty and cris_pipe_empty syscalls.  */
 static SIM_CPU *current_cpu_for_cb_callback;
 
-static int syscall_read_mem (host_callback *, struct cb_syscall *,
-			     unsigned long, char *, int);
-static int syscall_write_mem (host_callback *, struct cb_syscall *,
-			      unsigned long, const char *, int);
 static USI create_map (SIM_DESC, struct cris_sim_mmapped_page **,
 		       USI addr, USI len);
 static USI unmap_pages (SIM_DESC, struct cris_sim_mmapped_page **,
@@ -775,30 +773,6 @@ static USI is_mapped (SIM_DESC, struct cris_sim_mmapped_page **,
 		       USI addr, USI len);
 static void dump_statistics (SIM_CPU *current_cpu);
 static void make_first_thread (SIM_CPU *current_cpu);
-
-/* Read/write functions for system call interface.  */
-
-static int
-syscall_read_mem (host_callback *cb ATTRIBUTE_UNUSED,
-		  struct cb_syscall *sc,
-		  unsigned long taddr, char *buf, int bytes)
-{
-  SIM_DESC sd = (SIM_DESC) sc->p1;
-  SIM_CPU *cpu = (SIM_CPU *) sc->p2;
-
-  return sim_core_read_buffer (sd, cpu, read_map, buf, taddr, bytes);
-}
-
-static int
-syscall_write_mem (host_callback *cb ATTRIBUTE_UNUSED,
-		   struct cb_syscall *sc,
-		   unsigned long taddr, const char *buf, int bytes)
-{
-  SIM_DESC sd = (SIM_DESC) sc->p1;
-  SIM_CPU *cpu = (SIM_CPU *) sc->p2;
-
-  return sim_core_write_buffer (sd, cpu, write_map, buf, taddr, bytes);
-}
 
 /* When we risk running self-modified code (as in trampolines), this is
    called from special-case insns.  The silicon CRIS CPU:s have enough
@@ -825,8 +799,11 @@ dump_statistics (SIM_CPU *current_cpu)
   SIM_DESC sd = CPU_STATE (current_cpu);
   CRIS_MISC_PROFILE *profp
     = CPU_CRIS_MISC_PROFILE (current_cpu);
-  unsigned64 total = profp->basic_cycle_count;
-  const char *textmsg = "Basic clock cycles, total @: %llu\n";
+  uint64_t total = profp->basic_cycle_count;
+
+  /* Historically, these messages have gone to stderr, so we'll keep it
+     that way.  It's also easier to then tell it from normal program
+     output.  FIXME: Add redirect option like "run -e file".  */
 
   /* The --cris-stats={basic|unaligned|schedulable|all} counts affect
      what's included in the "total" count only.  */
@@ -834,16 +811,18 @@ dump_statistics (SIM_CPU *current_cpu)
 	  & FLAG_CRIS_MISC_PROFILE_ALL)
     {
     case FLAG_CRIS_MISC_PROFILE_SIMPLE:
+      sim_io_eprintf (sd, "Basic clock cycles, total @: %" PRIu64 "\n", total);
       break;
 
     case (FLAG_CRIS_MISC_PROFILE_UNALIGNED | FLAG_CRIS_MISC_PROFILE_SIMPLE):
-      textmsg
-	= "Clock cycles including stall cycles for unaligned accesses @: %llu\n";
       total += profp->unaligned_mem_dword_count;
+      sim_io_eprintf (sd,
+		      "Clock cycles including stall cycles for unaligned "
+		      "accesses @: %" PRIu64 "\n",
+		      total);
       break;
 
     case (FLAG_CRIS_MISC_PROFILE_SCHEDULABLE | FLAG_CRIS_MISC_PROFILE_SIMPLE):
-      textmsg = "Schedulable clock cycles, total @: %llu\n";
       total
 	+= (profp->memsrc_stall_count
 	    + profp->memraw_stall_count
@@ -852,10 +831,11 @@ dump_statistics (SIM_CPU *current_cpu)
 	    + profp->mulsrc_stall_count
 	    + profp->jumpsrc_stall_count
 	    + profp->unaligned_mem_dword_count);
+      sim_io_eprintf (sd, "Schedulable clock cycles, total @: %" PRIu64 "\n",
+		      total);
       break;
 
     case FLAG_CRIS_MISC_PROFILE_ALL:
-      textmsg = "All accounted clock cycles, total @: %llu\n";
       total
 	+= (profp->memsrc_stall_count
 	    + profp->memraw_stall_count
@@ -867,44 +847,36 @@ dump_statistics (SIM_CPU *current_cpu)
 	    + profp->branch_stall_count
 	    + profp->jumptarget_stall_count
 	    + profp->unaligned_mem_dword_count);
+      sim_io_eprintf (sd, "All accounted clock cycles, total @: %" PRIu64 "\n",
+		      total);
       break;
 
     default:
-      abort ();
-
-      sim_io_eprintf (sd,
-		      "Internal inconsistency at %s:%d",
-		      __FILE__, __LINE__);
-      sim_engine_halt (sd, current_cpu, NULL, 0,
-		       sim_stopped, SIM_SIGILL);
+      sim_engine_abort (sd, current_cpu, 0,
+			"Internal inconsistency at %s:%d",
+			__FILE__, __LINE__);
     }
-
-  /* Historically, these messages have gone to stderr, so we'll keep it
-     that way.  It's also easier to then tell it from normal program
-     output.  FIXME: Add redirect option like "run -e file".  */
-  sim_io_eprintf (sd, textmsg, total);
 
   /* For v32, unaligned_mem_dword_count should always be 0.  For
      v10, memsrc_stall_count should always be 0.  */
-  sim_io_eprintf (sd, "Memory source stall cycles: %llu\n",
-		  (unsigned long long) (profp->memsrc_stall_count
-					+ profp->unaligned_mem_dword_count));
-  sim_io_eprintf (sd, "Memory read-after-write stall cycles: %llu\n",
-		  (unsigned long long) profp->memraw_stall_count);
-  sim_io_eprintf (sd, "Movem source stall cycles: %llu\n",
-		  (unsigned long long) profp->movemsrc_stall_count);
-  sim_io_eprintf (sd, "Movem destination stall cycles: %llu\n",
-		  (unsigned long long) profp->movemdst_stall_count);
-  sim_io_eprintf (sd, "Movem address stall cycles: %llu\n",
-		  (unsigned long long) profp->movemaddr_stall_count);
-  sim_io_eprintf (sd, "Multiplication source stall cycles: %llu\n",
-		  (unsigned long long) profp->mulsrc_stall_count);
-  sim_io_eprintf (sd, "Jump source stall cycles: %llu\n",
-		  (unsigned long long) profp->jumpsrc_stall_count);
-  sim_io_eprintf (sd, "Branch misprediction stall cycles: %llu\n",
-		  (unsigned long long) profp->branch_stall_count);
-  sim_io_eprintf (sd, "Jump target stall cycles: %llu\n",
-		  (unsigned long long) profp->jumptarget_stall_count);
+  sim_io_eprintf (sd, "Memory source stall cycles: %" PRIu64 "\n",
+		  profp->memsrc_stall_count + profp->unaligned_mem_dword_count);
+  sim_io_eprintf (sd, "Memory read-after-write stall cycles: %" PRIu64 "\n",
+		  profp->memraw_stall_count);
+  sim_io_eprintf (sd, "Movem source stall cycles: %" PRIu64 "\n",
+		  profp->movemsrc_stall_count);
+  sim_io_eprintf (sd, "Movem destination stall cycles: %" PRIu64 "\n",
+		  profp->movemdst_stall_count);
+  sim_io_eprintf (sd, "Movem address stall cycles: %" PRIu64 "\n",
+		  profp->movemaddr_stall_count);
+  sim_io_eprintf (sd, "Multiplication source stall cycles: %" PRIu64 "\n",
+		  profp->mulsrc_stall_count);
+  sim_io_eprintf (sd, "Jump source stall cycles: %" PRIu64 "\n",
+		  profp->jumpsrc_stall_count);
+  sim_io_eprintf (sd, "Branch misprediction stall cycles: %" PRIu64 "\n",
+		  profp->branch_stall_count);
+  sim_io_eprintf (sd, "Jump target stall cycles: %" PRIu64 "\n",
+		  profp->jumptarget_stall_count);
 }
 
 /* Check whether any part of [addr .. addr + len - 1] is already mapped.
@@ -953,15 +925,18 @@ is_mapped_only (SIM_DESC sd ATTRIBUTE_UNUSED,
   return 0;
 }
 
-/* Debug helper; to be run from gdb.  */
+/* Provide a prototype to silence -Wmissing-prototypes.  */
+void cris_dump_map (SIM_CPU *current_cpu);
 
+/* Debug helper; to be run from gdb.  */
 void
 cris_dump_map (SIM_CPU *current_cpu)
 {
+  struct cris_sim_cpu *cris_cpu = CRIS_SIM_CPU (current_cpu);
   struct cris_sim_mmapped_page *mapp;
   USI start, end;
 
-  for (mapp = current_cpu->highest_mmapped_page,
+  for (mapp = cris_cpu->highest_mmapped_page,
 	 start = mapp == NULL ? 0 : mapp->addr + 8192,
 	 end = mapp == NULL ? 0 : mapp->addr + 8191;
        mapp != NULL;
@@ -976,7 +951,7 @@ cris_dump_map (SIM_CPU *current_cpu)
       start = mapp->addr;
     }
 
-  if (current_cpu->highest_mmapped_page != NULL)
+  if (cris_cpu->highest_mmapped_page != NULL)
     sim_io_eprintf (CPU_STATE (current_cpu), "0x%x..0x%x\n", start, end);
 }
 
@@ -1094,41 +1069,13 @@ sim_engine_invalid_insn (SIM_CPU *current_cpu, IADDR cia, SEM_PC vpc)
   return vpc;
 }
 
-/* Handlers from the CGEN description that should not be called.  */
-
-USI
-cris_bmod_handler (SIM_CPU *current_cpu ATTRIBUTE_UNUSED,
-		   UINT srcreg ATTRIBUTE_UNUSED,
-		   USI dstreg ATTRIBUTE_UNUSED)
-{
-  SIM_DESC sd = CPU_STATE (current_cpu);
-  abort ();
-}
-
-void
-h_supr_set_handler (SIM_CPU *current_cpu ATTRIBUTE_UNUSED,
-		    UINT index ATTRIBUTE_UNUSED,
-		    USI page ATTRIBUTE_UNUSED,
-		    USI newval ATTRIBUTE_UNUSED)
-{
-  SIM_DESC sd = CPU_STATE (current_cpu);
-  abort ();
-}
-
-USI
-h_supr_get_handler (SIM_CPU *current_cpu ATTRIBUTE_UNUSED,
-		    UINT index ATTRIBUTE_UNUSED,
-		    USI page ATTRIBUTE_UNUSED)
-{
-  SIM_DESC sd = CPU_STATE (current_cpu);
-  abort ();
-}
-
 /* Swap one context for another.  */
 
 static void
 schedule (SIM_CPU *current_cpu, int next)
 {
+  struct cris_sim_cpu *cris_cpu = CRIS_SIM_CPU (current_cpu);
+
   /* Need to mark context-switches in the trace output.  */
   if ((CPU_CRIS_MISC_PROFILE (current_cpu)->flags
        & FLAG_CRIS_MISC_PROFILE_XSIM_TRACE))
@@ -1136,34 +1083,34 @@ schedule (SIM_CPU *current_cpu, int next)
 		       "\t#:%d\n", next);
 
   /* Copy the current context (if there is one) to its slot.  */
-  if (current_cpu->thread_data[current_cpu->threadno].cpu_context)
-    memcpy (current_cpu->thread_data[current_cpu->threadno].cpu_context,
-	    &current_cpu->cpu_data_placeholder,
-	    current_cpu->thread_cpu_data_size);
+  if (cris_cpu->thread_data[cris_cpu->threadno].cpu_context)
+    memcpy (cris_cpu->thread_data[cris_cpu->threadno].cpu_context,
+	    &cris_cpu->cpu_data_placeholder,
+	    cris_cpu->thread_cpu_data_size);
 
   /* Copy the new context from its slot.  */
-  memcpy (&current_cpu->cpu_data_placeholder,
-	  current_cpu->thread_data[next].cpu_context,
-	  current_cpu->thread_cpu_data_size);
+  memcpy (&cris_cpu->cpu_data_placeholder,
+	  cris_cpu->thread_data[next].cpu_context,
+	  cris_cpu->thread_cpu_data_size);
 
   /* Update needed stuff to indicate the new context.  */
-  current_cpu->threadno = next;
+  cris_cpu->threadno = next;
 
   /* Handle pending signals.  */
-  if (current_cpu->thread_data[next].sigpending
+  if (cris_cpu->thread_data[next].sigpending
       /* We don't run nested signal handlers.  This means that pause(2)
 	 and sigsuspend(2) do not work in sighandlers, but that
 	 shouldn't be too hard a restriction.  It also greatly
 	 simplifies the code.  */
-      && current_cpu->thread_data[next].cpu_context_atsignal == NULL)
+      && cris_cpu->thread_data[next].cpu_context_atsignal == NULL)
   {
     int sig;
 
     /* See if there's really a pending, non-blocked handler.  We don't
        queue signals, so just use the first one in ascending order.  */
     for (sig = 0; sig < 64; sig++)
-      if (current_cpu->thread_data[next].sigdata[sig].pending
-	  && !current_cpu->thread_data[next].sigdata[sig].blocked)
+      if (cris_cpu->thread_data[next].sigdata[sig].pending
+	  && !cris_cpu->thread_data[next].sigdata[sig].blocked)
       {
 	bfd_byte regbuf[4];
 	USI sp;
@@ -1173,11 +1120,10 @@ schedule (SIM_CPU *current_cpu, int next)
 
 	/* It's simpler to save the CPU context inside the simulator
 	   than on the stack.  */
-	current_cpu->thread_data[next].cpu_context_atsignal
-	  = (*current_cpu
-	     ->make_thread_cpu_data) (current_cpu,
-				      current_cpu->thread_data[next]
-				      .cpu_context);
+	cris_cpu->thread_data[next].cpu_context_atsignal
+	  = (*cris_cpu->make_thread_cpu_data) (current_cpu,
+					       cris_cpu->thread_data[next]
+					       .cpu_context);
 
 	(*CPU_REG_FETCH (current_cpu)) (current_cpu, H_GR_SP, regbuf, 4);
 	sp = bfd_getl32 (regbuf);
@@ -1198,12 +1144,12 @@ schedule (SIM_CPU *current_cpu, int next)
 	blocked = 0;
 	for (i = 0; i < 32; i++)
 	  blocked
-	    |= current_cpu->thread_data[next].sigdata[i + 1].blocked << i;
+	    |= cris_cpu->thread_data[next].sigdata[i + 1].blocked << i;
 	sim_core_write_aligned_4 (current_cpu, pc, 0, sp, blocked);
 	blocked = 0;
 	for (i = 0; i < 31; i++)
 	  blocked
-	    |= current_cpu->thread_data[next].sigdata[i + 33].blocked << i;
+	    |= cris_cpu->thread_data[next].sigdata[i + 33].blocked << i;
 	sim_core_write_aligned_4 (current_cpu, pc, 0, sp + 4, blocked);
 
 	/* Then, the actual instructions.  This is CPU-specific, but we
@@ -1232,12 +1178,12 @@ schedule (SIM_CPU *current_cpu, int next)
 	(*CPU_REG_STORE (current_cpu)) (current_cpu, TARGET_SRP_REGNUM,
 					regbuf, 4);
 
-	current_cpu->thread_data[next].sigdata[sig].pending = 0;
+	cris_cpu->thread_data[next].sigdata[sig].pending = 0;
 
 	/* Block this signal (for the duration of the sighandler).  */
-	current_cpu->thread_data[next].sigdata[sig].blocked = 1;
+	cris_cpu->thread_data[next].sigdata[sig].blocked = 1;
 
-	sim_pc_set (current_cpu, current_cpu->sighandler[sig]);
+	sim_pc_set (current_cpu, cris_cpu->sighandler[sig]);
 	bfd_putl32 (sig, regbuf);
 	(*CPU_REG_STORE (current_cpu)) (current_cpu, H_GR_R10,
 					regbuf, 4);
@@ -1263,7 +1209,7 @@ schedule (SIM_CPU *current_cpu, int next)
 
     /* No, there actually was no pending signal for this thread.  Reset
        this flag.  */
-    current_cpu->thread_data[next].sigpending = 0;
+    cris_cpu->thread_data[next].sigpending = 0;
   }
 }
 
@@ -1278,25 +1224,26 @@ static void
 reschedule (SIM_CPU *current_cpu)
 {
   SIM_DESC sd = CPU_STATE (current_cpu);
+  struct cris_sim_cpu *cris_cpu = CRIS_SIM_CPU (current_cpu);
   int i;
 
   /* Iterate over all thread slots, because after a few thread creations
      and exits, we don't know where the live ones are.  */
-  for (i = (current_cpu->threadno + 1) % SIM_TARGET_MAX_THREADS;
-       i != current_cpu->threadno;
+  for (i = (cris_cpu->threadno + 1) % SIM_TARGET_MAX_THREADS;
+       i != cris_cpu->threadno;
        i = (i + 1) % SIM_TARGET_MAX_THREADS)
-    if (current_cpu->thread_data[i].cpu_context
-	&& current_cpu->thread_data[i].at_syscall == 0)
+    if (cris_cpu->thread_data[i].cpu_context
+	&& cris_cpu->thread_data[i].at_syscall == 0)
       {
 	schedule (current_cpu, i);
 	return;
       }
 
   /* Pick any next live thread.  */
-  for (i = (current_cpu->threadno + 1) % SIM_TARGET_MAX_THREADS;
-       i != current_cpu->threadno;
+  for (i = (cris_cpu->threadno + 1) % SIM_TARGET_MAX_THREADS;
+       i != cris_cpu->threadno;
        i = (i + 1) % SIM_TARGET_MAX_THREADS)
-    if (current_cpu->thread_data[i].cpu_context)
+    if (cris_cpu->thread_data[i].cpu_context)
       {
 	schedule (current_cpu, i);
 	return;
@@ -1312,18 +1259,18 @@ reschedule (SIM_CPU *current_cpu)
 static int
 deliver_signal (SIM_CPU *current_cpu, int sig, unsigned int pid)
 {
+  struct cris_sim_cpu *cris_cpu = CRIS_SIM_CPU (current_cpu);
   int i;
   USI pc = sim_pc_get (current_cpu);
 
   /* Find the thread index of the pid. */
   for (i = 0; i < SIM_TARGET_MAX_THREADS; i++)
     /* Apparently it's ok to send signals to zombies (so a check for
-       current_cpu->thread_data[i].cpu_context != NULL would be
-       wrong). */
-    if (current_cpu->thread_data[i].threadid == pid - TARGET_PID)
+       cris_cpu->thread_data[i].cpu_context != NULL would be wrong).  */
+    if (cris_cpu->thread_data[i].threadid == pid - TARGET_PID)
       {
 	if (sig < 64)
-	  switch (current_cpu->sighandler[sig])
+	  switch (cris_cpu->sighandler[sig])
 	    {
 	    case TARGET_SIG_DFL:
 	      switch (sig)
@@ -1392,8 +1339,8 @@ deliver_signal (SIM_CPU *current_cpu, int sig, unsigned int pid)
 	      /* Mark the signal as pending, making schedule () check
 		 closer.  The signal will be handled when the thread is
 		 scheduled and the signal is unblocked.  */
-	      current_cpu->thread_data[i].sigdata[sig].pending = 1;
-	      current_cpu->thread_data[i].sigpending = 1;
+	      cris_cpu->thread_data[i].sigdata[sig].pending = 1;
+	      cris_cpu->thread_data[i].sigpending = 1;
 	      return 0;
 	    }
 	else
@@ -1416,15 +1363,14 @@ static void
 make_first_thread (SIM_CPU *current_cpu)
 {
   SIM_DESC sd = CPU_STATE (current_cpu);
-  current_cpu->thread_data
-    = xcalloc (1,
-	       SIM_TARGET_MAX_THREADS
-	       * sizeof (current_cpu->thread_data[0]));
-  current_cpu->thread_data[0].cpu_context
-    = (*current_cpu->make_thread_cpu_data) (current_cpu,
-					    &current_cpu
-					    ->cpu_data_placeholder);
-  current_cpu->thread_data[0].parent_threadid = -1;
+  struct cris_sim_cpu *cris_cpu = CRIS_SIM_CPU (current_cpu);
+
+  cris_cpu->thread_data
+    = xcalloc (1, SIM_TARGET_MAX_THREADS * sizeof (cris_cpu->thread_data[0]));
+  cris_cpu->thread_data[0].cpu_context
+    = (*cris_cpu->make_thread_cpu_data) (current_cpu,
+					 &cris_cpu->cpu_data_placeholder);
+  cris_cpu->thread_data[0].parent_threadid = -1;
 
   /* For good measure.  */
   if (TARGET_SIG_DFL != 0)
@@ -1434,7 +1380,7 @@ make_first_thread (SIM_CPU *current_cpu)
 /* Handle unknown system calls.  Returns (if it does) the syscall
    return value.  */
 
-static USI
+static USI ATTRIBUTE_PRINTF (3, 4)
 cris_unknown_syscall (SIM_CPU *current_cpu, USI pc, char *s, ...)
 {
   SIM_DESC sd = CPU_STATE (current_cpu);
@@ -1465,11 +1411,12 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 {
   CB_SYSCALL s;
   SIM_DESC sd = CPU_STATE (current_cpu);
+  struct cris_sim_cpu *cris_cpu = CRIS_SIM_CPU (current_cpu);
   host_callback *cb = STATE_CALLBACK (sd);
   int retval;
-  int threadno = current_cpu->threadno;
+  int threadno = cris_cpu->threadno;
 
-  current_cpu->syscalls++;
+  cris_cpu->syscalls++;
 
   CB_SYSCALL_INIT (&s);
   s.func = callnum;
@@ -1486,7 +1433,7 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
     s.arg2 = (SI) arg2;
 
   if (callnum == TARGET_SYS_exit_group
-      || (callnum == TARGET_SYS_exit && current_cpu->m1threads == 0))
+      || (callnum == TARGET_SYS_exit && cris_cpu->m1threads == 0))
     {
       if (CPU_CRIS_MISC_PROFILE (current_cpu)->flags
 	  & FLAG_CRIS_MISC_PROFILE_ALL)
@@ -1494,19 +1441,18 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
       sim_engine_halt (sd, current_cpu, NULL, pc, sim_exited, arg1);
     }
 
-  s.p1 = (PTR) sd;
-  s.p2 = (PTR) current_cpu;
-  s.read_mem = syscall_read_mem;
-  s.write_mem = syscall_write_mem;
+  s.p1 = sd;
+  s.p2 = current_cpu;
+  s.read_mem = sim_syscall_read_mem;
+  s.write_mem = sim_syscall_write_mem;
 
   current_cpu_for_cb_callback = current_cpu;
 
   if (cb_syscall (cb, &s) != CB_RC_OK)
     {
-      abort ();
-      sim_io_eprintf (sd, "Break 13: invalid %d?  Returned %ld\n", callnum,
-		      s.result);
-      sim_engine_halt (sd, current_cpu, NULL, pc, sim_stopped, SIM_SIGILL);
+      sim_engine_abort (sd, current_cpu, pc,
+			"Break 13: invalid %d?  Returned %ld\n", callnum,
+			s.result);
     }
 
   retval = s.result == -1 ? -s.errcode : s.result;
@@ -1530,8 +1476,8 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 	     forever"; we re-run this insn.  The wait is ended by a
 	     callback.  Sanity check that this is the reason we got
 	     here. */
-	  if (current_cpu->thread_data == NULL
-	      || (current_cpu->thread_data[threadno].pipe_write_fd == 0))
+	  if (cris_cpu->thread_data == NULL
+	      || (cris_cpu->thread_data[threadno].pipe_write_fd == 0))
 	    goto unimplemented_syscall;
 
 	  sim_pc_set (current_cpu, pc);
@@ -1560,10 +1506,10 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 
 	    case 3:
 	      /* F_GETFL.  Check for the special case for open+fdopen.  */
-	      if (current_cpu->last_syscall == TARGET_SYS_open
-		  && arg1 == current_cpu->last_open_fd)
+	      if (cris_cpu->last_syscall == TARGET_SYS_open
+		  && arg1 == cris_cpu->last_open_fd)
 		{
-		  retval = current_cpu->last_open_flags & TARGET_O_ACCMODE;
+		  retval = cris_cpu->last_open_flags & TARGET_O_ACCMODE;
 		  break;
 		}
 	      else if (arg1 == 0)
@@ -1651,9 +1597,9 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 	  retval = arg1;
 
 	  if (arg1 == 0)
-	    retval = current_cpu->endbrk;
-	  else if (arg1 <= current_cpu->endmem)
-	    current_cpu->endbrk = arg1;
+	    retval = cris_cpu->endbrk;
+	  else if (arg1 <= cris_cpu->endmem)
+	    cris_cpu->endbrk = arg1;
 	  else
 	    {
 	      USI new_end = (arg1 + 8191) & ~8191;
@@ -1661,35 +1607,35 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 	      /* If the simulator wants to brk more than a certain very
 		 large amount, something is wrong.  FIXME: Return an error
 		 or abort?  Have command-line selectable?  */
-	      if (new_end - current_cpu->endmem > SIM_MAX_ALLOC_CHUNK)
+	      if (new_end - cris_cpu->endmem > SIM_MAX_ALLOC_CHUNK)
 		{
-		  current_cpu->endbrk = current_cpu->endmem;
-		  retval = current_cpu->endmem;
+		  cris_cpu->endbrk = cris_cpu->endmem;
+		  retval = cris_cpu->endmem;
 		  break;
 		}
 
 	      sim_core_attach (sd, NULL, 0, access_read_write_exec, 0,
-			       current_cpu->endmem,
-			       new_end - current_cpu->endmem,
+			       cris_cpu->endmem,
+			       new_end - cris_cpu->endmem,
 			       0, NULL, NULL);
-	      current_cpu->endbrk = arg1;
-	      current_cpu->endmem = new_end;
+	      cris_cpu->endbrk = arg1;
+	      cris_cpu->endmem = new_end;
 	    }
 	  break;
 
 	case TARGET_SYS_getpid:
 	  /* Correct until CLONE_THREAD is implemented.  */
-	  retval = current_cpu->thread_data == NULL
+	  retval = cris_cpu->thread_data == NULL
 	    ? TARGET_PID
-	    : TARGET_PID + current_cpu->thread_data[threadno].threadid;
+	    : TARGET_PID + cris_cpu->thread_data[threadno].threadid;
 	  break;
 
 	case TARGET_SYS_getppid:
 	  /* Correct until CLONE_THREAD is implemented.  */
-	  retval = current_cpu->thread_data == NULL
+	  retval = cris_cpu->thread_data == NULL
 	    ? TARGET_PID - 1
 	    : (TARGET_PID
-	       + current_cpu->thread_data[threadno].parent_threadid);
+	       + cris_cpu->thread_data[threadno].parent_threadid);
 	  break;
 
 	case TARGET_SYS_mmap2:
@@ -1767,14 +1713,14 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 		  abort ();
 
 		if (flags & TARGET_MAP_FIXED)
-		  unmap_pages (sd, &current_cpu->highest_mmapped_page,
+		  unmap_pages (sd, &cris_cpu->highest_mmapped_page,
 			       addr, newlen);
-		else if (is_mapped (sd, &current_cpu->highest_mmapped_page,
+		else if (is_mapped (sd, &cris_cpu->highest_mmapped_page,
 				    addr, newlen))
 		  addr = 0;
 
 		newaddr
-		  = create_map (sd, &current_cpu->highest_mmapped_page,
+		  = create_map (sd, &cris_cpu->highest_mmapped_page,
 				addr != 0 || (flags & TARGET_MAP_FIXED)
 				? addr : -1,
 				newlen);
@@ -1790,7 +1736,7 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 		if ((flags & TARGET_MAP_FIXED) && newaddr != addr)
 		  {
 		    abort ();
-		    unmap_pages (sd, &current_cpu->highest_mmapped_page,
+		    unmap_pages (sd, &cris_cpu->highest_mmapped_page,
 				 newaddr, newlen);
 		    retval = -cb_host_to_target_errno (cb, EINVAL);
 		    break;
@@ -1852,13 +1798,13 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 		USI newaddr;
 
 		if (flags & TARGET_MAP_FIXED)
-		  unmap_pages (sd, &current_cpu->highest_mmapped_page,
+		  unmap_pages (sd, &cris_cpu->highest_mmapped_page,
 			       addr, newlen);
-		else if (is_mapped (sd, &current_cpu->highest_mmapped_page,
+		else if (is_mapped (sd, &cris_cpu->highest_mmapped_page,
 				    addr, newlen))
 		  addr = 0;
 
-		newaddr = create_map (sd, &current_cpu->highest_mmapped_page,
+		newaddr = create_map (sd, &cris_cpu->highest_mmapped_page,
 				      addr != 0 || (flags & TARGET_MAP_FIXED)
 				      ? addr : -1,
 				      newlen);
@@ -1871,7 +1817,7 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 		if ((flags & TARGET_MAP_FIXED) && newaddr != addr)
 		  {
 		    abort ();
-		    unmap_pages (sd, &current_cpu->highest_mmapped_page,
+		    unmap_pages (sd, &cris_cpu->highest_mmapped_page,
 				 newaddr, newlen);
 		    retval = -cb_host_to_target_errno (cb, EINVAL);
 		    break;
@@ -1891,7 +1837,7 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 	    USI prot = arg3;
 
 	    if (prot != TARGET_PROT_NONE
-		|| !is_mapped_only (sd, &current_cpu->highest_mmapped_page,
+		|| !is_mapped_only (sd, &cris_cpu->highest_mmapped_page,
 				    addr, (len + 8191) & ~8191))
 	      {
 		retval
@@ -1933,7 +1879,7 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 	    USI addr = arg1;
 	    USI len = arg2;
 	    USI result
-	      = unmap_pages (sd, &current_cpu->highest_mmapped_page, addr,
+	      = unmap_pages (sd, &cris_cpu->highest_mmapped_page, addr,
 			     len);
 	    retval = result != 0 ? -cb_host_to_target_errno (cb, result) : 0;
 	    break;
@@ -1957,7 +1903,7 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 		      && (options == TARGET___WCLONE
 			  || options == TARGET___WALL)))
 		|| rusagep != 0
-		|| current_cpu->thread_data == NULL)
+		|| cris_cpu->thread_data == NULL)
 	      {
 		retval
 		  = cris_unknown_syscall (current_cpu, pc,
@@ -1973,20 +1919,20 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 	    if (pid == (USI) -1)
 	      for (i = 1; i < SIM_TARGET_MAX_THREADS; i++)
 		{
-		  if (current_cpu->thread_data[threadno].threadid
-		      == current_cpu->thread_data[i].parent_threadid
-		      && current_cpu->thread_data[i].threadid != 0
-		      && current_cpu->thread_data[i].cpu_context == NULL)
+		  if (cris_cpu->thread_data[threadno].threadid
+		      == cris_cpu->thread_data[i].parent_threadid
+		      && cris_cpu->thread_data[i].threadid != 0
+		      && cris_cpu->thread_data[i].cpu_context == NULL)
 		    {
 		      /* A zombied child.  Get the exit value and clear the
 			 zombied entry so it will be reused.  */
 		      sim_core_write_unaligned_4 (current_cpu, pc, 0, saddr,
-						  current_cpu
+						  cris_cpu
 						  ->thread_data[i].exitval);
 		      retval
-			= current_cpu->thread_data[i].threadid + TARGET_PID;
-		      memset (&current_cpu->thread_data[i], 0,
-			      sizeof (current_cpu->thread_data[i]));
+			= cris_cpu->thread_data[i].threadid + TARGET_PID;
+		      memset (&cris_cpu->thread_data[i], 0,
+			      sizeof (cris_cpu->thread_data[i]));
 		      goto outer_break;
 		    }
 		}
@@ -1995,21 +1941,20 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 		/* We're waiting for a specific PID.  If we don't find
 		   it zombied on this run, rerun the syscall.  */
 		for (i = 1; i < SIM_TARGET_MAX_THREADS; i++)
-		  if (pid == current_cpu->thread_data[i].threadid + TARGET_PID
-		      && current_cpu->thread_data[i].cpu_context == NULL)
+		  if (pid == cris_cpu->thread_data[i].threadid + TARGET_PID
+		      && cris_cpu->thread_data[i].cpu_context == NULL)
 		    {
 		      if (saddr != 0)
 			/* Get the exit value if the caller wants it.  */
 			sim_core_write_unaligned_4 (current_cpu, pc, 0,
 						    saddr,
-						    current_cpu
-						    ->thread_data[i]
-						    .exitval);
+						    cris_cpu
+						      ->thread_data[i].exitval);
 
 		      retval
-			= current_cpu->thread_data[i].threadid + TARGET_PID;
-		      memset (&current_cpu->thread_data[i], 0,
-			      sizeof (current_cpu->thread_data[i]));
+			= cris_cpu->thread_data[i].threadid + TARGET_PID;
+		      memset (&cris_cpu->thread_data[i], 0,
+			      sizeof (cris_cpu->thread_data[i]));
 
 		      goto outer_break;
 		    }
@@ -2039,7 +1984,7 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 	    if (old_sa != 0)
 	      {
 		sim_core_write_unaligned_4 (current_cpu, pc, 0, old_sa + 0,
-					    current_cpu->sighandler[signum]);
+					    cris_cpu->sighandler[signum]);
 		sim_core_write_unaligned_4 (current_cpu, pc, 0, arg3 + 4, 0);
 		sim_core_write_unaligned_4 (current_cpu, pc, 0, arg3 + 8, 0);
 
@@ -2090,12 +2035,12 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 		    break;
 		  }
 
-		current_cpu->sighandler[signum] = target_sa_handler;
+		cris_cpu->sighandler[signum] = target_sa_handler;
 
 		/* Because we may have unblocked signals, one may now be
 		   pending, if there are threads, that is.  */
-		if (current_cpu->thread_data)
-		  current_cpu->thread_data[threadno].sigpending = 1;
+		if (cris_cpu->thread_data)
+		  cris_cpu->thread_data[threadno].sigpending = 1;
 	      }
 	    retval = 0;
 	    break;
@@ -2118,18 +2063,18 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 	    else if (new_len < old_len)
 	      {
 		/* Shrinking is easy.  */
-		if (unmap_pages (sd, &current_cpu->highest_mmapped_page,
+		if (unmap_pages (sd, &cris_cpu->highest_mmapped_page,
 				 addr + new_len, old_len - new_len) != 0)
 		  retval = -cb_host_to_target_errno (cb, EINVAL);
 		else
 		  retval = addr;
 	      }
-	    else if (! is_mapped (sd, &current_cpu->highest_mmapped_page,
+	    else if (! is_mapped (sd, &cris_cpu->highest_mmapped_page,
 				  addr + old_len, new_len - old_len))
 	      {
 		/* If the extension isn't mapped, we can just add it.  */
 		mapped_addr
-		  = create_map (sd, &current_cpu->highest_mmapped_page,
+		  = create_map (sd, &cris_cpu->highest_mmapped_page,
 				addr + old_len, new_len - old_len);
 
 		if (mapped_addr > (USI) -8192)
@@ -2147,7 +2092,7 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 		USI prev_len = old_len;
 
 		mapped_addr
-		  = create_map (sd, &current_cpu->highest_mmapped_page,
+		  = create_map (sd, &cris_cpu->highest_mmapped_page,
 				-1, new_len);
 
 		if (mapped_addr > (USI) -8192)
@@ -2168,7 +2113,7 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 		      abort ();
 		  }
 
-		if (unmap_pages (sd, &current_cpu->highest_mmapped_page,
+		if (unmap_pages (sd, &cris_cpu->highest_mmapped_page,
 				 prev_addr, prev_len) != 0)
 		  abort ();
 	      }
@@ -2204,9 +2149,9 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 		|| ((events = sim_core_read_unaligned_2 (current_cpu, pc,
 							 0, ufds + 4))
 		    != TARGET_POLLIN)
-		|| ((cb->fstat) (cb, fd, &buf) != 0
+		|| ((cb->to_fstat) (cb, fd, &buf) != 0
 		    || (buf.st_mode & S_IFIFO) == 0)
-		|| current_cpu->thread_data == NULL)
+		|| cris_cpu->thread_data == NULL)
 	      {
 		retval
 		  = cris_unknown_syscall (current_cpu, pc,
@@ -2224,8 +2169,8 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 	    /* Iterate over threads; find a marker that a writer is
 	       sleeping, waiting for a reader.  */
 	    for (i = 0; i < SIM_TARGET_MAX_THREADS; i++)
-	      if (current_cpu->thread_data[i].cpu_context != NULL
-		  && current_cpu->thread_data[i].pipe_read_fd == fd)
+	      if (cris_cpu->thread_data[i].cpu_context != NULL
+		  && cris_cpu->thread_data[i].pipe_read_fd == fd)
 		{
 		  revents = TARGET_POLLIN;
 		  retval = 1;
@@ -2239,7 +2184,7 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 	       case.  */
 	    timeout
 	      -= (TARGET_TIME_MS (current_cpu)
-		  - (current_cpu->thread_data[threadno].last_execution));
+		  - (cris_cpu->thread_data[threadno].last_execution));
 
 	    /* Arrange to repeat this syscall until timeout or event,
                decreasing timeout at each iteration.  */
@@ -2262,7 +2207,7 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 
 	case TARGET_SYS_time:
 	  {
-	    retval = (int) (*cb->time) (cb, 0L);
+	    retval = (int) (*cb->time) (cb);
 
 	    /* At time of this writing, CB_SYSCALL_time doesn't do the
 	       part of setting *arg1 to the return value.  */
@@ -2400,7 +2345,7 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 	    /* At kill(2), glibc sets signal masks such that the thread
 	       machinery is initialized.  Still, there is and was only
 	       one thread.  */
-	    if (current_cpu->max_threadid == 0)
+	    if (cris_cpu->max_threadid == 0)
 	      {
 		if (pid != TARGET_PID)
 		  {
@@ -2459,26 +2404,26 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 
 		/* The sigmask is kept in the per-thread data, so we may
 		   need to create the first one.  */
-		if (current_cpu->thread_data == NULL)
+		if (cris_cpu->thread_data == NULL)
 		  make_first_thread (current_cpu);
 
 		if (how == TARGET_SIG_SETMASK)
 		  for (i = 0; i < 64; i++)
-		    current_cpu->thread_data[threadno].sigdata[i].blocked = 0;
+		    cris_cpu->thread_data[threadno].sigdata[i].blocked = 0;
 
 		for (i = 0; i < 32; i++)
 		  if ((set_low & (1 << i)))
-		    current_cpu->thread_data[threadno].sigdata[i + 1].blocked
+		    cris_cpu->thread_data[threadno].sigdata[i + 1].blocked
 		      = (how != TARGET_SIG_UNBLOCK);
 
 		for (i = 0; i < 31; i++)
 		  if ((set_high & (1 << i)))
-		    current_cpu->thread_data[threadno].sigdata[i + 33].blocked
+		    cris_cpu->thread_data[threadno].sigdata[i + 33].blocked
 		      = (how != TARGET_SIG_UNBLOCK);
 
 		/* The mask changed, so a signal may be unblocked for
                    execution.  */
-		current_cpu->thread_data[threadno].sigpending = 1;
+		cris_cpu->thread_data[threadno].sigpending = 1;
 	      }
 
 	    if (oldsetp != 0)
@@ -2487,11 +2432,11 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 		USI set_high = 0;
 
 		for (i = 0; i < 32; i++)
-		  if (current_cpu->thread_data[threadno]
+		  if (cris_cpu->thread_data[threadno]
 		      .sigdata[i + 1].blocked)
 		    set_low |= 1 << i;
 		for (i = 0; i < 31; i++)
-		  if (current_cpu->thread_data[threadno]
+		  if (cris_cpu->thread_data[threadno]
 		      .sigdata[i + 33].blocked)
 		    set_high |= 1 << i;
 
@@ -2509,10 +2454,10 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 	    bfd_byte regbuf[4];
 	    int was_sigsuspended;
 
-	    if (current_cpu->thread_data == NULL
+	    if (cris_cpu->thread_data == NULL
 		/* The CPU context is saved with the simulator data, not
 		   on the stack as in the real world.  */
-		|| (current_cpu->thread_data[threadno].cpu_context_atsignal
+		|| (cris_cpu->thread_data[threadno].cpu_context_atsignal
 		    == NULL))
 	      {
 		retval
@@ -2531,17 +2476,17 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 	      }
 
 	    was_sigsuspended
-	      = current_cpu->thread_data[threadno].sigsuspended;
+	      = cris_cpu->thread_data[threadno].sigsuspended;
 
 	    /* Restore the sigmask, either from the stack copy made when
 	       the sighandler was called, or from the saved state
 	       specifically for sigsuspend(2).  */
 	    if (was_sigsuspended)
 	      {
-		current_cpu->thread_data[threadno].sigsuspended = 0;
+		cris_cpu->thread_data[threadno].sigsuspended = 0;
 		for (i = 0; i < 64; i++)
-		  current_cpu->thread_data[threadno].sigdata[i].blocked
-		    = current_cpu->thread_data[threadno]
+		  cris_cpu->thread_data[threadno].sigdata[i].blocked
+		    = cris_cpu->thread_data[threadno]
 		    .sigdata[i].blocked_suspendsave;
 	      }
 	    else
@@ -2559,22 +2504,22 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 		  = sim_core_read_unaligned_4 (current_cpu, pc, 0, sp + 4);
 
 		for (i = 0; i < 32; i++)
-		  current_cpu->thread_data[threadno].sigdata[i + 1].blocked
+		  cris_cpu->thread_data[threadno].sigdata[i + 1].blocked
 		    = (set_low & (1 << i)) != 0;
 		for (i = 0; i < 31; i++)
-		  current_cpu->thread_data[threadno].sigdata[i + 33].blocked
+		  cris_cpu->thread_data[threadno].sigdata[i + 33].blocked
 		    = (set_high & (1 << i)) != 0;
 	      }
 
 	    /* The mask changed, so a signal may be unblocked for
 	       execution.  */
-	    current_cpu->thread_data[threadno].sigpending = 1;
+	    cris_cpu->thread_data[threadno].sigpending = 1;
 
-	    memcpy (&current_cpu->cpu_data_placeholder,
-		    current_cpu->thread_data[threadno].cpu_context_atsignal,
-		    current_cpu->thread_cpu_data_size);
-	    free (current_cpu->thread_data[threadno].cpu_context_atsignal);
-	    current_cpu->thread_data[threadno].cpu_context_atsignal = NULL;
+	    memcpy (&cris_cpu->cpu_data_placeholder,
+		    cris_cpu->thread_data[threadno].cpu_context_atsignal,
+		    cris_cpu->thread_cpu_data_size);
+	    free (cris_cpu->thread_data[threadno].cpu_context_atsignal);
+	    cris_cpu->thread_data[threadno].cpu_context_atsignal = NULL;
 
 	    /* The return value must come from the saved R10.  */
 	    (*CPU_REG_FETCH (current_cpu)) (current_cpu, H_GR_R10, regbuf, 4);
@@ -2604,7 +2549,7 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 
 	    /* Don't change the signal mask if we're already in
 	       sigsuspend state (i.e. this syscall is a rerun).  */
-	    else if (!current_cpu->thread_data[threadno].sigsuspended)
+	    else if (!cris_cpu->thread_data[threadno].sigsuspended)
 	      {
 		USI set_low
 		  = sim_core_read_unaligned_4 (current_cpu, pc, 0,
@@ -2618,29 +2563,29 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
                    one.  */
 		for (i = 0; i < 32; i++)
 		  {
-		    current_cpu->thread_data[threadno]
+		    cris_cpu->thread_data[threadno]
 		      .sigdata[i + 1].blocked_suspendsave
-		      = current_cpu->thread_data[threadno]
+		      = cris_cpu->thread_data[threadno]
 		      .sigdata[i + 1].blocked;
 
-		    current_cpu->thread_data[threadno]
+		    cris_cpu->thread_data[threadno]
 		      .sigdata[i + 1].blocked = (set_low & (1 << i)) != 0;
 		  }
 		for (i = 0; i < 31; i++)
 		  {
-		    current_cpu->thread_data[threadno]
+		    cris_cpu->thread_data[threadno]
 		      .sigdata[i + 33].blocked_suspendsave
-		      = current_cpu->thread_data[threadno]
+		      = cris_cpu->thread_data[threadno]
 		      .sigdata[i + 33].blocked;
-		    current_cpu->thread_data[threadno]
+		    cris_cpu->thread_data[threadno]
 		      .sigdata[i + 33].blocked = (set_high & (1 << i)) != 0;
 		  }
 
-		current_cpu->thread_data[threadno].sigsuspended = 1;
+		cris_cpu->thread_data[threadno].sigsuspended = 1;
 
 		/* The mask changed, so a signal may be unblocked for
                    execution. */
-		current_cpu->thread_data[threadno].sigpending = 1;
+		cris_cpu->thread_data[threadno].sigpending = 1;
 	      }
 
 	    /* Because we don't use arg1 (newsetp) when this syscall is
@@ -2890,8 +2835,8 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 		/* FIXME: Save scheduler setting before threads are
 		   created too.  */
 		sim_core_write_unaligned_4 (current_cpu, pc, 0, paramp,
-					    current_cpu->thread_data != NULL
-					    ? (current_cpu
+					    cris_cpu->thread_data != NULL
+					    ? (cris_cpu
 					       ->thread_data[threadno]
 					       .priority)
 					    : 0);
@@ -3058,24 +3003,24 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 	    /* Here for all but the last thread.  */
 	    int i;
 	    int pid
-	      = current_cpu->thread_data[threadno].threadid + TARGET_PID;
+	      = cris_cpu->thread_data[threadno].threadid + TARGET_PID;
 	    int ppid
-	      = (current_cpu->thread_data[threadno].parent_threadid
+	      = (cris_cpu->thread_data[threadno].parent_threadid
 		 + TARGET_PID);
-	    int exitsig = current_cpu->thread_data[threadno].exitsig;
+	    int exitsig = cris_cpu->thread_data[threadno].exitsig;
 
 	    /* Any children are now all orphans.  */
 	    for (i = 0; i < SIM_TARGET_MAX_THREADS; i++)
-	      if (current_cpu->thread_data[i].parent_threadid
-		  == current_cpu->thread_data[threadno].threadid)
+	      if (cris_cpu->thread_data[i].parent_threadid
+		  == cris_cpu->thread_data[threadno].threadid)
 		/* Make getppid(2) return 1 for them, poor little ones.  */
-		current_cpu->thread_data[i].parent_threadid = -TARGET_PID + 1;
+		cris_cpu->thread_data[i].parent_threadid = -TARGET_PID + 1;
 
 	    /* Free the cpu context data.  When the parent has received
 	       the exit status, we'll clear the entry too.  */
-	    free (current_cpu->thread_data[threadno].cpu_context);
-	    current_cpu->thread_data[threadno].cpu_context = NULL;
-	    current_cpu->m1threads--;
+	    free (cris_cpu->thread_data[threadno].cpu_context);
+	    cris_cpu->thread_data[threadno].cpu_context = NULL;
+	    cris_cpu->m1threads--;
 	    if (arg1 != 0)
 	      {
 		sim_io_eprintf (sd, "Thread %d exited with status %d\n",
@@ -3085,7 +3030,7 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 	      }
 
 	    /* Still, we may want to support non-zero exit values.  */
-	    current_cpu->thread_data[threadno].exitval = arg1 << 8;
+	    cris_cpu->thread_data[threadno].exitval = arg1 << 8;
 
 	    if (exitsig)
 	      deliver_signal (current_cpu, exitsig, ppid);
@@ -3094,7 +3039,7 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 
 	case TARGET_SYS_clone:
 	  {
-	    int nthreads = current_cpu->m1threads + 1;
+	    int nthreads = cris_cpu->m1threads + 1;
 	    void *thread_cpu_data;
 	    bfd_byte old_sp_buf[4];
 	    bfd_byte sp_buf[4];
@@ -3131,7 +3076,7 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 		break;
 	      }
 
-	    if (current_cpu->thread_data == NULL)
+	    if (cris_cpu->thread_data == NULL)
 	      make_first_thread (current_cpu);
 
 	    /* The created thread will get the new SP and a cleared R10.
@@ -3148,39 +3093,39 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 	    (*CPU_REG_STORE (current_cpu)) (current_cpu,
 					    H_GR_R10, (bfd_byte *) zeros, 4);
 	    thread_cpu_data
-	      = (*current_cpu
+	      = (*cris_cpu
 		 ->make_thread_cpu_data) (current_cpu,
-					  &current_cpu->cpu_data_placeholder);
+					  &cris_cpu->cpu_data_placeholder);
 	    (*CPU_REG_STORE (current_cpu)) (current_cpu,
 					    H_GR_SP, old_sp_buf, 4);
 
-	    retval = ++current_cpu->max_threadid + TARGET_PID;
+	    retval = ++cris_cpu->max_threadid + TARGET_PID;
 
 	    /* Find an unused slot.  After a few threads have been created
 	       and exited, the array is expected to be a bit fragmented.
 	       We don't reuse the first entry, though, that of the
 	       original thread.  */
 	    for (i = 1; i < SIM_TARGET_MAX_THREADS; i++)
-	      if (current_cpu->thread_data[i].cpu_context == NULL
+	      if (cris_cpu->thread_data[i].cpu_context == NULL
 		  /* Don't reuse a zombied entry.  */
-		  && current_cpu->thread_data[i].threadid == 0)
+		  && cris_cpu->thread_data[i].threadid == 0)
 		break;
 
-	    memcpy (&current_cpu->thread_data[i],
-		    &current_cpu->thread_data[threadno],
-		    sizeof (current_cpu->thread_data[i]));
-	    current_cpu->thread_data[i].cpu_context = thread_cpu_data;
-	    current_cpu->thread_data[i].cpu_context_atsignal = NULL;
-	    current_cpu->thread_data[i].threadid = current_cpu->max_threadid;
-	    current_cpu->thread_data[i].parent_threadid
-	      = current_cpu->thread_data[threadno].threadid;
-	    current_cpu->thread_data[i].pipe_read_fd = 0;
-	    current_cpu->thread_data[i].pipe_write_fd = 0;
-	    current_cpu->thread_data[i].at_syscall = 0;
-	    current_cpu->thread_data[i].sigpending = 0;
-	    current_cpu->thread_data[i].sigsuspended = 0;
-	    current_cpu->thread_data[i].exitsig = flags & TARGET_CSIGNAL;
-	    current_cpu->m1threads = nthreads;
+	    memcpy (&cris_cpu->thread_data[i],
+		    &cris_cpu->thread_data[threadno],
+		    sizeof (cris_cpu->thread_data[i]));
+	    cris_cpu->thread_data[i].cpu_context = thread_cpu_data;
+	    cris_cpu->thread_data[i].cpu_context_atsignal = NULL;
+	    cris_cpu->thread_data[i].threadid = cris_cpu->max_threadid;
+	    cris_cpu->thread_data[i].parent_threadid
+	      = cris_cpu->thread_data[threadno].threadid;
+	    cris_cpu->thread_data[i].pipe_read_fd = 0;
+	    cris_cpu->thread_data[i].pipe_write_fd = 0;
+	    cris_cpu->thread_data[i].at_syscall = 0;
+	    cris_cpu->thread_data[i].sigpending = 0;
+	    cris_cpu->thread_data[i].sigsuspended = 0;
+	    cris_cpu->thread_data[i].exitsig = flags & TARGET_CSIGNAL;
+	    cris_cpu->m1threads = nthreads;
 	    break;
 	  }
 
@@ -3196,7 +3141,7 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
 	      retval = -cb_host_to_target_errno (cb, EINVAL);
 	      break;
 	    }
-	  (*current_cpu->set_target_thread_data) (current_cpu, arg1);
+	  (*cris_cpu->set_target_thread_data) (current_cpu, arg1);
 	  retval = 0;
 	  break;
 
@@ -3214,28 +3159,28 @@ cris_break_13_handler (SIM_CPU *current_cpu, USI callnum, USI arg1,
   /* Minimal support for fcntl F_GETFL as used in open+fdopen.  */
   if (callnum == TARGET_SYS_open)
     {
-      current_cpu->last_open_fd = retval;
-      current_cpu->last_open_flags = arg2;
+      cris_cpu->last_open_fd = retval;
+      cris_cpu->last_open_flags = arg2;
     }
 
-  current_cpu->last_syscall = callnum;
+  cris_cpu->last_syscall = callnum;
 
   /* A system call is a rescheduling point.  For the time being, we don't
      reschedule anywhere else.  */
-  if (current_cpu->m1threads != 0
+  if (cris_cpu->m1threads != 0
       /* We need to schedule off from an exiting thread that is the
 	 second-last one.  */
-      || (current_cpu->thread_data != NULL
-	  && current_cpu->thread_data[threadno].cpu_context == NULL))
+      || (cris_cpu->thread_data != NULL
+	  && cris_cpu->thread_data[threadno].cpu_context == NULL))
     {
       bfd_byte retval_buf[4];
 
-      current_cpu->thread_data[threadno].last_execution
+      cris_cpu->thread_data[threadno].last_execution
 	= TARGET_TIME_MS (current_cpu);
       bfd_putl32 (retval, retval_buf);
       (*CPU_REG_STORE (current_cpu)) (current_cpu, H_GR_R10, retval_buf, 4);
 
-      current_cpu->thread_data[threadno].at_syscall = 1;
+      cris_cpu->thread_data[threadno].at_syscall = 1;
       reschedule (current_cpu);
 
       (*CPU_REG_FETCH (current_cpu)) (current_cpu, H_GR_R10, retval_buf, 4);
@@ -3255,6 +3200,7 @@ cris_pipe_nonempty (host_callback *cb ATTRIBUTE_UNUSED,
 		    int reader, int writer)
 {
   SIM_CPU *cpu = current_cpu_for_cb_callback;
+  struct cris_sim_cpu *cris_cpu = CRIS_SIM_CPU (cpu);
   const bfd_byte zeros[4] = { 0, 0, 0, 0 };
 
   /* It's the current thread: we just have to re-run the current
@@ -3266,7 +3212,7 @@ cris_pipe_nonempty (host_callback *cb ATTRIBUTE_UNUSED,
      This function may be called multiple times between cris_pipe_empty,
      but we must avoid e.g. decreasing PC every time.  Check fd markers
      to tell.  */
-  if (cpu->thread_data == NULL)
+  if (cris_cpu->thread_data == NULL)
     {
       sim_io_eprintf (CPU_STATE (cpu),
 		      "Terminating simulation due to writing pipe rd:wr %d:%d"
@@ -3274,10 +3220,10 @@ cris_pipe_nonempty (host_callback *cb ATTRIBUTE_UNUSED,
       sim_engine_halt (CPU_STATE (cpu), cpu,
 		       NULL, sim_pc_get (cpu), sim_stopped, SIM_SIGILL);
     }
-  else if (cpu->thread_data[cpu->threadno].pipe_write_fd == 0)
+  else if (cris_cpu->thread_data[cris_cpu->threadno].pipe_write_fd == 0)
     {
-      cpu->thread_data[cpu->threadno].pipe_write_fd = writer;
-      cpu->thread_data[cpu->threadno].pipe_read_fd = reader;
+      cris_cpu->thread_data[cris_cpu->threadno].pipe_write_fd = writer;
+      cris_cpu->thread_data[cris_cpu->threadno].pipe_read_fd = reader;
       /* FIXME: We really shouldn't change registers other than R10 in
 	 syscalls (like R9), here or elsewhere.  */
       (*CPU_REG_STORE (cpu)) (cpu, H_GR_R9, (bfd_byte *) zeros, 4);
@@ -3297,6 +3243,7 @@ cris_pipe_empty (host_callback *cb,
 {
   int i;
   SIM_CPU *cpu = current_cpu_for_cb_callback;
+  struct cris_sim_cpu *cris_cpu = CRIS_SIM_CPU (cpu);
   SIM_DESC sd = CPU_STATE (current_cpu_for_cb_callback);
   bfd_byte r10_buf[4];
   int remaining
@@ -3304,20 +3251,20 @@ cris_pipe_empty (host_callback *cb,
 
   /* We need to find the thread that waits for this pipe.  */
   for (i = 0; i < SIM_TARGET_MAX_THREADS; i++)
-    if (cpu->thread_data[i].cpu_context
-	&& cpu->thread_data[i].pipe_write_fd == writer)
+    if (cris_cpu->thread_data[i].cpu_context
+	&& cris_cpu->thread_data[i].pipe_write_fd == writer)
       {
 	int retval;
 
 	/* Temporarily switch to this cpu context, so we can change the
 	   PC by ordinary calls.  */
 
-	memcpy (cpu->thread_data[cpu->threadno].cpu_context,
-		&cpu->cpu_data_placeholder,
-		cpu->thread_cpu_data_size);
-	memcpy (&cpu->cpu_data_placeholder,
-		cpu->thread_data[i].cpu_context,
-		cpu->thread_cpu_data_size);
+	memcpy (cris_cpu->thread_data[cris_cpu->threadno].cpu_context,
+		&cris_cpu->cpu_data_placeholder,
+		cris_cpu->thread_cpu_data_size);
+	memcpy (&cris_cpu->cpu_data_placeholder,
+		cris_cpu->thread_data[i].cpu_context,
+		cris_cpu->thread_cpu_data_size);
 
 	/* The return value is supposed to contain the number of
 	   written bytes, which is the number of bytes requested and
@@ -3339,14 +3286,14 @@ cris_pipe_empty (host_callback *cb,
 	    (*CPU_REG_STORE (cpu)) (cpu, H_GR_R10, r10_buf, 4);
 	  }
 	sim_pc_set (cpu, sim_pc_get (cpu) + 2);
-	memcpy (cpu->thread_data[i].cpu_context,
-		&cpu->cpu_data_placeholder,
-		cpu->thread_cpu_data_size);
-	memcpy (&cpu->cpu_data_placeholder,
-		cpu->thread_data[cpu->threadno].cpu_context,
-		cpu->thread_cpu_data_size);
-	cpu->thread_data[i].pipe_read_fd = 0;
-	cpu->thread_data[i].pipe_write_fd = 0;
+	memcpy (cris_cpu->thread_data[i].cpu_context,
+		&cris_cpu->cpu_data_placeholder,
+		cris_cpu->thread_cpu_data_size);
+	memcpy (&cris_cpu->cpu_data_placeholder,
+		cris_cpu->thread_data[cris_cpu->threadno].cpu_context,
+		cris_cpu->thread_cpu_data_size);
+	cris_cpu->thread_data[i].pipe_read_fd = 0;
+	cris_cpu->thread_data[i].pipe_write_fd = 0;
 	return;
       }
 
@@ -3355,13 +3302,16 @@ cris_pipe_empty (host_callback *cb,
 
 /* We have a simulator-specific notion of time.  See TARGET_TIME.  */
 
-static long
-cris_time (host_callback *cb ATTRIBUTE_UNUSED, long *t)
+static int64_t
+cris_time (host_callback *cb ATTRIBUTE_UNUSED)
 {
-  long retval = TARGET_TIME (current_cpu_for_cb_callback);
-  if (t)
-    *t = retval;
-  return retval;
+  return TARGET_TIME (current_cpu_for_cb_callback);
+}
+
+static int
+cris_getpid (host_callback *cb ATTRIBUTE_UNUSED)
+{
+  return TARGET_PID;
 }
 
 /* Set target-specific callback data. */
@@ -3372,6 +3322,8 @@ cris_set_callbacks (host_callback *cb)
   /* Yeargh, have to cast away constness to avoid warnings.  */
   cb->syscall_map = (CB_TARGET_DEFS_MAP *) syscall_map;
   cb->errno_map = (CB_TARGET_DEFS_MAP *) errno_map;
+
+  cb->getpid = cris_getpid;
 
   /* The kernel stat64 layout.  If we see a file > 2G, the "long"
      parameter to cb_store_target_endian will make st_size negative.

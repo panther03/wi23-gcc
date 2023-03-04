@@ -1,6 +1,6 @@
 /* Target waitstatus implementations.
 
-   Copyright (C) 1990-2013 Free Software Foundation, Inc.
+   Copyright (C) 1990-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,56 +17,54 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifdef GDBSERVER
-#include "server.h"
-#else
-#include "defs.h"
-#endif
-
+#include "gdbsupport/common-defs.h"
 #include "waitstatus.h"
 
-/* Return a pretty printed form of target_waitstatus.
-   Space for the result is malloc'd, caller must free.  */
+/* See waitstatus.h.  */
 
-char *
-target_waitstatus_to_string (const struct target_waitstatus *ws)
+std::string
+target_waitstatus::to_string () const
 {
-  const char *kind_str = "status->kind = ";
+  std::string str = string_printf
+    ("status->kind = %s", target_waitkind_str (this->kind ()));
 
-  switch (ws->kind)
+/* Make sure the compiler warns if a new TARGET_WAITKIND enumerator is added
+   but not handled here.  */
+DIAGNOSTIC_PUSH
+DIAGNOSTIC_ERROR_SWITCH
+  switch (this->kind ())
     {
     case TARGET_WAITKIND_EXITED:
-      return xstrprintf ("%sexited, status = %d",
-			 kind_str, ws->value.integer);
+    case TARGET_WAITKIND_THREAD_EXITED:
+      return string_appendf (str, ", exit_status = %d", this->exit_status ());
+
     case TARGET_WAITKIND_STOPPED:
-      return xstrprintf ("%sstopped, signal = %s",
-			 kind_str, gdb_signal_to_name (ws->value.sig));
     case TARGET_WAITKIND_SIGNALLED:
-      return xstrprintf ("%ssignalled, signal = %s",
-			 kind_str, gdb_signal_to_name (ws->value.sig));
-    case TARGET_WAITKIND_LOADED:
-      return xstrprintf ("%sloaded", kind_str);
+      return string_appendf (str, ", sig = %s",
+			     gdb_signal_to_symbol_string (this->sig ()));
+
     case TARGET_WAITKIND_FORKED:
-      return xstrprintf ("%sforked", kind_str);
     case TARGET_WAITKIND_VFORKED:
-      return xstrprintf ("%svforked", kind_str);
+      return string_appendf (str, ", child_ptid = %s",
+			     this->child_ptid ().to_string ().c_str ());
+
     case TARGET_WAITKIND_EXECD:
-      return xstrprintf ("%sexecd", kind_str);
+      return string_appendf (str, ", execd_pathname = %s",
+			     this->execd_pathname ());
+
+    case TARGET_WAITKIND_LOADED:
     case TARGET_WAITKIND_VFORK_DONE:
-      return xstrprintf ("%svfork-done", kind_str);
-    case TARGET_WAITKIND_SYSCALL_ENTRY:
-      return xstrprintf ("%sentered syscall", kind_str);
-    case TARGET_WAITKIND_SYSCALL_RETURN:
-      return xstrprintf ("%sexited syscall", kind_str);
     case TARGET_WAITKIND_SPURIOUS:
-      return xstrprintf ("%sspurious", kind_str);
+    case TARGET_WAITKIND_SYSCALL_ENTRY:
+    case TARGET_WAITKIND_SYSCALL_RETURN:
     case TARGET_WAITKIND_IGNORE:
-      return xstrprintf ("%signore", kind_str);
     case TARGET_WAITKIND_NO_HISTORY:
-      return xstrprintf ("%sno-history", kind_str);
     case TARGET_WAITKIND_NO_RESUMED:
-      return xstrprintf ("%sno-resumed", kind_str);
-    default:
-      return xstrprintf ("%sunknown???", kind_str);
+    case TARGET_WAITKIND_THREAD_CREATED:
+      return str;
     }
+DIAGNOSTIC_POP
+
+  gdb_assert_not_reached ("invalid target_waitkind value: %d",
+			  (int) this->kind ());
 }

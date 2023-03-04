@@ -1,7 +1,5 @@
 /* write.h
-   Copyright 1987, 1992, 1993, 1994, 1995, 1996, 1997, 1999, 2000, 2001,
-   2002, 2003, 2005, 2006, 2007
-   Free Software Foundation, Inc.
+   Copyright (C) 1987-2023 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -29,7 +27,18 @@
 #define FAKE_LABEL_NAME "L0\001"
 #endif
 
-#include "bit_fix.h"
+/* This is a special character that is used to indicate a fake label.
+   It must be present in FAKE_LABEL_NAME, although it does not have to
+   be the first character.  It must not be a character that would be
+   found in a valid symbol name.
+
+   Also be aware that the function _bfd_elf_is_local_label_name in
+   bfd/elf.c has an implicit assumption that FAKE_LABEL_CHAR is '\001'.
+   If this is not the case then FAKE_LABEL_NAME must start with ".L" in
+   order for the function to continue working.  */
+#ifndef FAKE_LABEL_CHAR
+#define FAKE_LABEL_CHAR '\001'
+#endif
 
 /*
  * FixSs may be built up in any order.
@@ -37,19 +46,24 @@
 
 struct fix
 {
+  /* Next fixS in linked list, or NULL.  */
+  struct fix *fx_next;
+
   /* These small fields are grouped together for compactness of
      this structure, and efficiency of access on some architectures.  */
 
+  /* pc-relative offset adjust (only used by some CPU specific code).
+     A 4-bit field would be sufficient for most uses, except for ppc
+     which pokes an operand table index here.  Bits may be stolen
+     from here should that be necessary, provided PPC_OPINDEX_MAX is
+     adjusted suitably.  */
+  int fx_pcrel_adjust : 16;
+
+  /* How many bytes are involved? */
+  unsigned fx_size : 8;
+
   /* Is this a pc-relative relocation?  */
   unsigned fx_pcrel : 1;
-
-  /* Is this value an immediate displacement?  */
-  /* Only used on ns32k; merge it into TC_FIX_TYPE sometime.  */
-  unsigned fx_im_disp : 2;
-
-  /* Some bits for the CPU specific code.  */
-  unsigned fx_tcbit : 1;
-  unsigned fx_tcbit2 : 1;
 
   /* Has this relocation already been applied?  */
   unsigned fx_done : 1;
@@ -64,17 +78,20 @@ struct fix
   /* The value is signed when checking for overflow.  */
   unsigned fx_signed : 1;
 
-  /* pc-relative offset adjust (only used by some CPU specific code) */
-  signed char fx_pcrel_adjust;
+  /* Some bits for the CPU specific code.  */
+  unsigned fx_tcbit : 1;
+  unsigned fx_tcbit2 : 1;
 
-  /* How many bytes are involved? */
-  unsigned char fx_size;
+  /* Spare bits.  */
+  unsigned fx_unused : 2;
+
+  bfd_reloc_code_real_type fx_r_type;
 
   /* Which frag does this fix apply to?  */
   fragS *fx_frag;
 
-  /* Where is the first byte to fix up?  */
-  long fx_where;
+  /* The location within the frag where the fixup occurs.  */
+  unsigned long fx_where;
 
   /* NULL or Symbol whose value we add in.  */
   symbolS *fx_addsy;
@@ -91,18 +108,6 @@ struct fix
   /* The frag fx_dot_value is based on.  */
   fragS *fx_dot_frag;
 
-  /* Next fixS in linked list, or NULL.  */
-  struct fix *fx_next;
-
-  /* If NULL, no bitfix's to do.  */
-  /* Only i960-coff and ns32k use this, and i960-coff stores an
-     integer.  This can probably be folded into tc_fix_data, below.
-     @@ Alpha also uses it, but only to disable certain relocation
-     processing.  */
-  bit_fixS *fx_bit_fixP;
-
-  bfd_reloc_code_real_type fx_r_type;
-
   /* This field is sort of misnamed.  It appears to be a sort of random
      scratch field, for use by the back ends.  The main gas code doesn't
      do anything but initialize it to zero.  The use of it does need to
@@ -114,7 +119,7 @@ struct fix
 
   /* The location of the instruction which created the reloc, used
      in error messages.  */
-  char *fx_file;
+  const char *fx_file;
   unsigned fx_line;
 
 #ifdef USING_CGEN
@@ -158,7 +163,7 @@ struct reloc_list
       arelent r;
     } b;
   } u;
-  char *file;
+  const char *file;
   unsigned int line;
 };
 
@@ -168,24 +173,21 @@ extern addressT dot_value;
 extern fragS *dot_frag;
 extern struct reloc_list* reloc_list;
 
-extern void append (char **charPP, char *fromP, unsigned long length);
-extern void record_alignment (segT seg, int align);
-extern int get_recorded_alignment (segT seg);
-extern void subsegs_finish (void);
+extern void append (char **, char *, unsigned long);
+extern void record_alignment (segT, unsigned);
+extern int get_recorded_alignment (segT);
 extern void write_object_file (void);
 extern long relax_frag (segT, fragS *, long);
 extern int relax_segment (struct frag *, segT, int);
 extern void number_to_chars_littleendian (char *, valueT, int);
 extern void number_to_chars_bigendian (char *, valueT, int);
-extern fixS *fix_new
-  (fragS * frag, int where, int size, symbolS * add_symbol,
-   offsetT offset, int pcrel, bfd_reloc_code_real_type r_type);
-extern fixS *fix_at_start
-  (fragS * frag, int size, symbolS * add_symbol,
-   offsetT offset, int pcrel, bfd_reloc_code_real_type r_type);
-extern fixS *fix_new_exp
-  (fragS * frag, int where, int size, expressionS *exp, int pcrel,
-   bfd_reloc_code_real_type r_type);
+extern fixS *fix_new (fragS *, unsigned long, unsigned long, symbolS *,
+		      offsetT, int, bfd_reloc_code_real_type);
+extern fixS *fix_at_start (fragS *, unsigned long, symbolS *,
+			   offsetT, int, bfd_reloc_code_real_type);
+extern fixS *fix_new_exp (fragS *, unsigned long, unsigned long,
+			  expressionS *, int, bfd_reloc_code_real_type);
 extern void write_print_statistics (FILE *);
+extern void as_bad_subtract (fixS *);
 
 #endif /* __write_h__ */

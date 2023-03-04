@@ -1,11 +1,11 @@
+/* DO NOT EDIT!  -*- buffer-read-only: t -*- vi:set ro:  */
 /* Disassembler interface for targets using CGEN. -*- C -*-
    CGEN: Cpu tools GENerator
 
    THIS FILE IS MACHINE GENERATED WITH CGEN.
    - the resultant file is machine generated, cgen-dis.in isn't
 
-   Copyright 1996, 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2005, 2007,
-   2008, 2010  Free Software Foundation, Inc.
+   Copyright (C) 1996-2023 Free Software Foundation, Inc.
 
    This file is part of libopcodes.
 
@@ -29,7 +29,7 @@
 #include "sysdep.h"
 #include <stdio.h>
 #include "ansidecl.h"
-#include "dis-asm.h"
+#include "disassemble.h"
 #include "bfd.h"
 #include "symcat.h"
 #include "libiberty.h"
@@ -204,7 +204,7 @@ print_regset (CGEN_CPU_DESC cd ATTRIBUTE_UNUSED,
 	      int length ATTRIBUTE_UNUSED,
 	      int push)
 {
-  static char * m16c_register_names [] = 
+  static char * m16c_register_names [] =
   {
     "r0", "r1", "r2", "r3", "a0", "a1", "sb", "fb"
   };
@@ -217,7 +217,7 @@ print_regset (CGEN_CPU_DESC cd ATTRIBUTE_UNUSED,
     mask = 0x80;
   else
     mask = 1;
- 
+
   if (value & mask)
     {
       (*info->fprintf_func) (info->stream, "%s", m16c_register_names [0]);
@@ -276,7 +276,7 @@ print_signed4n (CGEN_CPU_DESC cd ATTRIBUTE_UNUSED,
 }
 
 void m32c_cgen_print_operand
-  (CGEN_CPU_DESC, int, PTR, CGEN_FIELDS *, void const *, bfd_vma, int);
+  (CGEN_CPU_DESC, int, void *, CGEN_FIELDS *, void const *, bfd_vma, int);
 
 /* Main entry point for printing operands.
    XINFO is a `void *' and not a `disassemble_info *' to not put a requirement
@@ -888,13 +888,14 @@ m32c_cgen_print_operand (CGEN_CPU_DESC cd,
 
     default :
       /* xgettext:c-format */
-      fprintf (stderr, _("Unrecognized field %d while printing insn.\n"),
-	       opindex);
-    abort ();
+      opcodes_error_handler
+	(_("internal error: unrecognized field %d while printing insn"),
+	 opindex);
+      abort ();
   }
 }
 
-cgen_print_fn * const m32c_cgen_print_handlers[] = 
+cgen_print_fn * const m32c_cgen_print_handlers[] =
 {
   print_insn_normal,
 };
@@ -1063,7 +1064,7 @@ print_insn (CGEN_CPU_DESC cd,
   /* Extract base part of instruction, just in case CGEN_DIS_* uses it. */
   basesize = cd->base_insn_bitsize < buflen * 8 ?
                                      cd->base_insn_bitsize : buflen * 8;
-  insn_value = cgen_get_insn_value (cd, buf, basesize);
+  insn_value = cgen_get_insn_value (cd, buf, basesize, cd->insn_endian);
 
 
   /* Fill in ex_info fields like read_insn would.  Don't actually call
@@ -1084,7 +1085,7 @@ print_insn (CGEN_CPU_DESC cd,
       int length;
       unsigned long insn_value_cropped;
 
-#ifdef CGEN_VALIDATE_INSN_SUPPORTED 
+#ifdef CGEN_VALIDATE_INSN_SUPPORTED
       /* Not needed as insn shouldn't be in hash lists if not supported.  */
       /* Supported by this cpu?  */
       if (! m32c_cgen_insn_supported (cd, insn))
@@ -1102,7 +1103,7 @@ print_insn (CGEN_CPU_DESC cd,
          relevant part from the buffer. */
       if ((unsigned) (CGEN_INSN_BITSIZE (insn) / 8) < buflen &&
 	  (unsigned) (CGEN_INSN_BITSIZE (insn) / 8) <= sizeof (unsigned long))
-	insn_value_cropped = bfd_get_bits (buf, CGEN_INSN_BITSIZE (insn), 
+	insn_value_cropped = bfd_get_bits (buf, CGEN_INSN_BITSIZE (insn),
 					   info->endian == BFD_ENDIAN_BIG);
       else
 	insn_value_cropped = insn_value;
@@ -1194,6 +1195,7 @@ typedef struct cpu_desc_list
   CGEN_BITSET *isa;
   int mach;
   int endian;
+  int insn_endian;
   CGEN_CPU_DESC cd;
 } cpu_desc_list;
 
@@ -1206,12 +1208,16 @@ print_insn_m32c (bfd_vma pc, disassemble_info *info)
   static CGEN_BITSET *prev_isa;
   static int prev_mach;
   static int prev_endian;
+  static int prev_insn_endian;
   int length;
   CGEN_BITSET *isa;
   int mach;
   int endian = (info->endian == BFD_ENDIAN_BIG
 		? CGEN_ENDIAN_BIG
 		: CGEN_ENDIAN_LITTLE);
+  int insn_endian = (info->endian_code == BFD_ENDIAN_BIG
+                     ? CGEN_ENDIAN_BIG
+                     : CGEN_ENDIAN_LITTLE);
   enum bfd_architecture arch;
 
   /* ??? gdb will set mach but leave the architecture as "unknown" */
@@ -1221,7 +1227,7 @@ print_insn_m32c (bfd_vma pc, disassemble_info *info)
   arch = info->arch;
   if (arch == bfd_arch_unknown)
     arch = CGEN_BFD_ARCH;
-   
+
   /* There's no standard way to compute the machine or isa number
      so we leave it to the target.  */
 #ifdef CGEN_COMPUTE_MACH
@@ -1241,7 +1247,7 @@ print_insn_m32c (bfd_vma pc, disassemble_info *info)
     cgen_bitset_add (isa, CGEN_COMPUTE_ISA (info));
   }
 #else
-  isa = info->insn_sets;
+  isa = info->private_data;
 #endif
 
   /* If we've switched cpu's, try to find a handle we've used before */
@@ -1262,7 +1268,7 @@ print_insn_m32c (bfd_vma pc, disassemble_info *info)
 	      break;
 	    }
 	}
-    } 
+    }
 
   /* If we haven't initialized yet, initialize the opcode table.  */
   if (! cd)
@@ -1277,9 +1283,11 @@ print_insn_m32c (bfd_vma pc, disassemble_info *info)
       prev_isa = cgen_bitset_copy (isa);
       prev_mach = mach;
       prev_endian = endian;
+      prev_insn_endian = insn_endian;
       cd = m32c_cgen_cpu_open (CGEN_CPU_OPEN_ISAS, prev_isa,
 				 CGEN_CPU_OPEN_BFDMACH, mach_name,
 				 CGEN_CPU_OPEN_ENDIAN, prev_endian,
+                                 CGEN_CPU_OPEN_INSN_ENDIAN, prev_insn_endian,
 				 CGEN_CPU_OPEN_END);
       if (!cd)
 	abort ();

@@ -1,7 +1,7 @@
 /* Target-dependent code for GNU/Linux running on the Fujitsu FR-V,
    for GDB.
 
-   Copyright (C) 2004-2013 Free Software Foundation, Inc.
+   Copyright (C) 2004-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -30,8 +30,8 @@
 #include "trad-frame.h"
 #include "frame-unwind.h"
 #include "regset.h"
-#include "gdb_string.h"
 #include "linux-tdep.h"
+#include "gdbarch.h"
 
 /* Define the size (in bytes) of an FR-V instruction.  */
 static const int frv_instr_size = 4;
@@ -168,8 +168,8 @@ frv_linux_pc_in_sigtramp (struct gdbarch *gdbarch, CORE_ADDR pc,
       } __attribute__((aligned(8)));  */
 
 static LONGEST
-frv_linux_sigcontext_reg_addr (struct frame_info *this_frame, int regno,
-                               CORE_ADDR *sc_addr_cache_ptr)
+frv_linux_sigcontext_reg_addr (frame_info_ptr this_frame, int regno,
+			       CORE_ADDR *sc_addr_cache_ptr)
 {
   struct gdbarch *gdbarch = get_frame_arch (this_frame);
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
@@ -200,22 +200,22 @@ frv_linux_sigcontext_reg_addr (struct frame_info *this_frame, int regno,
       else if (tramp_type == RT_SIGTRAMP)
 	{
 	  /* For a realtime sigtramp frame, SP + 12 contains a pointer
- 	     to a ucontext struct.  The ucontext struct contains a
- 	     sigcontext struct starting 24 bytes in.  (The offset of
- 	     uc_mcontext within struct ucontext is derived as follows: 
- 	     stack_t is a 12-byte struct and struct sigcontext is
- 	     8-byte aligned.  This gives an offset of 8 + 12 + 4 (for
- 	     padding) = 24.)  */
+	     to a ucontext struct.  The ucontext struct contains a
+	     sigcontext struct starting 24 bytes in.  (The offset of
+	     uc_mcontext within struct ucontext is derived as follows: 
+	     stack_t is a 12-byte struct and struct sigcontext is
+	     8-byte aligned.  This gives an offset of 8 + 12 + 4 (for
+	     padding) = 24.)  */
 	  if (target_read_memory (sp + 12, buf, sizeof buf) != 0)
 	    {
 	      warning (_("Can't read realtime sigtramp frame."));
 	      return 0;
 	    }
 	  sc_addr = extract_unsigned_integer (buf, sizeof buf, byte_order);
- 	  sc_addr += 24;
+	  sc_addr += 24;
 	}
       else
-	internal_error (__FILE__, __LINE__, _("not a signal trampoline"));
+	internal_error (_("not a signal trampoline"));
 
       if (sc_addr_cache_ptr)
 	*sc_addr_cache_ptr = sc_addr;
@@ -258,11 +258,10 @@ frv_linux_sigcontext_reg_addr (struct frame_info *this_frame, int regno,
 /* Signal trampolines.  */
 
 static struct trad_frame_cache *
-frv_linux_sigtramp_frame_cache (struct frame_info *this_frame,
+frv_linux_sigtramp_frame_cache (frame_info_ptr this_frame,
 				void **this_cache)
 {
   struct gdbarch *gdbarch = get_frame_arch (this_frame);
-  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   struct trad_frame_cache *cache;
   CORE_ADDR addr;
@@ -272,7 +271,7 @@ frv_linux_sigtramp_frame_cache (struct frame_info *this_frame,
   struct frame_id this_id;
 
   if (*this_cache)
-    return *this_cache;
+    return (struct trad_frame_cache *) *this_cache;
 
   cache = trad_frame_cache_zalloc (this_frame);
 
@@ -298,7 +297,7 @@ frv_linux_sigtramp_frame_cache (struct frame_info *this_frame,
 }
 
 static void
-frv_linux_sigtramp_frame_this_id (struct frame_info *this_frame,
+frv_linux_sigtramp_frame_this_id (frame_info_ptr this_frame,
 				  void **this_cache,
 				  struct frame_id *this_id)
 {
@@ -308,7 +307,7 @@ frv_linux_sigtramp_frame_this_id (struct frame_info *this_frame,
 }
 
 static struct value *
-frv_linux_sigtramp_frame_prev_register (struct frame_info *this_frame,
+frv_linux_sigtramp_frame_prev_register (frame_info_ptr this_frame,
 					void **this_cache, int regnum)
 {
   /* Make sure we've initialized the cache.  */
@@ -319,7 +318,7 @@ frv_linux_sigtramp_frame_prev_register (struct frame_info *this_frame,
 
 static int
 frv_linux_sigtramp_frame_sniffer (const struct frame_unwind *self,
-				  struct frame_info *this_frame,
+				  frame_info_ptr this_frame,
 				  void **this_cache)
 {
   struct gdbarch *gdbarch = get_frame_arch (this_frame);
@@ -335,6 +334,7 @@ frv_linux_sigtramp_frame_sniffer (const struct frame_unwind *self,
 
 static const struct frame_unwind frv_linux_sigtramp_frame_unwind =
 {
+  "frv linux sigtramp",
   SIGTRAMP_FRAME,
   default_frame_unwind_stop_reason,
   frv_linux_sigtramp_frame_this_id,
@@ -360,149 +360,110 @@ typedef struct
   frv_elf_fpreg_t fsr[1];
 } frv_elf_fpregset_t;
 
-/* Constants for accessing elements of frv_elf_gregset_t.  */
+/* Register maps.  */
 
-#define FRV_PT_PSR 0
-#define	FRV_PT_ISR 1
-#define FRV_PT_CCR 2
-#define FRV_PT_CCCR 3
-#define FRV_PT_LR 4
-#define FRV_PT_LCR 5
-#define FRV_PT_PC 6
-#define FRV_PT_GNER0 10
-#define FRV_PT_GNER1 11
-#define FRV_PT_IACC0H 12
-#define FRV_PT_IACC0L 13
+static const struct regcache_map_entry frv_linux_gregmap[] =
+  {
+    { 1, psr_regnum, 4 },
+    { 1, REGCACHE_MAP_SKIP, 4 }, /* isr */
+    { 1, ccr_regnum, 4 },
+    { 1, cccr_regnum, 4 },
+    { 1, lr_regnum, 4 },
+    { 1, lcr_regnum, 4 },
+    { 1, pc_regnum, 4 },
+    { 1, REGCACHE_MAP_SKIP, 4 }, /* __status */
+    { 1, REGCACHE_MAP_SKIP, 4 }, /* syscallno */
+    { 1, REGCACHE_MAP_SKIP, 4 }, /* orig_gr8 */
+    { 1, gner0_regnum, 4 },
+    { 1, gner1_regnum, 4 },
+    { 1, REGCACHE_MAP_SKIP, 8 }, /* iacc0 */
+    { 1, tbr_regnum, 4 },
+    { 31, first_gpr_regnum + 1, 4 }, /* gr1 ... gr31 */
 
-/* Note: Only 32 of the GRs will be found in the corefile.  */
-#define FRV_PT_GR(j)	( 14 + (j))	/* GRj for 0<=j<=63.  */
+    /* Technically, the loadmap addresses are not part of `pr_reg' as
+       found in the elf_prstatus struct.  The fields which communicate
+       the loadmap address appear (by design) immediately after
+       `pr_reg' though, and the BFD function elf32_frv_grok_prstatus()
+       has been implemented to include these fields in the register
+       section that it extracts from the core file.  So, for our
+       purposes, they may be viewed as registers.  */
 
-#define FRV_PT_TBR FRV_PT_GR(0)		/* gr0 is always 0, so TBR is stuffed
-					   there.  */
+    { 1, fdpic_loadmap_exec_regnum, 4 },
+    { 1, fdpic_loadmap_interp_regnum, 4 },
+    { 0 }
+  };
 
-/* Technically, the loadmap addresses are not part of `pr_reg' as
-   found in the elf_prstatus struct.  The fields which communicate the
-   loadmap address appear (by design) immediately after `pr_reg'
-   though, and the BFD function elf32_frv_grok_prstatus() has been
-   implemented to include these fields in the register section that it
-   extracts from the core file.  So, for our purposes, they may be
-   viewed as registers.  */
-
-#define FRV_PT_EXEC_FDPIC_LOADMAP 46
-#define FRV_PT_INTERP_FDPIC_LOADMAP 47
-
+static const struct regcache_map_entry frv_linux_fpregmap[] =
+  {
+    { 64, first_fpr_regnum, 4 }, /* fr0 ... fr63 */
+    { 1, fner0_regnum, 4 },
+    { 1, fner1_regnum, 4 },
+    { 1, msr0_regnum, 4 },
+    { 1, msr1_regnum, 4 },
+    { 8, acc0_regnum, 4 },	/* acc0 ... acc7 */
+    { 1, accg0123_regnum, 4 },
+    { 1, accg4567_regnum, 4 },
+    { 1, fsr0_regnum, 4 },
+    { 0 }
+  };
 
 /* Unpack an frv_elf_gregset_t into GDB's register cache.  */
 
 static void 
 frv_linux_supply_gregset (const struct regset *regset,
-                          struct regcache *regcache,
+			  struct regcache *regcache,
 			  int regnum, const void *gregs, size_t len)
 {
   int regi;
-  char zerobuf[MAX_REGISTER_SIZE];
-  const frv_elf_gregset_t *gregsetp = gregs;
-
-  memset (zerobuf, 0, MAX_REGISTER_SIZE);
 
   /* gr0 always contains 0.  Also, the kernel passes the TBR value in
      this slot.  */
-  regcache_raw_supply (regcache, first_gpr_regnum, zerobuf);
+  regcache->raw_supply_zeroed (first_gpr_regnum);
 
-  for (regi = first_gpr_regnum + 1; regi <= last_gpr_regnum; regi++)
-    {
-      if (regi >= first_gpr_regnum + 32)
-	regcache_raw_supply (regcache, regi, zerobuf);
-      else
-	regcache_raw_supply (regcache, regi,
-			     gregsetp->reg[FRV_PT_GR (regi
-						      - first_gpr_regnum)]);
-    }
+  /* Fill gr32, ..., gr63 with zeros. */
+  for (regi = first_gpr_regnum + 32; regi <= last_gpr_regnum; regi++)
+    regcache->raw_supply_zeroed (regi);
 
-  regcache_raw_supply (regcache, pc_regnum, gregsetp->reg[FRV_PT_PC]);
-  regcache_raw_supply (regcache, psr_regnum, gregsetp->reg[FRV_PT_PSR]);
-  regcache_raw_supply (regcache, ccr_regnum, gregsetp->reg[FRV_PT_CCR]);
-  regcache_raw_supply (regcache, cccr_regnum, gregsetp->reg[FRV_PT_CCCR]);
-  regcache_raw_supply (regcache, lr_regnum, gregsetp->reg[FRV_PT_LR]);
-  regcache_raw_supply (regcache, lcr_regnum, gregsetp->reg[FRV_PT_LCR]);
-  regcache_raw_supply (regcache, gner0_regnum, gregsetp->reg[FRV_PT_GNER0]);
-  regcache_raw_supply (regcache, gner1_regnum, gregsetp->reg[FRV_PT_GNER1]);
-  regcache_raw_supply (regcache, tbr_regnum, gregsetp->reg[FRV_PT_TBR]);
-  regcache_raw_supply (regcache, fdpic_loadmap_exec_regnum,
-                       gregsetp->reg[FRV_PT_EXEC_FDPIC_LOADMAP]);
-  regcache_raw_supply (regcache, fdpic_loadmap_interp_regnum,
-                       gregsetp->reg[FRV_PT_INTERP_FDPIC_LOADMAP]);
-}
-
-/* Unpack an frv_elf_fpregset_t into GDB's register cache.  */
-
-static void
-frv_linux_supply_fpregset (const struct regset *regset,
-                           struct regcache *regcache,
-			   int regnum, const void *gregs, size_t len)
-{
-  int regi;
-  const frv_elf_fpregset_t *fpregsetp = gregs;
-
-  for (regi = first_fpr_regnum; regi <= last_fpr_regnum; regi++)
-    regcache_raw_supply (regcache, regi,
-			 fpregsetp->fr[regi - first_fpr_regnum]);
-
-  regcache_raw_supply (regcache, fner0_regnum, fpregsetp->fner[0]);
-  regcache_raw_supply (regcache, fner1_regnum, fpregsetp->fner[1]);
-
-  regcache_raw_supply (regcache, msr0_regnum, fpregsetp->msr[0]);
-  regcache_raw_supply (regcache, msr1_regnum, fpregsetp->msr[1]);
-
-  for (regi = acc0_regnum; regi <= acc7_regnum; regi++)
-    regcache_raw_supply (regcache, regi, fpregsetp->acc[regi - acc0_regnum]);
-
-  regcache_raw_supply (regcache, accg0123_regnum, fpregsetp->accg);
-  regcache_raw_supply (regcache, accg4567_regnum, fpregsetp->accg + 4);
-
-  regcache_raw_supply (regcache, fsr0_regnum, fpregsetp->fsr[0]);
+  regcache_supply_regset (regset, regcache, regnum, gregs, len);
 }
 
 /* FRV Linux kernel register sets.  */
 
-static struct regset frv_linux_gregset =
+static const struct regset frv_linux_gregset =
 {
-  NULL,
-  frv_linux_supply_gregset
+  frv_linux_gregmap,
+  frv_linux_supply_gregset, regcache_collect_regset
 };
 
-static struct regset frv_linux_fpregset =
+static const struct regset frv_linux_fpregset =
 {
-  NULL,
-  frv_linux_supply_fpregset
+  frv_linux_fpregmap,
+  regcache_supply_regset, regcache_collect_regset
 };
 
-static const struct regset *
-frv_linux_regset_from_core_section (struct gdbarch *gdbarch,
-				    const char *sect_name, size_t sect_size)
+static void
+frv_linux_iterate_over_regset_sections (struct gdbarch *gdbarch,
+					iterate_over_regset_sections_cb *cb,
+					void *cb_data,
+					const struct regcache *regcache)
 {
-  if (strcmp (sect_name, ".reg") == 0 
-      && sect_size >= sizeof (frv_elf_gregset_t))
-    return &frv_linux_gregset;
-
-  if (strcmp (sect_name, ".reg2") == 0 
-      && sect_size >= sizeof (frv_elf_fpregset_t))
-    return &frv_linux_fpregset;
-
-  return NULL;
+  cb (".reg", sizeof (frv_elf_gregset_t), sizeof (frv_elf_gregset_t),
+      &frv_linux_gregset, NULL, cb_data);
+  cb (".reg2", sizeof (frv_elf_fpregset_t), sizeof (frv_elf_fpregset_t),
+      &frv_linux_fpregset, NULL, cb_data);
 }
 
 
 static void
 frv_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
 {
-  linux_init_abi (info, gdbarch);
+  linux_init_abi (info, gdbarch, 0);
 
   /* Set the sigtramp frame sniffer.  */
   frame_unwind_append_unwinder (gdbarch, &frv_linux_sigtramp_frame_unwind); 
 
-  set_gdbarch_regset_from_core_section (gdbarch,
-                                        frv_linux_regset_from_core_section);
+  set_gdbarch_iterate_over_regset_sections
+    (gdbarch, frv_linux_iterate_over_regset_sections);
 }
 
 static enum gdb_osabi
@@ -521,11 +482,9 @@ frv_linux_elf_osabi_sniffer (bfd *abfd)
     return GDB_OSABI_UNKNOWN;
 }
 
-/* Provide a prototype to silence -Wmissing-prototypes.  */
-void _initialize_frv_linux_tdep (void);
-
+void _initialize_frv_linux_tdep ();
 void
-_initialize_frv_linux_tdep (void)
+_initialize_frv_linux_tdep ()
 {
   gdbarch_register_osabi (bfd_arch_frv, 0, GDB_OSABI_LINUX,
 			  frv_linux_init_abi);

@@ -1,4 +1,4 @@
-# Copyright 2007-2013 Free Software Foundation, Inc.
+# Copyright 2007-2023 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -17,10 +17,7 @@
 
 # Test that GDB can handle overlapping sizes of symbols.
 
-if { ![is_x86_like_target] } then {
-    verbose "Skipping i386 unwinder tests."
-    return
-}
+require is_x86_like_target
 
 standard_testfile
 
@@ -29,30 +26,16 @@ set additional_flags [gdb_target_symbol_prefix_flags]
 
 if { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" \
 	  executable [list debug $additional_flags]] != "" } {
-    untested ${testfile}.exp
+    untested "failed to compile"
     return -1
 }
 
-gdb_exit
-gdb_start
-gdb_reinitialize_dir $srcdir/$subdir
-gdb_load ${binfile}
+clean_restart $binfile
 
 # We use gdb_run_cmd so this stands a chance to work for remote
 # targets too.
 gdb_run_cmd
-
-gdb_expect {
-    -re "Program received signal SIGTRAP.*$gdb_prompt $" {
-	pass "run past main"
-    }
-    -re ".*$gdb_prompt $" {
-	fail "run past main"
-    }
-    timeout {
-	fail "run past main (timeout)"
-    }
-}
+gdb_test "" "Program received signal SIGTRAP.*" "run past main"
 
 set message "backtrace shows the outer function"
 gdb_test_multiple "backtrace 10" $message {

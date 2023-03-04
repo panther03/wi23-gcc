@@ -1,6 +1,6 @@
 /* Target-dependent code for Solaris SPARC.
 
-   Copyright (C) 2003-2013 Free Software Foundation, Inc.
+   Copyright (C) 2003-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -25,18 +25,16 @@
 #include "objfiles.h"
 #include "osabi.h"
 #include "regcache.h"
+#include "regset.h"
 #include "target.h"
 #include "trad-frame.h"
-
-#include "gdb_assert.h"
-#include "gdb_string.h"
 
 #include "sol2-tdep.h"
 #include "sparc-tdep.h"
 #include "solib-svr4.h"
 
 /* From <sys/regset.h>.  */
-const struct sparc_gregset sparc32_sol2_gregset =
+const struct sparc_gregmap sparc32_sol2_gregmap =
 {
   32 * 4,			/* %psr */
   33 * 4,			/* %pc */
@@ -48,39 +46,61 @@ const struct sparc_gregset sparc32_sol2_gregset =
   16 * 4,			/* %l0 */
 };
 
-const struct sparc_fpregset sparc32_sol2_fpregset =
+const struct sparc_fpregmap sparc32_sol2_fpregmap =
 {
   0 * 4,			/* %f0 */
   33 * 4,			/* %fsr */
 };
-
 
-/* The Solaris signal trampolines reside in libc.  For normal signals,
-   the function `sigacthandler' is used.  This signal trampoline will
-   call the signal handler using the System V calling convention,
-   where the third argument is a pointer to an instance of
-   `ucontext_t', which has a member `uc_mcontext' that contains the
-   saved registers.  Incidentally, the kernel passes the `ucontext_t'
-   pointer as the third argument of the signal trampoline too, and
-   `sigacthandler' simply passes it on.  However, if you link your
-   program with "-L/usr/ucblib -R/usr/ucblib -lucb", the function
-   `ucbsigvechandler' will be used, which invokes the using the BSD
-   convention, where the third argument is a pointer to an instance of
-   `struct sigcontext'.  It is the `ucbsigvechandler' function that
-   converts the `ucontext_t' to a `sigcontext', and back.  Unless the
-   signal handler modifies the `struct sigcontext' we can safely
-   ignore this.  */
-
-int
-sparc_sol2_pc_in_sigtramp (CORE_ADDR pc, const char *name)
+static void
+sparc32_sol2_supply_core_gregset (const struct regset *regset,
+				  struct regcache *regcache,
+				  int regnum, const void *gregs, size_t len)
 {
-  return (name && (strcmp (name, "sigacthandler") == 0
-		   || strcmp (name, "ucbsigvechandler") == 0
-		   || strcmp (name, "__sighndlr") == 0));
+  sparc32_supply_gregset (&sparc32_sol2_gregmap, regcache, regnum, gregs);
 }
 
+static void
+sparc32_sol2_collect_core_gregset (const struct regset *regset,
+				   const struct regcache *regcache,
+				   int regnum, void *gregs, size_t len)
+{
+  sparc32_collect_gregset (&sparc32_sol2_gregmap, regcache, regnum, gregs);
+}
+
+static void
+sparc32_sol2_supply_core_fpregset (const struct regset *regset,
+				   struct regcache *regcache,
+				   int regnum, const void *fpregs, size_t len)
+{
+  sparc32_supply_fpregset (&sparc32_sol2_fpregmap, regcache, regnum, fpregs);
+}
+
+static void
+sparc32_sol2_collect_core_fpregset (const struct regset *regset,
+				    const struct regcache *regcache,
+				    int regnum, void *fpregs, size_t len)
+{
+  sparc32_collect_fpregset (&sparc32_sol2_fpregmap, regcache, regnum, fpregs);
+}
+
+static const struct regset sparc32_sol2_gregset =
+  {
+    NULL,
+    sparc32_sol2_supply_core_gregset,
+    sparc32_sol2_collect_core_gregset
+  };
+
+static const struct regset sparc32_sol2_fpregset =
+  {
+    NULL,
+    sparc32_sol2_supply_core_fpregset,
+    sparc32_sol2_collect_core_fpregset
+  };
+
+
 static struct sparc_frame_cache *
-sparc32_sol2_sigtramp_frame_cache (struct frame_info *this_frame,
+sparc32_sol2_sigtramp_frame_cache (frame_info_ptr this_frame,
 				   void **this_cache)
 {
   struct sparc_frame_cache *cache;
@@ -88,7 +108,7 @@ sparc32_sol2_sigtramp_frame_cache (struct frame_info *this_frame,
   int regnum;
 
   if (*this_cache)
-    return *this_cache;
+    return (struct sparc_frame_cache *) *this_cache;
 
   cache = sparc_frame_cache (this_frame, this_cache);
   gdb_assert (cache == *this_cache);
@@ -102,36 +122,36 @@ sparc32_sol2_sigtramp_frame_cache (struct frame_info *this_frame,
     (cache->copied_regs_mask & 0x04) ? SPARC_I2_REGNUM : SPARC_O2_REGNUM;
   mcontext_addr = get_frame_register_unsigned (this_frame, regnum) + 40;
 
-  cache->saved_regs[SPARC32_PSR_REGNUM].addr = mcontext_addr + 0 * 4;
-  cache->saved_regs[SPARC32_PC_REGNUM].addr = mcontext_addr + 1 * 4;
-  cache->saved_regs[SPARC32_NPC_REGNUM].addr = mcontext_addr + 2 * 4;
-  cache->saved_regs[SPARC32_Y_REGNUM].addr = mcontext_addr + 3 * 4;
+  cache->saved_regs[SPARC32_PSR_REGNUM].set_addr (mcontext_addr + 0 * 4);
+  cache->saved_regs[SPARC32_PC_REGNUM].set_addr (mcontext_addr + 1 * 4);
+  cache->saved_regs[SPARC32_NPC_REGNUM].set_addr (mcontext_addr + 2 * 4);
+  cache->saved_regs[SPARC32_Y_REGNUM].set_addr (mcontext_addr + 3 * 4);
 
   /* Since %g0 is always zero, keep the identity encoding.  */
   for (regnum = SPARC_G1_REGNUM, addr = mcontext_addr + 4 * 4;
        regnum <= SPARC_O7_REGNUM; regnum++, addr += 4)
-    cache->saved_regs[regnum].addr = addr;
+    cache->saved_regs[regnum].set_addr (addr);
 
   if (get_frame_memory_unsigned (this_frame, mcontext_addr + 19 * 4, 4))
     {
       /* The register windows haven't been flushed.  */
       for (regnum = SPARC_L0_REGNUM; regnum <= SPARC_I7_REGNUM; regnum++)
-	trad_frame_set_unknown (cache->saved_regs, regnum);
+	cache->saved_regs[regnum].set_unknown ();
     }
   else
     {
-      addr = cache->saved_regs[SPARC_SP_REGNUM].addr;
+      addr = cache->saved_regs[SPARC_SP_REGNUM].addr ();
       addr = get_frame_memory_unsigned (this_frame, addr, 4);
       for (regnum = SPARC_L0_REGNUM;
 	   regnum <= SPARC_I7_REGNUM; regnum++, addr += 4)
-	cache->saved_regs[regnum].addr = addr;
+	cache->saved_regs[regnum].set_addr (addr);
     }
 
   return cache;
 }
 
 static void
-sparc32_sol2_sigtramp_frame_this_id (struct frame_info *this_frame,
+sparc32_sol2_sigtramp_frame_this_id (frame_info_ptr this_frame,
 				     void **this_cache,
 				     struct frame_id *this_id)
 {
@@ -142,7 +162,7 @@ sparc32_sol2_sigtramp_frame_this_id (struct frame_info *this_frame,
 }
 
 static struct value *
-sparc32_sol2_sigtramp_frame_prev_register (struct frame_info *this_frame,
+sparc32_sol2_sigtramp_frame_prev_register (frame_info_ptr this_frame,
 					   void **this_cache,
 					   int regnum)
 {
@@ -154,21 +174,15 @@ sparc32_sol2_sigtramp_frame_prev_register (struct frame_info *this_frame,
 
 static int
 sparc32_sol2_sigtramp_frame_sniffer (const struct frame_unwind *self,
-				     struct frame_info *this_frame,
+				     frame_info_ptr this_frame,
 				     void **this_cache)
 {
-  CORE_ADDR pc = get_frame_pc (this_frame);
-  const char *name;
-
-  find_pc_partial_function (pc, &name, NULL, NULL);
-  if (sparc_sol2_pc_in_sigtramp (pc, name))
-    return 1;
-
-  return 0;
+  return sol2_sigtramp_p (this_frame);
 }
 
 static const struct frame_unwind sparc32_sol2_sigtramp_frame_unwind =
 {
+  "sparc32 solaris sigtramp",
   SIGTRAMP_FRAME,
   default_frame_unwind_stop_reason,
   sparc32_sol2_sigtramp_frame_this_id,
@@ -177,56 +191,23 @@ static const struct frame_unwind sparc32_sol2_sigtramp_frame_unwind =
   sparc32_sol2_sigtramp_frame_sniffer
 };
 
-/* Unglobalize NAME.  */
-
-const const char *
-sparc_sol2_static_transform_name (const char *name)
-{
-  /* The Sun compilers (Sun ONE Studio, Forte Developer, Sun WorkShop,
-     SunPRO) convert file static variables into global values, a
-     process known as globalization.  In order to do this, the
-     compiler will create a unique prefix and prepend it to each file
-     static variable.  For static variables within a function, this
-     globalization prefix is followed by the function name (nested
-     static variables within a function are supposed to generate a
-     warning message, and are left alone).  The procedure is
-     documented in the Stabs Interface Manual, which is distrubuted
-     with the compilers, although version 4.0 of the manual seems to
-     be incorrect in some places, at least for SPARC.  The
-     globalization prefix is encoded into an N_OPT stab, with the form
-     "G=<prefix>".  The globalization prefix always seems to start
-     with a dollar sign '$'; a dot '.' is used as a seperator.  So we
-     simply strip everything up until the last dot.  */
-
-  if (name[0] == '$')
-    {
-      char *p = strrchr (name, '.');
-      if (p)
-        return p + 1;
-    }
-
-  return name;
-}
 
 
-void
+static void
 sparc32_sol2_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
 {
-  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  sparc_gdbarch_tdep *tdep = gdbarch_tdep<sparc_gdbarch_tdep> (gdbarch);
 
-  /* The Sun compilers (Sun ONE Studio, Forte Developer, Sun WorkShop, SunPRO)
-     compiler puts out 0 instead of the address in N_SO stabs.  Starting with
-     SunPRO 3.0, the compiler does this for N_FUN stabs too.  */
-  set_gdbarch_sofun_address_maybe_missing (gdbarch, 1);
+  tdep->gregset = &sparc32_sol2_gregset;
+  tdep->sizeof_gregset = 152;
 
-  /* The Sun compilers also do "globalization"; see the comment in
-     sparc_sol2_static_transform_name for more information.  */
-  set_gdbarch_static_transform_name
-    (gdbarch, sparc_sol2_static_transform_name);
+  tdep->fpregset = &sparc32_sol2_fpregset;
+  tdep->sizeof_fpregset = 400;
+
+  sol2_init_abi (info, gdbarch);
 
   /* Solaris has SVR4-style shared libraries...  */
   set_gdbarch_skip_trampoline_code (gdbarch, find_solib_trampoline_target);
-  set_gdbarch_skip_solib_resolver (gdbarch, sol2_skip_solib_resolver);
   set_solib_svr4_fetch_link_map_offsets
     (gdbarch, svr4_ilp32_fetch_link_map_offsets);
 
@@ -238,17 +219,11 @@ sparc32_sol2_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
   set_gdbarch_software_single_step (gdbarch, NULL);
 
   frame_unwind_append_unwinder (gdbarch, &sparc32_sol2_sigtramp_frame_unwind);
-
-  /* How to print LWP PTIDs from core files.  */
-  set_gdbarch_core_pid_to_str (gdbarch, sol2_core_pid_to_str);
 }
-
 
-/* Provide a prototype to silence -Wmissing-prototypes.  */
-void _initialize_sparc_sol2_tdep (void);
-
+void _initialize_sparc_sol2_tdep ();
 void
-_initialize_sparc_sol2_tdep (void)
+_initialize_sparc_sol2_tdep ()
 {
   gdbarch_register_osabi (bfd_arch_sparc, 0,
 			  GDB_OSABI_SOLARIS, sparc32_sol2_init_abi);

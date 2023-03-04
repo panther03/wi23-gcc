@@ -1,4 +1,4 @@
-# Copyright 2008-2013 Free Software Foundation, Inc.
+# Copyright 2008-2023 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,18 +13,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-if { ![support_displaced_stepping] } { 
-    unsupported "displaced stepping"
-    return -1
-}
+require support_displaced_stepping
 
 load_lib mi-support.exp
 set MIFLAGS "-i=mi"
-
-gdb_exit
-if {[mi_gdb_start]} {
-    continue
-}
 
 #
 # Start here
@@ -36,19 +28,21 @@ if {[gdb_compile_pthreads "$srcdir/$subdir/$srcfile" $binfile executable $option
     return -1
 }
 
-mi_gdb_reinitialize_dir $srcdir/$subdir
-mi_gdb_load $binfile
-
-mi_gdb_test "-gdb-set non-stop 1" ".*"
-mi_gdb_test "-gdb-set target-async 1" ".*"
-mi_detect_async
-
-if { [mi_run_to_main] < 0 } {
-    continue
+save_vars { GDBFLAGS } {
+    append GDBFLAGS " -ex \"set non-stop on\""
+    mi_clean_restart $binfile
 }
 
-mi_create_breakpoint thread_function 2 keep thread_function .* .* .* \
-    "breakpoint at thread_function"
+mi_gdb_test "-gdb-set mi-async 1" ".*"
+mi_detect_async
+
+if { [mi_runto_main] < 0 } {
+    return
+}
+
+mi_create_breakpoint thread_function \
+    "breakpoint at thread_function" \
+    -number 2 -func thread_function
 
 mi_send_resuming_command "exec-continue --all" "resume all"
 for {set i 0} {$i < 6} {incr i} {
@@ -66,10 +60,10 @@ mi_delete_breakpoints
 # Here we create a response string.  Note we don't want \r\n at the end,
 # since mi_gdb_test will append this itself.
 set running_re ""
-for {set i 6} {$i > 1} {incr i -1} {
+for {set i 1} {$i < 6} {incr i} {
     set running_re "$running_re\\*running,thread-id=\"$i\"\r\n"
 }
-set running_re "$running_re\\*running,thread-id=\"1\""
+set running_re "$running_re\\*running,thread-id=\"6\""
 
 mi_gdb_test "-exec-continue --all" "\[^\n\]*\r\n$running_re" \
     "resume all, no breakpoint"

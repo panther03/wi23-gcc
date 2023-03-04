@@ -1,6 +1,6 @@
 /* Target-dependent code for GNU/Linux m32r.
 
-   Copyright (C) 2004-2013 Free Software Foundation, Inc.
+   Copyright (C) 2004-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -27,8 +27,6 @@
 #include "reggroups.h"
 #include "regset.h"
 
-#include "gdb_string.h"
-
 #include "glibc-tdep.h"
 #include "solib-svr4.h"
 #include "symtab.h"
@@ -38,6 +36,7 @@
 
 #include "m32r-tdep.h"
 #include "linux-tdep.h"
+#include "gdbarch.h"
 
 
 
@@ -86,7 +85,7 @@ static const gdb_byte linux_sigtramp_code[] = {
    the routine.  Otherwise, return 0.  */
 
 static CORE_ADDR
-m32r_linux_sigtramp_start (CORE_ADDR pc, struct frame_info *this_frame)
+m32r_linux_sigtramp_start (CORE_ADDR pc, frame_info_ptr this_frame)
 {
   gdb_byte buf[4];
 
@@ -100,7 +99,7 @@ m32r_linux_sigtramp_start (CORE_ADDR pc, struct frame_info *this_frame)
 
   if (pc % 2 != 0)
     {
-      if (!safe_frame_unwind_memory (this_frame, pc, buf, 2))
+      if (!safe_frame_unwind_memory (this_frame, pc, {buf, 2}))
 	return 0;
 
       if (memcmp (buf, linux_sigtramp_code, 2) == 0)
@@ -109,7 +108,7 @@ m32r_linux_sigtramp_start (CORE_ADDR pc, struct frame_info *this_frame)
 	return 0;
     }
 
-  if (!safe_frame_unwind_memory (this_frame, pc, buf, 4))
+  if (!safe_frame_unwind_memory (this_frame, pc, {buf, 4}))
     return 0;
 
   if (memcmp (buf, linux_sigtramp_code, 4) != 0)
@@ -134,7 +133,7 @@ static const gdb_byte linux_rt_sigtramp_code[] = {
    of the routine.  Otherwise, return 0.  */
 
 static CORE_ADDR
-m32r_linux_rt_sigtramp_start (CORE_ADDR pc, struct frame_info *this_frame)
+m32r_linux_rt_sigtramp_start (CORE_ADDR pc, frame_info_ptr this_frame)
 {
   gdb_byte buf[4];
 
@@ -149,12 +148,12 @@ m32r_linux_rt_sigtramp_start (CORE_ADDR pc, struct frame_info *this_frame)
   if (pc % 2 != 0)
     return 0;
 
-  if (!safe_frame_unwind_memory (this_frame, pc, buf, 4))
+  if (!safe_frame_unwind_memory (this_frame, pc, {buf, 4}))
     return 0;
 
   if (memcmp (buf, linux_rt_sigtramp_code, 4) == 0)
     {
-      if (!safe_frame_unwind_memory (this_frame, pc + 4, buf, 4))
+      if (!safe_frame_unwind_memory (this_frame, pc + 4, {buf, 4}))
 	return 0;
 
       if (memcmp (buf, linux_rt_sigtramp_code + 4, 4) == 0)
@@ -162,7 +161,7 @@ m32r_linux_rt_sigtramp_start (CORE_ADDR pc, struct frame_info *this_frame)
     }
   else if (memcmp (buf, linux_rt_sigtramp_code + 4, 4) == 0)
     {
-      if (!safe_frame_unwind_memory (this_frame, pc - 4, buf, 4))
+      if (!safe_frame_unwind_memory (this_frame, pc - 4, {buf, 4}))
 	return 0;
 
       if (memcmp (buf, linux_rt_sigtramp_code, 4) == 0)
@@ -174,7 +173,7 @@ m32r_linux_rt_sigtramp_start (CORE_ADDR pc, struct frame_info *this_frame)
 
 static int
 m32r_linux_pc_in_sigtramp (CORE_ADDR pc, const char *name,
-			   struct frame_info *this_frame)
+			   frame_info_ptr this_frame)
 {
   /* If we have NAME, we can optimize the search.  The trampolines are
      named __restore and __restore_rt.  However, they aren't dynamically
@@ -220,11 +219,11 @@ static int m32r_linux_sc_reg_offset[] = {
 struct m32r_frame_cache
 {
   CORE_ADDR base, pc;
-  struct trad_frame_saved_reg *saved_regs;
+  trad_frame_saved_reg *saved_regs;
 };
 
 static struct m32r_frame_cache *
-m32r_linux_sigtramp_frame_cache (struct frame_info *this_frame,
+m32r_linux_sigtramp_frame_cache (frame_info_ptr this_frame,
 				 void **this_cache)
 {
   struct m32r_frame_cache *cache;
@@ -232,7 +231,7 @@ m32r_linux_sigtramp_frame_cache (struct frame_info *this_frame,
   int regnum;
 
   if ((*this_cache) != NULL)
-    return (*this_cache);
+    return (struct m32r_frame_cache *) (*this_cache);
   cache = FRAME_OBSTACK_ZALLOC (struct m32r_frame_cache);
   (*this_cache) = cache;
   cache->saved_regs = trad_frame_alloc_saved_regs (this_frame);
@@ -245,7 +244,7 @@ m32r_linux_sigtramp_frame_cache (struct frame_info *this_frame,
   if (addr == 0)
     {
       /* If this is a RT signal trampoline, adjust SIGCONTEXT_ADDR
-         accordingly.  */
+	 accordingly.  */
       addr = m32r_linux_rt_sigtramp_start (cache->pc, this_frame);
       if (addr)
 	sigcontext_addr += 128;
@@ -259,15 +258,15 @@ m32r_linux_sigtramp_frame_cache (struct frame_info *this_frame,
   for (regnum = 0; regnum < sizeof (m32r_linux_sc_reg_offset) / 4; regnum++)
     {
       if (m32r_linux_sc_reg_offset[regnum] >= 0)
-	cache->saved_regs[regnum].addr =
-	  sigcontext_addr + m32r_linux_sc_reg_offset[regnum];
+	cache->saved_regs[regnum].set_addr (sigcontext_addr
+					    + m32r_linux_sc_reg_offset[regnum]);
     }
 
   return cache;
 }
 
 static void
-m32r_linux_sigtramp_frame_this_id (struct frame_info *this_frame,
+m32r_linux_sigtramp_frame_this_id (frame_info_ptr this_frame,
 				   void **this_cache,
 				   struct frame_id *this_id)
 {
@@ -278,7 +277,7 @@ m32r_linux_sigtramp_frame_this_id (struct frame_info *this_frame,
 }
 
 static struct value *
-m32r_linux_sigtramp_frame_prev_register (struct frame_info *this_frame,
+m32r_linux_sigtramp_frame_prev_register (frame_info_ptr this_frame,
 					 void **this_cache, int regnum)
 {
   struct m32r_frame_cache *cache =
@@ -289,7 +288,7 @@ m32r_linux_sigtramp_frame_prev_register (struct frame_info *this_frame,
 
 static int
 m32r_linux_sigtramp_frame_sniffer (const struct frame_unwind *self,
-				   struct frame_info *this_frame,
+				   frame_info_ptr this_frame,
 				   void **this_cache)
 {
   CORE_ADDR pc = get_frame_pc (this_frame);
@@ -303,6 +302,7 @@ m32r_linux_sigtramp_frame_sniffer (const struct frame_unwind *self,
 }
 
 static const struct frame_unwind m32r_linux_sigtramp_frame_unwind = {
+  "m32r linux sigtramp",
   SIGTRAMP_FRAME,
   default_frame_unwind_stop_reason,
   m32r_linux_sigtramp_frame_this_id,
@@ -346,19 +346,26 @@ static int m32r_pt_regs_offset[] = {
 #define SPU_OFFSET (4 * 23)
 #define SPI_OFFSET (4 * 26)
 
+#define M32R_LINUX_GREGS_SIZE (4 * 28)
+
 static void
 m32r_linux_supply_gregset (const struct regset *regset,
 			   struct regcache *regcache, int regnum,
 			   const void *gregs, size_t size)
 {
-  const char *regs = gregs;
-  unsigned long psw, bbpsw;
+  const gdb_byte *regs = (const gdb_byte *) gregs;
+  enum bfd_endian byte_order =
+    gdbarch_byte_order (regcache->arch ());
+  ULONGEST psw, bbpsw;
+  gdb_byte buf[4];
+  const gdb_byte *p;
   int i;
 
-  psw = *((unsigned long *) (regs + PSW_OFFSET));
-  bbpsw = *((unsigned long *) (regs + BBPSW_OFFSET));
+  psw = extract_unsigned_integer (regs + PSW_OFFSET, 4, byte_order);
+  bbpsw = extract_unsigned_integer (regs + BBPSW_OFFSET, 4, byte_order);
+  psw = ((0x00c1 & bbpsw) << 8) | ((0xc100 & psw) >> 8);
 
-  for (i = 0; i < sizeof (m32r_pt_regs_offset) / 4; i++)
+  for (i = 0; i < ARRAY_SIZE (m32r_pt_regs_offset); i++)
     {
       if (regnum != -1 && regnum != i)
 	continue;
@@ -366,48 +373,84 @@ m32r_linux_supply_gregset (const struct regset *regset,
       switch (i)
 	{
 	case PSW_REGNUM:
-	  *((unsigned long *) (regs + m32r_pt_regs_offset[i])) =
-	    ((0x00c1 & bbpsw) << 8) | ((0xc100 & psw) >> 8);
+	  store_unsigned_integer (buf, 4, byte_order, psw);
+	  p = buf;
 	  break;
 	case CBR_REGNUM:
-	  *((unsigned long *) (regs + m32r_pt_regs_offset[i])) =
-	    ((psw >> 8) & 1);
+	  store_unsigned_integer (buf, 4, byte_order, psw & 1);
+	  p = buf;
 	  break;
 	case M32R_SP_REGNUM:
-	  if (psw & 0x8000)
-	    *((unsigned long *) (regs + m32r_pt_regs_offset[i])) =
-	      *((unsigned long *) (regs + SPU_OFFSET));
-	  else
-	    *((unsigned long *) (regs + m32r_pt_regs_offset[i])) =
-	      *((unsigned long *) (regs + SPI_OFFSET));
+	  p = regs + ((psw & 0x80) ? SPU_OFFSET : SPI_OFFSET);
 	  break;
+	default:
+	  p = regs + m32r_pt_regs_offset[i];
 	}
 
-      regcache_raw_supply (regcache, i,
-			   regs + m32r_pt_regs_offset[i]);
+      regcache->raw_supply (i, p);
     }
 }
 
-static struct regset m32r_linux_gregset = {
-  NULL, m32r_linux_supply_gregset
+static void
+m32r_linux_collect_gregset (const struct regset *regset,
+			    const struct regcache *regcache,
+			    int regnum, void *gregs, size_t size)
+{
+  gdb_byte *regs = (gdb_byte *) gregs;
+  int i;
+  enum bfd_endian byte_order =
+    gdbarch_byte_order (regcache->arch ());
+  ULONGEST psw;
+  gdb_byte buf[4];
+
+  regcache->raw_collect (PSW_REGNUM, buf);
+  psw = extract_unsigned_integer (buf, 4, byte_order);
+
+  for (i = 0; i < ARRAY_SIZE (m32r_pt_regs_offset); i++)
+    {
+      if (regnum != -1 && regnum != i)
+	continue;
+
+      switch (i)
+	{
+	case PSW_REGNUM:
+	  store_unsigned_integer (regs + PSW_OFFSET, 4, byte_order,
+				  (psw & 0xc1) << 8);
+	  store_unsigned_integer (regs + BBPSW_OFFSET, 4, byte_order,
+				  (psw >> 8) & 0xc1);
+	  break;
+	case CBR_REGNUM:
+	  break;
+	case M32R_SP_REGNUM:
+	  regcache->raw_collect
+	    (i, regs + ((psw & 0x80) ? SPU_OFFSET : SPI_OFFSET));
+	  break;
+	default:
+	  regcache->raw_collect (i, regs + m32r_pt_regs_offset[i]);
+	}
+    }
+}
+
+static const struct regset m32r_linux_gregset = {
+  NULL,
+  m32r_linux_supply_gregset, m32r_linux_collect_gregset
 };
 
-static const struct regset *
-m32r_linux_regset_from_core_section (struct gdbarch *core_arch,
-				     const char *sect_name, size_t sect_size)
+static void
+m32r_linux_iterate_over_regset_sections (struct gdbarch *gdbarch,
+					 iterate_over_regset_sections_cb *cb,
+					 void *cb_data,
+					 const struct regcache *regcache)
 {
-  struct gdbarch_tdep *tdep = gdbarch_tdep (core_arch);
-  if (strcmp (sect_name, ".reg") == 0)
-    return &m32r_linux_gregset;
-  return NULL;
+  cb (".reg", M32R_LINUX_GREGS_SIZE, M32R_LINUX_GREGS_SIZE, &m32r_linux_gregset,
+      NULL, cb_data);
 }
 
 static void
 m32r_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
 {
-  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
 
-  linux_init_abi (info, gdbarch);
+  linux_init_abi (info, gdbarch, 0);
 
   /* Since EVB register is not available for native debug, we reduce
      the number of registers.  */
@@ -418,22 +461,20 @@ m32r_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
   /* GNU/Linux uses SVR4-style shared libraries.  */
   set_gdbarch_skip_trampoline_code (gdbarch, find_solib_trampoline_target);
   set_solib_svr4_fetch_link_map_offsets
-    (gdbarch, svr4_ilp32_fetch_link_map_offsets);
+    (gdbarch, linux_ilp32_fetch_link_map_offsets);
 
   /* Core file support.  */
-  set_gdbarch_regset_from_core_section
-    (gdbarch, m32r_linux_regset_from_core_section);
+  set_gdbarch_iterate_over_regset_sections
+    (gdbarch, m32r_linux_iterate_over_regset_sections);
 
   /* Enable TLS support.  */
   set_gdbarch_fetch_tls_load_module_address (gdbarch,
-                                             svr4_fetch_objfile_link_map);
+					     svr4_fetch_objfile_link_map);
 }
 
-/* Provide a prototype to silence -Wmissing-prototypes.  */
-extern void _initialize_m32r_linux_tdep (void);
-
+void _initialize_m32r_linux_tdep ();
 void
-_initialize_m32r_linux_tdep (void)
+_initialize_m32r_linux_tdep ()
 {
   gdbarch_register_osabi (bfd_arch_m32r, 0, GDB_OSABI_LINUX,
 			  m32r_linux_init_abi);

@@ -1,6 +1,6 @@
 /* Simulator for Analog Devices Blackfin processors.
 
-   Copyright (C) 2005-2013 Free Software Foundation, Inc.
+   Copyright (C) 2005-2023 Free Software Foundation, Inc.
    Contributed by Analog Devices, Inc.
 
    This file is part of simulators.
@@ -18,15 +18,19 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "config.h"
+/* This must come before any other includes.  */
+#include "defs.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
 
+#include "ansidecl.h"
 #include "opcode/bfin.h"
 #include "sim-main.h"
+#include "arch.h"
+#include "bfin-sim.h"
 #include "dv-bfin_cec.h"
 #include "dv-bfin_mmu.h"
 
@@ -35,7 +39,7 @@
 #define SIGNEXTEND(v, n) \
   (((bs32)(v) << (HOST_LONG_WORD_SIZE - (n))) >> (HOST_LONG_WORD_SIZE - (n)))
 
-static __attribute__ ((noreturn)) void
+static ATTRIBUTE_NORETURN void
 illegal_instruction (SIM_CPU *cpu)
 {
   TRACE_INSN (cpu, "ILLEGAL INSTRUCTION");
@@ -43,7 +47,7 @@ illegal_instruction (SIM_CPU *cpu)
     cec_exception (cpu, VEC_UNDEF_I);
 }
 
-static __attribute__ ((noreturn)) void
+static ATTRIBUTE_NORETURN void
 illegal_instruction_combination (SIM_CPU *cpu)
 {
   TRACE_INSN (cpu, "ILLEGAL INSTRUCTION COMBINATION");
@@ -51,7 +55,7 @@ illegal_instruction_combination (SIM_CPU *cpu)
     cec_exception (cpu, VEC_ILGAL_I);
 }
 
-static __attribute__ ((noreturn)) void
+static ATTRIBUTE_NORETURN void
 illegal_instruction_or_combination (SIM_CPU *cpu)
 {
   if (PARALLEL_GROUP != BFIN_PARALLEL_NONE)
@@ -60,7 +64,7 @@ illegal_instruction_or_combination (SIM_CPU *cpu)
     illegal_instruction (cpu);
 }
 
-static __attribute__ ((noreturn)) void
+static ATTRIBUTE_NORETURN void
 unhandled_instruction (SIM_CPU *cpu, const char *insn)
 {
   SIM_DESC sd = CPU_STATE (cpu);
@@ -1741,7 +1745,7 @@ hwloop_get_next_pc (SIM_CPU *cpu, bu32 pc, bu32 insn_len)
   for (i = 1; i >= 0; --i)
     if (LCREG (i) > 1 && pc == LBREG (i))
       {
-	TRACE_BRANCH (cpu, pc, LTREG (i), i, "Hardware loop %i", i);
+	BFIN_TRACE_BRANCH (cpu, pc, LTREG (i), i, "Hardware loop %i", i);
 	return LTREG (i);
       }
 
@@ -1773,7 +1777,7 @@ decode_ProgCtrl_0 (SIM_CPU *cpu, bu16 iw0, bu32 pc)
       IFETCH_CHECK (newpc);
       if (PARALLEL_GROUP != BFIN_PARALLEL_NONE)
 	illegal_instruction_combination (cpu);
-      TRACE_BRANCH (cpu, pc, newpc, -1, "RTS");
+      BFIN_TRACE_BRANCH (cpu, pc, newpc, -1, "RTS");
       SET_PCREG (newpc);
       BFIN_CPU_STATE.did_jump = true;
       CYCLE_DELAY = 5;
@@ -1893,7 +1897,7 @@ decode_ProgCtrl_0 (SIM_CPU *cpu, bu16 iw0, bu32 pc)
       IFETCH_CHECK (newpc);
       if (PARALLEL_GROUP != BFIN_PARALLEL_NONE)
 	illegal_instruction_combination (cpu);
-      TRACE_BRANCH (cpu, pc, newpc, -1, "JUMP (Preg)");
+      BFIN_TRACE_BRANCH (cpu, pc, newpc, -1, "JUMP (Preg)");
       SET_PCREG (newpc);
       BFIN_CPU_STATE.did_jump = true;
       PROFILE_BRANCH_TAKEN (cpu);
@@ -1907,7 +1911,7 @@ decode_ProgCtrl_0 (SIM_CPU *cpu, bu16 iw0, bu32 pc)
       IFETCH_CHECK (newpc);
       if (PARALLEL_GROUP != BFIN_PARALLEL_NONE)
 	illegal_instruction_combination (cpu);
-      TRACE_BRANCH (cpu, pc, newpc, -1, "CALL (Preg)");
+      BFIN_TRACE_BRANCH (cpu, pc, newpc, -1, "CALL (Preg)");
       /* If we're at the end of a hardware loop, RETS is going to be
          the top of the loop rather than the next instruction.  */
       SET_RETSREG (hwloop_get_next_pc (cpu, pc, 2));
@@ -1924,7 +1928,7 @@ decode_ProgCtrl_0 (SIM_CPU *cpu, bu16 iw0, bu32 pc)
       IFETCH_CHECK (newpc);
       if (PARALLEL_GROUP != BFIN_PARALLEL_NONE)
 	illegal_instruction_combination (cpu);
-      TRACE_BRANCH (cpu, pc, newpc, -1, "CALL (PC + Preg)");
+      BFIN_TRACE_BRANCH (cpu, pc, newpc, -1, "CALL (PC + Preg)");
       SET_RETSREG (hwloop_get_next_pc (cpu, pc, 2));
       SET_PCREG (newpc);
       BFIN_CPU_STATE.did_jump = true;
@@ -1939,7 +1943,7 @@ decode_ProgCtrl_0 (SIM_CPU *cpu, bu16 iw0, bu32 pc)
       IFETCH_CHECK (newpc);
       if (PARALLEL_GROUP != BFIN_PARALLEL_NONE)
 	illegal_instruction_combination (cpu);
-      TRACE_BRANCH (cpu, pc, newpc, -1, "JUMP (PC + Preg)");
+      BFIN_TRACE_BRANCH (cpu, pc, newpc, -1, "JUMP (PC + Preg)");
       SET_PCREG (newpc);
       BFIN_CPU_STATE.did_jump = true;
       PROFILE_BRANCH_TAKEN (cpu);
@@ -2444,7 +2448,7 @@ decode_BRCC_0 (SIM_CPU *cpu, bu16 iw0, bu32 pc)
   if (cond)
     {
       bu32 newpc = pc + pcrel;
-      TRACE_BRANCH (cpu, pc, newpc, -1, "Conditional JUMP");
+      BFIN_TRACE_BRANCH (cpu, pc, newpc, -1, "Conditional JUMP");
       SET_PCREG (newpc);
       BFIN_CPU_STATE.did_jump = true;
       PROFILE_BRANCH_TAKEN (cpu);
@@ -2477,7 +2481,7 @@ decode_UJUMP_0 (SIM_CPU *cpu, bu16 iw0, bu32 pc)
   if (PARALLEL_GROUP != BFIN_PARALLEL_NONE)
     illegal_instruction_combination (cpu);
 
-  TRACE_BRANCH (cpu, pc, newpc, -1, "JUMP.S");
+  BFIN_TRACE_BRANCH (cpu, pc, newpc, -1, "JUMP.S");
 
   SET_PCREG (newpc);
   BFIN_CPU_STATE.did_jump = true;
@@ -3292,7 +3296,7 @@ decode_LDST_0 (SIM_CPU *cpu, bu16 iw0)
   int aop = ((iw0 >> LDST_aop_bits) & LDST_aop_mask);
   int reg = ((iw0 >> LDST_reg_bits) & LDST_reg_mask);
   int ptr = ((iw0 >> LDST_ptr_bits) & LDST_ptr_mask);
-  const char * const posts[] = { "++", "--", "" };
+  const char * const posts[] = { "++", "--", "", "<INV>" };
   const char *post = posts[aop];
   const char *ptr_name = get_preg_name (ptr);
 
@@ -3619,11 +3623,11 @@ decode_CALLa_0 (SIM_CPU *cpu, bu16 iw0, bu16 iw1, bu32 pc)
 
   if (S == 1)
     {
-      TRACE_BRANCH (cpu, pc, newpc, -1, "CALL");
+      BFIN_TRACE_BRANCH (cpu, pc, newpc, -1, "CALL");
       SET_RETSREG (hwloop_get_next_pc (cpu, pc, 4));
     }
   else
-    TRACE_BRANCH (cpu, pc, newpc, -1, "JUMP.L");
+    BFIN_TRACE_BRANCH (cpu, pc, newpc, -1, "JUMP.L");
 
   SET_PCREG (newpc);
   BFIN_CPU_STATE.did_jump = true;
@@ -4318,7 +4322,7 @@ decode_dsp32alu_0 (SIM_CPU *cpu, bu16 iw0, bu16 iw1)
       SET_AREG (1, 0);
     }
   else if ((aop == 0 || aop == 1 || aop == 2) && s == 1 && aopcde == 8
-	   && x == 0 && s == 1 && HL == 0)
+	   && x == 0 && HL == 0)
     {
       bs40 acc0 = get_extended_acc (cpu, 0);
       bs40 acc1 = get_extended_acc (cpu, 1);
@@ -4537,7 +4541,7 @@ decode_dsp32alu_0 (SIM_CPU *cpu, bu16 iw0, bu16 iw1)
   else if ((aop == 0 || aop == 1) && aopcde == 14 && x == 0 && s == 0)
     {
       bs40 src_acc = get_extended_acc (cpu, aop);
-      int v = 0;
+      bu32 v = 0;
 
       TRACE_INSN (cpu, "A%i = - A%i;", HL, aop);
 
@@ -5716,7 +5720,7 @@ decode_dsp32shift_0 (SIM_CPU *cpu, bu16 iw0, bu16 iw1)
       bu32 fg = DREG (src0);
       bu32 bg = DREG (src1);
       bu32 len = fg & 0x1f;
-      bu32 mask = (1 << MIN (16, len)) - 1;
+      bu32 mask = (1 << min (16, len)) - 1;
       bu32 fgnd = (fg >> 16) & mask;
       int shft = ((fg >> 8) & 0x1f);
 
@@ -6083,7 +6087,11 @@ decode_dsp32shiftimm_0 (SIM_CPU *cpu, bu16 iw0, bu16 iw1)
       int count = imm6 (immag);
 
       TRACE_INSN (cpu, "R%i = R%i << %i (S);", dst0, src1, count);
-      STORE (DREG (dst0), lshift (cpu, DREG (src1), count, 32, 1, 1));
+
+      if (count < 0)
+	STORE (DREG (dst0), ashiftrt (cpu, DREG (src1), -count, 32));
+      else
+	STORE (DREG (dst0), lshift (cpu, DREG (src1), count, 32, 1, 1));
     }
   else if (sop == 2 && sopcde == 2)
     {

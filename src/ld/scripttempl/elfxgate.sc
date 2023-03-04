@@ -1,3 +1,8 @@
+# Copyright (C) 2014-2023 Free Software Foundation, Inc.
+#
+# Copying and distribution of this file, with or without modification,
+# are permitted in any medium without royalty provided the copyright
+# notice and this notice are preserved.
 #
 # Unusual variables checked by this code:
 #	NOP - four byte opcode for no-op (defaults to 0)
@@ -13,7 +18,7 @@
 #		.data section.
 #	OTHER_BSS_SYMBOLS - symbols that appear at the start of the
 #		.bss section besides __bss_start.
-#	EMBEDDED - whether this is for an embedded system. 
+#	EMBEDDED - whether this is for an embedded system.
 #
 # When adding sections, do note that the names of some sections are used
 # when specifying the start address of the next.
@@ -24,7 +29,7 @@ test -z "${LITTLE_OUTPUT_FORMAT}" && LITTLE_OUTPUT_FORMAT=${OUTPUT_FORMAT}
 if [ -z "$MACHINE" ]; then OUTPUT_ARCH=${ARCH}; else OUTPUT_ARCH=${ARCH}:${MACHINE}; fi
 test "$LD_FLAG" = "N" && DATA_ADDR=.
 
-CTOR=".ctors ${CONSTRUCTING-0} : 
+CTOR=".ctors ${CONSTRUCTING-0} :
   {
     ${CONSTRUCTING+ PROVIDE (__CTOR_LIST__ = .); }
     ${CONSTRUCTING+${CTOR_START}}
@@ -52,7 +57,7 @@ VECTORS="
      Bootstrap		0x00c0
      Test		0xbfc0
 
-     In general, the vectors address is 0xffc0.  This can be overriden 
+     In general, the vectors address is 0xffc0.  This can be overriden
      with the '-defsym vectors_addr=0xbfc0' ld option.
 
      Note: for the bootstrap mode, the interrupt vectors are at 0xbfc0 but
@@ -161,6 +166,12 @@ cat <<EOF
 ${RELOCATING+/* Linker script for 68HC12 executable (PROM).  */}
 ${RELOCATING-/* Linker script for 68HC12 object file (ld -r).  */}
 
+/* Copyright (C) 2014-2023 Free Software Foundation, Inc.
+
+   Copying and distribution of this script, with or without modification,
+   are permitted in any medium without royalty provided the copyright
+   notice and this notice are preserved.  */
+
 OUTPUT_FORMAT("${OUTPUT_FORMAT}", "${BIG_OUTPUT_FORMAT}",
 	      "${LITTLE_OUTPUT_FORMAT}")
 OUTPUT_ARCH(${OUTPUT_ARCH})
@@ -228,7 +239,7 @@ SECTIONS
       ${RELOCATING+*(.rela.gnu.linkonce.s.*)}
     }
   .rel.sbss    ${RELOCATING-0} :
-    { 
+    {
       *(.rel.sbss)
       ${RELOCATING+*(.rel.sbss.*)}
       ${RELOCATING+*(.rel.gnu.linkonce.sb.*)}
@@ -239,14 +250,14 @@ SECTIONS
       ${RELOCATING+*(.rela.sbss.*)}
       ${RELOCATING+*(.rel.gnu.linkonce.sb.*)}
     }
-  .rel.bss     ${RELOCATING-0} : 
-    { 
+  .rel.bss     ${RELOCATING-0} :
+    {
       *(.rel.bss)
       ${RELOCATING+*(.rel.bss.*)}
       ${RELOCATING+*(.rel.gnu.linkonce.b.*)}
     }
-  .rela.bss    ${RELOCATING-0} : 
-    { 
+  .rela.bss    ${RELOCATING-0} :
+    {
       *(.rela.bss)
       ${RELOCATING+*(.rela.bss.*)}
       ${RELOCATING+*(.rela.gnu.linkonce.b.*)}
@@ -288,14 +299,14 @@ SECTIONS
   } ${RELOCATING+ > page0}
 
   /* Start of text section.  */
-  .stext ${RELOCATING-0} : 
+  .stext ${RELOCATING-0} :
   {
     *(.stext)
   } ${RELOCATING+ > ${TEXT_MEMORY}}
 
   .init	${RELOCATING-0} :
   {
-    *(.init) 
+    KEEP (*(SORT_NONE(.init)))
   } ${RELOCATING+=${NOP-0}}
 
   ${RELOCATING-${INSTALL_RELOC}}
@@ -306,15 +317,15 @@ SECTIONS
     /* Put startup code at beginning so that _start keeps same address.  */
     ${RELOCATING+${STARTUP_CODE}}
 
-    ${RELOCATING+*(.init)}
     *(.text)
     ${RELOCATING+*(.text.*)}
-    /* .gnu.warning sections are handled specially by elf32.em.  */
+    /* .gnu.warning sections are handled specially by elf.em.  */
     *(.gnu.warning)
     ${RELOCATING+*(.gnu.linkonce.t.*)}
     ${RELOCATING+*(.tramp)}
     ${RELOCATING+*(.tramp.*)}
 
+    ${RELOCATING+KEEP (*(SORT_NONE(.fini)))}
     ${RELOCATING+${FINISH_CODE}}
 
     ${RELOCATING+_etext = .;}
@@ -402,12 +413,11 @@ SECTIONS
     ${RELOCATING+*(.softregs)}
     ${RELOCATING+*(.sbss)}
     ${RELOCATING+*(.scommon)}
-
-    *(.dynbss)
+    ${RELOCATING+*(.dynbss)}
     *(.bss)
     ${RELOCATING+*(.bss.*)}
     ${RELOCATING+*(.gnu.linkonce.b.*)}
-    *(COMMON)
+    ${RELOCATING+*(COMMON)}
     ${RELOCATING+PROVIDE (_end = .);}
   } ${RELOCATING+ > ${DATA_MEMORY}}
   ${RELOCATING+__bss_size = SIZEOF(.bss);}
@@ -416,7 +426,7 @@ SECTIONS
   .eeprom ${RELOCATING-0} :
   {
     *(.eeprom)
-    *(.eeprom.*)
+    ${RELOCATING+*(.eeprom.*)}
   } ${RELOCATING+ > ${EEPROM_MEMORY}}
 
   ${RELOCATING+${VECTORS}}

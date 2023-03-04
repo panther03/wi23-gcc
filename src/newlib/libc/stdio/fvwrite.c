@@ -5,7 +5,7 @@
  * Redistribution and use in source and binary forms are permitted
  * provided that the above copyright notice and this paragraph are
  * duplicated in all such forms and that any documentation,
- * advertising materials, and other materials related to such
+ * and/or other materials related to such
  * distribution and use acknowledge that the software was developed
  * by the University of California, Berkeley.  The name of the
  * University may not be used to endorse or promote products derived
@@ -26,7 +26,7 @@
 #include "fvwrite.h"
 
 #define	MIN(a, b) ((a) < (b) ? (a) : (b))
-#define	COPY(n)	  _CAST_VOID memmove ((_PTR) fp->_p, (_PTR) p, (size_t) (n))
+#define	COPY(n)	  (void) memmove ((void *) fp->_p, (void *) p, (size_t) (n))
 
 #define GETIOV(extra_work) \
   while (len == 0) \
@@ -45,13 +45,12 @@
  */
 
 int
-_DEFUN(__sfvwrite_r, (ptr, fp, uio),
-       struct _reent *ptr _AND
-       register FILE *fp _AND
+__sfvwrite_r (struct _reent *ptr,
+       register FILE *fp,
        register struct __suio *uio)
 {
   register size_t len;
-  register _CONST char *p = NULL;
+  register const char *p = NULL;
   register struct __siov *iov;
   register _READ_WRITE_RETURN_TYPE w, s;
   char *nl;
@@ -146,7 +145,7 @@ _DEFUN(__sfvwrite_r, (ptr, fp, uio),
 		      str = (unsigned char *)_malloc_r (ptr, newsize);
 		      if (!str)
 			{
-			  ptr->_errno = ENOMEM;
+			  _REENT_ERRNO(ptr) = ENOMEM;
 			  goto err;
 			}
 		      memcpy (str, fp->_bf._base, curpos);
@@ -163,7 +162,7 @@ _DEFUN(__sfvwrite_r, (ptr, fp, uio),
 			  _free_r (ptr, fp->_bf._base);
 			  fp->_flags &=  ~__SMBF;
 			  /* Ensure correct errno, even if free changed it.  */
-			  ptr->_errno = ENOMEM;
+			  _REENT_ERRNO(ptr) = ENOMEM;
 			  goto err;
 			}
 		    }
@@ -219,7 +218,7 @@ _DEFUN(__sfvwrite_r, (ptr, fp, uio),
 	  GETIOV (nlknown = 0);
 	  if (!nlknown)
 	    {
-	      nl = memchr ((_PTR) p, '\n', len);
+	      nl = memchr ((void *) p, '\n', len);
 	      nldist = nl ? nl + 1 - p : len + 1;
 	      nlknown = 1;
 	    }

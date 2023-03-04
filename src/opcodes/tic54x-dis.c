@@ -1,6 +1,5 @@
 /* Disassembly routines for TMS320C54X architecture
-   Copyright 1999, 2000, 2001, 2005, 2007, 2009, 2012
-   Free Software Foundation, Inc.
+   Copyright (C) 1999-2023 Free Software Foundation, Inc.
    Contributed by Timothy Wall (twall@cygnus.com)
 
    This file is part of the GNU opcodes library.
@@ -24,7 +23,7 @@
 #include <errno.h>
 #include <math.h>
 #include <stdlib.h>
-#include "dis-asm.h"
+#include "disassemble.h"
 #include "opcode/tic54x.h"
 #include "coff/tic54x.h"
 
@@ -118,7 +117,7 @@ tic54x_get_insn (disassemble_info *info, bfd_vma addr,
           bfd_byte opbuf[2];
           bfd_vma addr2 = addr + 1 + has_lkaddr (memdata, tm);
           int status = (*info->read_memory_func) (addr2, opbuf, 2, info);
-          // FIXME handle errors
+          /* FIXME handle errors.  */
           if (status == 0)
             {
               unsigned short data2 = bfd_getl16 (opbuf);
@@ -395,8 +394,7 @@ print_instruction (disassemble_info *info,
             break;
           }
         case OP_k5:
-          sprintf (operand[i], "#%d",
-                   (int) (((signed char) opcode & 0x1F) << 3) >> 3);
+          sprintf (operand[i], "#%d", ((opcode & 0x1F) ^ 0x10) - 0x10);
           info->fprintf_func (info->stream, "%s%s", comma, operand[i]);
           break;
         case OP_k8u:
@@ -531,7 +529,7 @@ sprint_mmr (disassemble_info *info ATTRIBUTE_UNUSED,
 	    char buf[],
 	    int mmr)
 {
-  symbol *reg = (symbol *) mmregs;
+  const tic54x_symbol *reg = tic54x_mmregs;
   while (reg->name != NULL)
     {
       if (mmr == reg->value)

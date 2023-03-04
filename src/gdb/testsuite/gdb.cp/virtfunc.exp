@@ -1,4 +1,4 @@
-# Copyright 1992-2013 Free Software Foundation, Inc.
+# Copyright 1992-2023 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -18,13 +18,13 @@
 
 set nl		"\[\r\n\]+"
 
-if { [skip_cplus_tests] } { continue }
+require allow_cplus_tests
 
 load_lib "cp-support.exp"
 
 standard_testfile .cc
 
-if {[prepare_for_testing $testfile.exp $testfile $srcfile {debug c++}]} {
+if {[prepare_for_testing "failed to prepare" $testfile $srcfile {debug c++}]} {
     return -1
 }
 
@@ -177,8 +177,7 @@ proc test_virtual_calls {} {
     global nl
 
     if [target_info exists gdb,cannot_call_functions] {
-	setup_xfail "*-*-*" 2416
-	fail "This target can not call functions"
+	unsupported "this target can not call functions"
 	return 0
     }
 
@@ -274,8 +273,7 @@ proc do_tests {} {
     gdb_test_no_output "set language c++" ""
     gdb_test_no_output "set width 0" ""
 
-    if ![runto_main] then {
-	perror "couldn't run to breakpoint"
+    if {![runto_main]} {
 	return
     }
     test_ptype_of_classes

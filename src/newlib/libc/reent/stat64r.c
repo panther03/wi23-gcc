@@ -33,17 +33,10 @@ FUNCTION
 INDEX
 	_stat64_r
 
-ANSI_SYNOPSIS
+SYNOPSIS
 	#include <reent.h>
 	int _stat64_r(struct _reent *<[ptr]>,
 		    const char *<[file]>, struct stat64 *<[pstat]>);
-
-TRAD_SYNOPSIS
-	#include <reent.h>
-	int _stat64_r(<[ptr]>, <[file]>, <[pstat]>)
-	struct _reent *<[ptr]>;
-	char *<[file]>;
-	struct stat64 *<[pstat]>;
 
 DESCRIPTION
 	This is a reentrant version of <<stat64>>.  It
@@ -52,16 +45,15 @@ DESCRIPTION
 */
 
 int
-_DEFUN (_stat64_r, (ptr, file, pstat),
-     struct _reent *ptr _AND
-     _CONST char *file _AND
+_stat64_r (struct _reent *ptr,
+     const char *file,
      struct stat64 *pstat)
 {
   int ret;
 
   errno = 0;
   if ((ret = _stat64 (file, pstat)) == -1 && errno != 0)
-    ptr->_errno = errno;
+    _REENT_ERRNO(ptr) = errno;
   return ret;
 }
 

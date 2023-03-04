@@ -1,5 +1,5 @@
 /* tc-score.c -- Assembler for Score
-   Copyright 2006, 2007, 2008, 2009, 2011, 2012 Free Software Foundation, Inc.
+   Copyright (C) 2006-2023 Free Software Foundation, Inc.
    Contributed by:
    Brain.lin (brain.lin@sunplusct.com)
    Mei Ligang (ligang@sunnorth.com.cn)
@@ -61,11 +61,11 @@ static void s3_assemble (char *str);
 static void s3_operand (expressionS *);
 static void s3_begin (void);
 static void s3_number_to_chars (char *buf, valueT val, int n);
-static char *s3_atof (int type, char *litP, int *sizeP);
+static const char *s3_atof (int type, char *litP, int *sizeP);
 static void s3_frag_check (fragS * fragp ATTRIBUTE_UNUSED);
 static void s3_validate_fix (fixS *fixP);
 static int s3_force_relocation (struct fix *fixp);
-static bfd_boolean s3_fix_adjustable (fixS * fixP);
+static bool s3_fix_adjustable (fixS * fixP);
 static void s3_elf_final_processing (void);
 static int s3_estimate_size_before_relax (fragS * fragp, asection * sec ATTRIBUTE_UNUSED);
 static int s3_relax_frag (asection * sec ATTRIBUTE_UNUSED, fragS * fragp, long stretch ATTRIBUTE_UNUSED);
@@ -300,7 +300,6 @@ size_t md_longopts_size = sizeof (md_longopts);
                              ? s3_INSN16_SIZE : (s3_GET_INSN_CLASS (type) == INSN_CLASS_48) \
                                              ? s3_INSN48_SIZE : s3_INSN_SIZE)
 
-#define s3_MAX_LITTLENUMS 6
 #define s3_INSN_NAME_LEN 16
 
 /* Relax will need some padding for alignment.  */
@@ -334,7 +333,7 @@ enum s3_insn_type_for_dependency
 
 struct s3_insn_to_dependency
 {
-  char *insn_name;
+  const char *insn_name;
   enum s3_insn_type_for_dependency type;
 };
 
@@ -351,13 +350,13 @@ struct s3_data_dependency
 
 static const struct s3_insn_to_dependency s3_insn_to_dependency_table[] =
 {
-  /* move spectial instruction.  */
+  /* move special instruction.  */
   {"mtcr",      s3_D_mtcr},
 };
 
 static const struct s3_data_dependency s3_data_dependency_table[] =
 {
-  /* Status regiser.  */
+  /* Status register.  */
   {s3_D_mtcr, "cr0", s3_D_all_insn, "", 5, 1, 0},
 };
 
@@ -460,7 +459,7 @@ struct s3_reg_map
 {
   const struct s3_reg_entry *names;
   int max_regno;
-  struct hash_control *htab;
+  htab_t htab;
   const char *expected;
 };
 
@@ -471,8 +470,8 @@ static struct s3_reg_map s3_all_reg_maps[] =
   {s3_score_crn_table, 31, NULL, N_("S+core co-processor register expected")},
 };
 
-static struct hash_control *s3_score_ops_hsh = NULL;
-static struct hash_control *s3_dependency_insn_hsh = NULL;
+static htab_t s3_score_ops_hsh = NULL;
+static htab_t s3_dependency_insn_hsh = NULL;
 
 
 struct s3_datafield_range
@@ -1028,7 +1027,7 @@ s3_end_of_line (char *str)
 }
 
 static int
-s3_score_reg_parse (char **ccp, struct hash_control *htab)
+s3_score_reg_parse (char **ccp, htab_t htab)
 {
   char *start = *ccp;
   char c;
@@ -1045,7 +1044,7 @@ s3_score_reg_parse (char **ccp, struct hash_control *htab)
     c = *p++;
 
   *--p = 0;
-  reg = (struct s3_reg_entry *) hash_find (htab, start);
+  reg = (struct s3_reg_entry *) str_hash_find (htab, start);
   *p = c;
 
   if (reg)
@@ -1071,7 +1070,7 @@ s3_reg_required_here (char **str, int shift, enum s3_score_reg_type reg_type)
         {
           if ((reg == 1) && (s3_nor1 == 1) && (s3_inst.bwarn == 0))
             {
-              as_warn (_("Using temp register(r1)"));
+              as_warn (_("Using temp register (r1)"));
               s3_inst.bwarn = 1;
             }
         }
@@ -2079,7 +2078,7 @@ s3_reglow_required_here (char **str, int shift)
 
   /* Restore the start point, we may have got a reg of the wrong class.  */
   *str = start;
-  sprintf (buff, _("low register(r0-r15)expected, not '%.100s'"), start);
+  sprintf (buff, _("low register (r0-r15) expected, not '%.100s'"), start);
   s3_inst.error = buff;
   return (int) s3_FAIL;
 }
@@ -2204,7 +2203,8 @@ s3_dependency_type_from_insn (char *insn_name)
   const struct s3_insn_to_dependency *tmp;
 
   strcpy (name, insn_name);
-  tmp = (const struct s3_insn_to_dependency *) hash_find (s3_dependency_insn_hsh, name);
+  tmp = (const struct s3_insn_to_dependency *)
+    str_hash_find (s3_dependency_insn_hsh, name);
 
   if (tmp)
     return tmp->type;
@@ -2344,7 +2344,7 @@ s3_handle_dependency (struct s3_score_it *theinst)
 	      if (remainder_bubbles <= 2)
 		{
 		  if (s3_warn_fix_data_dependency)
-		    as_warn (_("Fix data dependency: %s %s -- %s %s  (insert %d nop!/%d)"),
+		    as_warn (_("Fix data dependency: %s %s -- %s %s (insert %d nop!/%d)"),
 			     s3_dependency_vector[i].name, s3_dependency_vector[i].reg,
 			     s3_dependency_vector[0].name, s3_dependency_vector[0].reg,
 			     remainder_bubbles, bubbles);
@@ -2363,7 +2363,7 @@ s3_handle_dependency (struct s3_score_it *theinst)
 	      else
 		{
 		  if (s3_warn_fix_data_dependency)
-		    as_warn (_("Fix data dependency: %s %s -- %s %s  (insert 1 pflush/%d)"),
+		    as_warn (_("Fix data dependency: %s %s -- %s %s (insert 1 pflush/%d)"),
 			     s3_dependency_vector[i].name, s3_dependency_vector[i].reg,
 			     s3_dependency_vector[0].name, s3_dependency_vector[0].reg,
 			     bubbles);
@@ -2379,14 +2379,14 @@ s3_handle_dependency (struct s3_score_it *theinst)
             {
 	      if (warn_or_error)
 		{
-                  as_bad (_("data dependency: %s %s -- %s %s  (%d/%d bubble)"),
+                  as_bad (_("data dependency: %s %s -- %s %s (%d/%d bubble)"),
 			  s3_dependency_vector[i].name, s3_dependency_vector[i].reg,
 			  s3_dependency_vector[0].name, s3_dependency_vector[0].reg,
 			  remainder_bubbles, bubbles);
 		}
 	      else
 		{
-                  as_warn (_("data dependency: %s %s -- %s %s  (%d/%d bubble)"),
+                  as_warn (_("data dependency: %s %s -- %s %s (%d/%d bubble)"),
                            s3_dependency_vector[i].name, s3_dependency_vector[i].reg,
                            s3_dependency_vector[0].name, s3_dependency_vector[0].reg,
                            remainder_bubbles, bubbles);
@@ -2544,14 +2544,14 @@ static void
 s3_gen_insn_frag (struct s3_score_it *part_1, struct s3_score_it *part_2)
 {
   char *p;
-  bfd_boolean pce_p = FALSE;
+  bool pce_p = false;
   int relaxable_p = s3_g_opt;
   int relax_size = 0;
   struct s3_score_it *inst1 = part_1;
   struct s3_score_it *inst2 = part_2;
   struct s3_score_it backup_inst1;
 
-  pce_p = (inst2) ? TRUE : FALSE;
+  pce_p = inst2 != NULL;
   memcpy (&backup_inst1, inst1, sizeof (struct s3_score_it));
 
   /* Adjust instruction opcode and to be relaxed instruction opcode.  */
@@ -2595,7 +2595,7 @@ s3_gen_insn_frag (struct s3_score_it *part_1, struct s3_score_it *part_2)
   /* Here, we must call frag_grow in order to keep the instruction frag type is
      rs_machine_dependent.
      For, frag_var may change frag_now->fr_type to rs_fill by calling frag_grow which
-     acturally will call frag_wane.
+     actually will call frag_wane.
      Calling frag_grow first will create a new frag_now which free size is 20 that is enough
      for frag_var.  */
   frag_grow (20);
@@ -2643,7 +2643,7 @@ s3_gen_insn_frag (struct s3_score_it *part_1, struct s3_score_it *part_2)
 }
 
 static void
-s3_parse_16_32_inst (char *insnstr, bfd_boolean gen_frag_p)
+s3_parse_16_32_inst (char *insnstr, bool gen_frag_p)
 {
   char c;
   char *p;
@@ -2663,7 +2663,8 @@ s3_parse_16_32_inst (char *insnstr, bfd_boolean gen_frag_p)
   c = *p;
   *p = '\0';
 
-  opcode = (const struct s3_asm_opcode *) hash_find (s3_score_ops_hsh, operator);
+  opcode = (const struct s3_asm_opcode *) str_hash_find (s3_score_ops_hsh,
+							 operator);
   *p = c;
 
   memset (&s3_inst, '\0', sizeof (s3_inst));
@@ -2692,7 +2693,7 @@ s3_parse_16_32_inst (char *insnstr, bfd_boolean gen_frag_p)
 }
 
 static void
-s3_parse_48_inst (char *insnstr, bfd_boolean gen_frag_p)
+s3_parse_48_inst (char *insnstr, bool gen_frag_p)
 {
   char c;
   char *p;
@@ -2709,7 +2710,8 @@ s3_parse_48_inst (char *insnstr, bfd_boolean gen_frag_p)
   c = *p;
   *p = '\0';
 
-  opcode = (const struct s3_asm_opcode *) hash_find (s3_score_ops_hsh, operator);
+  opcode = (const struct s3_asm_opcode *) str_hash_find (s3_score_ops_hsh,
+							 operator);
   *p = c;
 
   memset (&s3_inst, '\0', sizeof (s3_inst));
@@ -2738,7 +2740,7 @@ s3_parse_48_inst (char *insnstr, bfd_boolean gen_frag_p)
 }
 
 static int
-s3_append_insn (char *str, bfd_boolean gen_frag_p)
+s3_append_insn (char *str, bool gen_frag_p)
 {
   int retval = s3_SUCCESS;
 
@@ -3775,7 +3777,7 @@ s3_do16_rpush (char *str)
     return;
 
   /* 0: indicate 32.
-     1: invalide value.
+     1: invalid value.
      2: to 31: normal value.  */
   val = s3_inst.instruction & 0x1f;
   if (val == 1)
@@ -3803,7 +3805,7 @@ s3_do16_rpop (char *str)
     return;
 
   /* 0: indicate 32.
-     1: invalide value.
+     1: invalid value.
      2: to 31: normal value.  */
   val = s3_inst.instruction & 0x1f;
   if (val == 1)
@@ -4096,8 +4098,8 @@ s3_build_la_pic (int reg_rd, expressionS exp)
       /* Fix part
          For an external symbol: lw rD, <sym>($gp)
 	 (BFD_RELOC_SCORE_GOT15 or BFD_RELOC_SCORE_CALL15)  */
-      sprintf (tmp, "lw_pic r%d, %s", reg_rd, add_symbol->bsym->name);
-      if (s3_append_insn (tmp, FALSE) == (int) s3_FAIL)
+      sprintf (tmp, "lw_pic r%d, %s", reg_rd, S_GET_NAME (add_symbol));
+      if (s3_append_insn (tmp, false) == (int) s3_FAIL)
 	return;
 
       if (reg_rd == s3_PIC_CALL_REG)
@@ -4110,8 +4112,8 @@ s3_build_la_pic (int reg_rd, expressionS exp)
 	 addi rD, <sym>       (BFD_RELOC_GOT_LO16) */
       s3_inst.reloc.type = BFD_RELOC_SCORE_GOT15;
       memcpy (&var_insts[0], &s3_inst, sizeof (struct s3_score_it));
-      sprintf (tmp, "addi_s_pic r%d, %s", reg_rd, add_symbol->bsym->name);
-      if (s3_append_insn (tmp, FALSE) == (int) s3_FAIL)
+      sprintf (tmp, "addi_s_pic r%d, %s", reg_rd, S_GET_NAME (add_symbol));
+      if (s3_append_insn (tmp, false) == (int) s3_FAIL)
 	return;
 
       memcpy (&var_insts[1], &s3_inst, sizeof (struct s3_score_it));
@@ -4120,8 +4122,8 @@ s3_build_la_pic (int reg_rd, expressionS exp)
   else if (add_number >= -0x8000 && add_number <= 0x7fff)
     {
       /* Insn 1: lw rD, <sym>($gp)    (BFD_RELOC_SCORE_GOT15)  */
-      sprintf (tmp, "lw_pic r%d, %s", reg_rd, add_symbol->bsym->name);
-      if (s3_append_insn (tmp, TRUE) == (int) s3_FAIL)
+      sprintf (tmp, "lw_pic r%d, %s", reg_rd, S_GET_NAME (add_symbol));
+      if (s3_append_insn (tmp, true) == (int) s3_FAIL)
 	return;
 
       /* Insn 2  */
@@ -4130,15 +4132,16 @@ s3_build_la_pic (int reg_rd, expressionS exp)
       /* Fix part
          For an external symbol: addi rD, <constant> */
       sprintf (tmp, "addi r%d, %d", reg_rd, (int)add_number);
-      if (s3_append_insn (tmp, FALSE) == (int) s3_FAIL)
+      if (s3_append_insn (tmp, false) == (int) s3_FAIL)
 	return;
 
       memcpy (&fix_insts[0], &s3_inst, sizeof (struct s3_score_it));
 
       /* Var part
  	 For a local symbol: addi rD, <sym>+<constant>    (BFD_RELOC_GOT_LO16)  */
-      sprintf (tmp, "addi_s_pic r%d, %s + %d", reg_rd, add_symbol->bsym->name, (int)add_number);
-      if (s3_append_insn (tmp, FALSE) == (int) s3_FAIL)
+      sprintf (tmp, "addi_s_pic r%d, %s + %d", reg_rd,
+	       S_GET_NAME (add_symbol), (int) add_number);
+      if (s3_append_insn (tmp, false) == (int) s3_FAIL)
 	return;
 
       memcpy (&var_insts[0], &s3_inst, sizeof (struct s3_score_it));
@@ -4150,8 +4153,8 @@ s3_build_la_pic (int reg_rd, expressionS exp)
       int lo = add_number & 0x0000FFFF;
 
       /* Insn 1: lw rD, <sym>($gp)    (BFD_RELOC_SCORE_GOT15)  */
-      sprintf (tmp, "lw_pic r%d, %s", reg_rd, add_symbol->bsym->name);
-      if (s3_append_insn (tmp, TRUE) == (int) s3_FAIL)
+      sprintf (tmp, "lw_pic r%d, %s", reg_rd, S_GET_NAME (add_symbol));
+      if (s3_append_insn (tmp, true) == (int) s3_FAIL)
 	return;
 
       /* Insn 2  */
@@ -4160,20 +4163,20 @@ s3_build_la_pic (int reg_rd, expressionS exp)
       /* Fix part
 	 For an external symbol: ldis r1, HI%<constant>  */
       sprintf (tmp, "ldis r1, %d", hi);
-      if (s3_append_insn (tmp, FALSE) == (int) s3_FAIL)
+      if (s3_append_insn (tmp, false) == (int) s3_FAIL)
 	return;
 
       memcpy (&fix_insts[0], &s3_inst, sizeof (struct s3_score_it));
 
       /* Var part
 	 For a local symbol: ldis r1, HI%<constant>
-         but, if lo is outof 16 bit, make hi plus 1  */
+         but, if lo is out of 16 bit, make hi plus 1  */
       if ((lo < -0x8000) || (lo > 0x7fff))
 	{
 	  hi += 1;
 	}
       sprintf (tmp, "ldis_pic r1, %d", hi);
-      if (s3_append_insn (tmp, FALSE) == (int) s3_FAIL)
+      if (s3_append_insn (tmp, false) == (int) s3_FAIL)
 	return;
 
       memcpy (&var_insts[0], &s3_inst, sizeof (struct s3_score_it));
@@ -4185,15 +4188,15 @@ s3_build_la_pic (int reg_rd, expressionS exp)
       /* Fix part
 	 For an external symbol: ori r1, LO%<constant>  */
       sprintf (tmp, "ori r1, %d", lo);
-      if (s3_append_insn (tmp, FALSE) == (int) s3_FAIL)
+      if (s3_append_insn (tmp, false) == (int) s3_FAIL)
 	return;
 
       memcpy (&fix_insts[0], &s3_inst, sizeof (struct s3_score_it));
 
       /* Var part
   	 For a local symbol: addi r1, <sym>+LO%<constant>    (BFD_RELOC_GOT_LO16)  */
-      sprintf (tmp, "addi_u_pic r1, %s + %d", add_symbol->bsym->name, lo);
-      if (s3_append_insn (tmp, FALSE) == (int) s3_FAIL)
+      sprintf (tmp, "addi_u_pic r1, %s + %d", S_GET_NAME (add_symbol), lo);
+      if (s3_append_insn (tmp, false) == (int) s3_FAIL)
 	return;
 
       memcpy (&var_insts[0], &s3_inst, sizeof (struct s3_score_it));
@@ -4201,7 +4204,7 @@ s3_build_la_pic (int reg_rd, expressionS exp)
 
       /* Insn 4: add rD, rD, r1  */
       sprintf (tmp, "add r%d, r%d, r1", reg_rd, reg_rd);
-      if (s3_append_insn (tmp, TRUE) == (int) s3_FAIL)
+      if (s3_append_insn (tmp, true) == (int) s3_FAIL)
 	return;
 
       /* Set bwarn as -1, so macro instruction itself will not be generated frag.  */
@@ -4267,11 +4270,11 @@ s3_do_macro_la_rdi32 (char *str)
               if ((s3_score_pic == s3_NO_PIC) || (!s3_inst.reloc.exp.X_add_symbol))
                 {
                   sprintf (append_str, "ld_i32hi r%d, %s", reg_rd, keep_data);
-                  if (s3_append_insn (append_str, TRUE) == (int) s3_FAIL)
+                  if (s3_append_insn (append_str, true) == (int) s3_FAIL)
 		    return;
 
                   sprintf (append_str, "ld_i32lo r%d, %s", reg_rd, keep_data);
-                  if (s3_append_insn (append_str, TRUE) == (int) s3_FAIL)
+                  if (s3_append_insn (append_str, true) == (int) s3_FAIL)
 		    return;
 		}
 	      else
@@ -4349,12 +4352,12 @@ s3_do_macro_li_rdi32 (char *str)
             {
               sprintf (append_str, "ld_i32hi r%d, %s", reg_rd, keep_data);
 
-              if (s3_append_insn (append_str, TRUE) == (int) s3_FAIL)
+              if (s3_append_insn (append_str, true) == (int) s3_FAIL)
 		return;
               else
                 {
                   sprintf (append_str, "ld_i32lo r%d, %s", reg_rd, keep_data);
-                  if (s3_append_insn (append_str, TRUE) == (int) s3_FAIL)
+                  if (s3_append_insn (append_str, true) == (int) s3_FAIL)
 		    return;
 
                   /* Set bwarn as -1, so macro instruction itself will not be generated frag.  */
@@ -4432,11 +4435,11 @@ s3_do_macro_mul_rdrsrs (char *str)
             }
 
           /* Output mul/mulu or div/divu or rem/remu.  */
-          if (s3_append_insn (append_str, TRUE) == (int) s3_FAIL)
+          if (s3_append_insn (append_str, true) == (int) s3_FAIL)
 	    return;
 
           /* Output mfcel or mfceh.  */
-          if (s3_append_insn (append_str1, TRUE) == (int) s3_FAIL)
+          if (s3_append_insn (append_str1, true) == (int) s3_FAIL)
 	    return;
 
           /* Set bwarn as -1, so macro instruction itself will not be generated frag.  */
@@ -4471,7 +4474,7 @@ s3_exp_macro_ldst_abs (char *str)
 
   backupstr = tmp;
   sprintf (append_str, "li r1  %s", backupstr);
-  s3_append_insn (append_str, TRUE);
+  s3_append_insn (append_str, true);
 
   memcpy (&s3_inst, &inst_backup, sizeof (struct s3_score_it));
   sprintf (append_str, " r%d, [r1,0]", reg_rd);
@@ -4485,9 +4488,9 @@ static void
 s3_do_macro_bcmp (char *str)
 {
   int reg_a , reg_b;
-  char keep_data[s3_MAX_LITERAL_POOL_SIZE];
-  char* ptemp;
-  int i = 0;
+  char *keep_data;
+  size_t keep_data_size;
+  int i;
   struct s3_score_it inst_expand[2];
   struct s3_score_it inst_main;
 
@@ -4498,26 +4501,23 @@ s3_do_macro_bcmp (char *str)
       ||(reg_b = s3_reg_required_here (&str, 10, s3_REG_TYPE_SCORE)) == (int) s3_FAIL
       || s3_skip_past_comma (&str) == (int) s3_FAIL)
     return;
-  ptemp = str;
-  while (*ptemp != 0)
-    {
-      keep_data[i] = *ptemp;
-      i++;
-      ptemp++;
-    }
-  keep_data[i] = 0;
+
+  keep_data_size = strlen (str) + 1;
+  keep_data = xmalloc (keep_data_size * 2 + 14);
+  memcpy (keep_data, str, keep_data_size);
+
   if (s3_my_get_expression (&s3_inst.reloc.exp, &str) == (int) s3_FAIL
       ||reg_b == 0
       || s3_end_of_line (str) == (int) s3_FAIL)
-    return;
+    goto out;
   else if (s3_inst.reloc.exp.X_add_symbol == 0)
     {
       s3_inst.error = _("lacking label  ");
-      return;
+      goto out;
     }
   else
     {
-      char append_str[s3_MAX_LITERAL_POOL_SIZE];
+      char *append_str = keep_data + keep_data_size;
       s3_SET_INSN_ERROR (NULL);
 
       s3_inst.reloc.type = BFD_RELOC_SCORE_BCMP;
@@ -4536,15 +4536,16 @@ s3_do_macro_bcmp (char *str)
           /* support bcmp --> cmp!+beq (bne) */
           if (s3_score_pic == s3_NO_PIC)
             {
-              sprintf (&append_str[0], "cmp! r%d, r%d", reg_a, reg_b);
-              if (s3_append_insn (&append_str[0], TRUE) == (int) s3_FAIL)
-                return;
-              if ((inst_main.instruction & 0x3e00007e) == 0x0000004c)
-                sprintf (&append_str[1], "beq %s", keep_data);
-              else
-                sprintf (&append_str[1], "bne %s", keep_data);
-              if (s3_append_insn (&append_str[1], TRUE) == (int) s3_FAIL)
-                return;
+	      sprintf (append_str, "cmp! r%d, r%d", reg_a, reg_b);
+	      if (s3_append_insn (append_str, true) == (int) s3_FAIL)
+		goto out;
+	      if ((inst_main.instruction & 0x3e00007e) == 0x0000004c)
+		memcpy (append_str, "beq ", 4);
+	      else
+		memcpy (append_str, "bne ", 4);
+	      memmove (append_str + 4, keep_data, strlen (keep_data) + 1);
+	      if (s3_append_insn (append_str, true) == (int) s3_FAIL)
+		goto out;
 	    }
 	  else
 	    {
@@ -4552,7 +4553,7 @@ s3_do_macro_bcmp (char *str)
 	    }
 	  /* Set bwarn as -1, so macro instruction itself will not be generated frag.  */
 	  s3_inst.bwarn = -1;
-	  return;
+	  goto out;
         }
       else
         {
@@ -4567,18 +4568,19 @@ s3_do_macro_bcmp (char *str)
 
       if (s3_score_pic == s3_NO_PIC)
         {
-          sprintf (&append_str[0], "cmp! r%d, r%d", reg_a, reg_b);
-          if (s3_append_insn (&append_str[0], FALSE) == (int) s3_FAIL)
-            return;
-          memcpy (&inst_expand[0], &s3_inst, sizeof (struct s3_score_it));
+	  sprintf (append_str, "cmp! r%d, r%d", reg_a, reg_b);
+	  if (s3_append_insn (append_str, false) == (int) s3_FAIL)
+	    goto out;
+	  memcpy (&inst_expand[0], &s3_inst, sizeof (struct s3_score_it));
 
-          if ((inst_main.instruction & 0x3e00007e) == 0x0000004c)
-            sprintf (&append_str[1], "beq %s", keep_data);
-          else
-            sprintf (&append_str[1], "bne %s", keep_data);
-          if (s3_append_insn (&append_str[1], FALSE) == (int) s3_FAIL)
-            return;
-          memcpy (&inst_expand[1], &s3_inst, sizeof (struct s3_score_it));
+	  if ((inst_main.instruction & 0x3e00007e) == 0x0000004c)
+	    memcpy (append_str, "beq ", 4);
+	  else
+	    memcpy (append_str, "bne ", 4);
+	  memmove (append_str + 4, keep_data, strlen (keep_data) + 1);
+	  if (s3_append_insn (append_str, false) == (int) s3_FAIL)
+	    goto out;
+	  memcpy (&inst_expand[1], &s3_inst, sizeof (struct s3_score_it));
         }
       else
         {
@@ -4634,6 +4636,8 @@ s3_do_macro_bcmp (char *str)
       /* Set bwarn as -1, so macro instruction itself will not be generated frag.  */
       s3_inst.bwarn = -1;
     }
+ out:
+  free (keep_data);
 }
 
 /* Handle bcmpeqz / bcmpnez  */
@@ -4641,9 +4645,9 @@ static void
 s3_do_macro_bcmpz (char *str)
 {
   int reg_a;
-  char keep_data[s3_MAX_LITERAL_POOL_SIZE];
-  char* ptemp;
-  int i = 0;
+  char *keep_data;
+  size_t keep_data_size;
+  int i;
   struct s3_score_it inst_expand[2];
   struct s3_score_it inst_main;
 
@@ -4652,27 +4656,22 @@ s3_do_macro_bcmpz (char *str)
   if (( reg_a = s3_reg_required_here (&str, 15, s3_REG_TYPE_SCORE)) == (int) s3_FAIL
       || s3_skip_past_comma (&str) == (int) s3_FAIL)
     return;
-  ptemp = str;
-  while (*ptemp != 0)
-    {
-      keep_data[i] = *ptemp;
-      i++;
-      ptemp++;
-    }
 
-  keep_data[i] = 0;
+  keep_data_size = strlen (str) + 1;
+  keep_data = xmalloc (keep_data_size * 2 + 13);
+  memcpy (keep_data, str, keep_data_size);
 
   if (s3_my_get_expression (&s3_inst.reloc.exp, &str) == (int) s3_FAIL
       || s3_end_of_line (str) == (int) s3_FAIL)
-    return;
+    goto out;
   else if (s3_inst.reloc.exp.X_add_symbol == 0)
     {
       s3_inst.error = _("lacking label  ");
-      return;
+      goto out;
     }
   else
     {
-      char append_str[s3_MAX_LITERAL_POOL_SIZE];
+      char *append_str = keep_data + keep_data_size;
       s3_SET_INSN_ERROR (NULL);
       s3_inst.reloc.type = BFD_RELOC_SCORE_BCMP;
       s3_inst.reloc.pc_rel = 1;
@@ -4687,15 +4686,16 @@ s3_do_macro_bcmpz (char *str)
         {
           if (s3_score_pic == s3_NO_PIC)
             {
-              sprintf (&append_str[0], "cmpi! r%d,0", reg_a);
-              if (s3_append_insn (&append_str[0], TRUE) == (int) s3_FAIL)
-                return;
-              if ((inst_main.instruction & 0x3e00007e) == 0x0000004c)
-                sprintf (&append_str[1], "beq %s", keep_data);
-              else
-                sprintf (&append_str[1], "bne %s", keep_data);
-              if (s3_append_insn (&append_str[1], TRUE) == (int) s3_FAIL)
-                return;
+	      sprintf (append_str, "cmpi! r%d, 0", reg_a);
+	      if (s3_append_insn (append_str, true) == (int) s3_FAIL)
+		goto out;
+	      if ((inst_main.instruction & 0x3e00007e) == 0x0000004c)
+		memcpy (append_str, "beq ", 4);
+	      else
+		memcpy (append_str, "bne ", 4);
+	      memmove (append_str + 4, keep_data, strlen (keep_data) + 1);
+	      if (s3_append_insn (append_str, true) == (int) s3_FAIL)
+		goto out;
             }
           else
             {
@@ -4703,7 +4703,7 @@ s3_do_macro_bcmpz (char *str)
             }
           /* Set bwarn as -1, so macro instruction itself will not be generated frag.  */
           s3_inst.bwarn = -1;
-          return;
+	  goto out;
         }
       else
         {
@@ -4718,17 +4718,18 @@ s3_do_macro_bcmpz (char *str)
 
       if (s3_score_pic == s3_NO_PIC)
         {
-          sprintf (&append_str[0], "cmpi! r%d, 0", reg_a);
-          if (s3_append_insn (&append_str[0], FALSE) == (int) s3_FAIL)
-            return;
-          memcpy (&inst_expand[0], &s3_inst, sizeof (struct s3_score_it));
-          if ((inst_main.instruction & 0x3e00007e) == 0x0000004c)
-            sprintf (&append_str[1], "beq %s", keep_data);
-          else
-            sprintf (&append_str[1], "bne %s", keep_data);
-          if (s3_append_insn (&append_str[1], FALSE) == (int) s3_FAIL)
-            return;
-          memcpy (&inst_expand[1], &s3_inst, sizeof (struct s3_score_it));
+	  sprintf (append_str, "cmpi! r%d, 0", reg_a);
+	  if (s3_append_insn (append_str, false) == (int) s3_FAIL)
+	    goto out;
+	  memcpy (&inst_expand[0], &s3_inst, sizeof (struct s3_score_it));
+	  if ((inst_main.instruction & 0x3e00007e) == 0x0000004c)
+	    memcpy (append_str, "beq ", 4);
+	  else
+	    memcpy (append_str, "bne ", 4);
+	  memmove (append_str + 4, keep_data, strlen (keep_data) + 1);
+	  if (s3_append_insn (append_str, false) == (int) s3_FAIL)
+	    goto out;
+	  memcpy (&inst_expand[1], &s3_inst, sizeof (struct s3_score_it));
         }
       else
         {
@@ -4784,6 +4785,8 @@ s3_do_macro_bcmpz (char *str)
       /* Set bwarn as -1, so macro instruction itself will not be generated frag.  */
       s3_inst.bwarn = -1;
     }
+ out:
+  free (keep_data);
 }
 
 static int
@@ -4829,8 +4832,8 @@ s3_nopic_need_relax (symbolS * sym, int before_relaxing)
       segname = segment_name (S_GET_SEGMENT (sym));
       return (strcmp (segname, ".sdata") != 0
 	      && strcmp (segname, ".sbss") != 0
-	      && strncmp (segname, ".sdata.", 7) != 0
-	      && strncmp (segname, ".gnu.linkonce.s.", 16) != 0);
+	      && !startswith (segname, ".sdata.")
+	      && !startswith (segname, ".gnu.linkonce.s."));
     }
   /* We are not optimizing for the $gp register.  */
   else
@@ -4864,8 +4867,8 @@ s3_build_lwst_pic (int reg_rd, expressionS exp, const char *insn_name)
       /* Fix part
          For an external symbol: lw rD, <sym>($gp)
 	 (BFD_RELOC_SCORE_GOT15)  */
-      sprintf (tmp, "lw_pic r1, %s", add_symbol->bsym->name);
-      if (s3_append_insn (tmp, FALSE) == (int) s3_FAIL)
+      sprintf (tmp, "lw_pic r1, %s", S_GET_NAME (add_symbol));
+      if (s3_append_insn (tmp, false) == (int) s3_FAIL)
         return;
 
       memcpy (&fix_insts[0], &s3_inst, sizeof (struct s3_score_it));
@@ -4876,8 +4879,8 @@ s3_build_lwst_pic (int reg_rd, expressionS exp, const char *insn_name)
 	 addi rD, <sym>       (BFD_RELOC_GOT_LO16) */
       s3_inst.reloc.type = BFD_RELOC_SCORE_GOT15;
       memcpy (&var_insts[0], &s3_inst, sizeof (struct s3_score_it));
-      sprintf (tmp, "addi_s_pic r1, %s", add_symbol->bsym->name);
-      if (s3_append_insn (tmp, FALSE) == (int) s3_FAIL)
+      sprintf (tmp, "addi_s_pic r1, %s", S_GET_NAME (add_symbol));
+      if (s3_append_insn (tmp, false) == (int) s3_FAIL)
         return;
 
       memcpy (&var_insts[1], &s3_inst, sizeof (struct s3_score_it));
@@ -4885,7 +4888,7 @@ s3_build_lwst_pic (int reg_rd, expressionS exp, const char *insn_name)
 
       /* Insn 2 or Insn 3: lw/st rD, [r1, constant]  */
       sprintf (tmp, "%s r%d, [r1, %d]", insn_name, reg_rd, add_number);
-      if (s3_append_insn (tmp, TRUE) == (int) s3_FAIL)
+      if (s3_append_insn (tmp, true) == (int) s3_FAIL)
         return;
 
       /* Set bwarn as -1, so macro instruction itself will not be generated frag.  */
@@ -5029,7 +5032,7 @@ s3_do_macro_ldst_label (char *str)
      ld/st rd, [r1, 0]  */
   for (i = 0; i < 3; i++)
     {
-      if (s3_append_insn (append_str[i], FALSE) == (int) s3_FAIL)
+      if (s3_append_insn (append_str[i], false) == (int) s3_FAIL)
 	return;
 
       memcpy (&inst_expand[i], &s3_inst, sizeof (struct s3_score_it));
@@ -5228,7 +5231,7 @@ s3_do_branch (char *str)
   else if (!(s3_inst.reloc.exp.X_add_number >= -524288
 	     && s3_inst.reloc.exp.X_add_number <= 524287))
     {
-      s3_inst.error = _("invalid constant: 20 bit expression not in range -2^19..2^19");
+      s3_inst.error = _("invalid constant: 20 bit expression not in range -2^19..2^19-1");
       return;
     }
 
@@ -5279,11 +5282,11 @@ s3_do16_branch (char *str)
 }
 
 /* Return true if the given symbol should be considered local for s3_PIC.  */
-static bfd_boolean
+static bool
 s3_pic_need_relax (symbolS *sym, asection *segtype)
 {
   asection *symsec;
-  bfd_boolean linkonce;
+  bool linkonce;
 
   /* Handle the case of a symbol equated to another symbol.  */
   while (symbol_equated_reloc_p (sym))
@@ -5301,18 +5304,17 @@ s3_pic_need_relax (symbolS *sym, asection *segtype)
   symsec = S_GET_SEGMENT (sym);
 
   /* duplicate the test for LINK_ONCE sections as in adjust_reloc_syms */
-  linkonce = FALSE;
+  linkonce = false;
   if (symsec != segtype && ! S_IS_LOCAL (sym))
     {
-      if ((bfd_get_section_flags (stdoutput, symsec) & SEC_LINK_ONCE) != 0)
-	linkonce = TRUE;
+      if ((bfd_section_flags (symsec) & SEC_LINK_ONCE) != 0)
+	linkonce = true;
 
       /* The GNU toolchain uses an extension for ELF: a section
 	 beginning with the magic string .gnu.linkonce is a linkonce
 	 section.  */
-      if (strncmp (segment_name (symsec), ".gnu.linkonce",
-		   sizeof ".gnu.linkonce" - 1) == 0)
-	linkonce = TRUE;
+      if (startswith (segment_name (symsec), ".gnu.linkonce"))
+	linkonce = true;
     }
 
   /* This must duplicate the test in adjust_reloc_syms.  */
@@ -5348,13 +5350,13 @@ s3_parse_pce_inst (char *insnstr)
   p += 2;
   sprintf (second, "%s", p);
 
-  s3_parse_16_32_inst (first, FALSE);
+  s3_parse_16_32_inst (first, false);
   if (s3_inst.error)
     return;
 
   memcpy (&pec_part_1, &s3_inst, sizeof (s3_inst));
 
-  s3_parse_16_32_inst (second, FALSE);
+  s3_parse_16_32_inst (second, false);
   if (s3_inst.error)
     return;
 
@@ -5362,8 +5364,8 @@ s3_parse_pce_inst (char *insnstr)
 	 || ((pec_part_1.size == s3_INSN_SIZE) && (s3_inst.size == s3_INSN16_SIZE))
 	 || ((pec_part_1.size == s3_INSN16_SIZE) && (s3_inst.size == s3_INSN_SIZE)))
     {
-      s3_inst.error = _("pce instruction error (16 bit || 16 bit)'");
-      sprintf (s3_inst.str, insnstr);
+      s3_inst.error = _("pce instruction error (16 bit || 16 bit).");
+      sprintf (s3_inst.str, "%s", insnstr);
       return;
     }
 
@@ -5550,7 +5552,7 @@ static void
 s3_score_s_section (int ignore)
 {
   obj_elf_section (ignore);
-  if ((bfd_get_section_flags (stdoutput, now_seg) & SEC_CODE) != 0)
+  if ((bfd_section_flags (now_seg) & SEC_CODE) != 0)
     record_alignment (now_seg, 2);
 
 }
@@ -5573,14 +5575,16 @@ s3_s_change_sec (int sec)
     {
     case 'r':
       seg = subseg_new (s3_RDATA_SECTION_NAME, (subsegT) get_absolute_expression ());
-      bfd_set_section_flags (stdoutput, seg, (SEC_ALLOC | SEC_LOAD | SEC_READONLY | SEC_RELOC | SEC_DATA));
+      bfd_set_section_flags (seg, (SEC_ALLOC | SEC_LOAD | SEC_READONLY
+				   | SEC_RELOC | SEC_DATA));
       if (strcmp (TARGET_OS, "elf") != 0)
         record_alignment (seg, 4);
       demand_empty_rest_of_line ();
       break;
     case 's':
       seg = subseg_new (".sdata", (subsegT) get_absolute_expression ());
-      bfd_set_section_flags (stdoutput, seg, SEC_ALLOC | SEC_LOAD | SEC_RELOC | SEC_DATA);
+      bfd_set_section_flags (seg, (SEC_ALLOC | SEC_LOAD | SEC_RELOC
+				   | SEC_DATA | SEC_SMALL_DATA));
       if (strcmp (TARGET_OS, "elf") != 0)
         record_alignment (seg, 4);
       demand_empty_rest_of_line ();
@@ -5619,10 +5623,9 @@ s3_get_symbol (void)
   char *name;
   symbolS *p;
 
-  name = input_line_pointer;
-  c = get_symbol_end ();
+  c = get_symbol_name (&name);
   p = (symbolS *) symbol_find_or_make (name);
-  *input_line_pointer = c;
+  (void) restore_line_pointer (c);
   return p;
 }
 
@@ -5690,17 +5693,10 @@ s3_s_score_ent (int aent)
   if (ISDIGIT (*input_line_pointer) || *input_line_pointer == '-')
     s3_get_number ();
 
-#ifdef BFD_ASSEMBLER
-  if ((bfd_get_section_flags (stdoutput, now_seg) & SEC_CODE) != 0)
+  if ((bfd_section_flags (now_seg) & SEC_CODE) != 0)
     maybe_text = 1;
   else
     maybe_text = 0;
-#else
-  if (now_seg != data_section && now_seg != bss_section)
-    maybe_text = 1;
-  else
-    maybe_text = 0;
-#endif
   if (!maybe_text)
     as_warn (_(".ent or .aent not in text section."));
   if (!aent && s3_cur_proc_ptr)
@@ -5799,17 +5795,10 @@ s3_s_score_end (int x ATTRIBUTE_UNUSED)
   else
     p = NULL;
 
-#ifdef BFD_ASSEMBLER
-  if ((bfd_get_section_flags (stdoutput, now_seg) & SEC_CODE) != 0)
+  if ((bfd_section_flags (now_seg) & SEC_CODE) != 0)
     maybe_text = 1;
   else
     maybe_text = 0;
-#else
-  if (now_seg != data_section && now_seg != bss_section)
-    maybe_text = 1;
-  else
-    maybe_text = 0;
-#endif
 
   if (!maybe_text)
     as_warn (_(".end not in text section"));
@@ -5943,15 +5932,15 @@ s3_s_score_cpload (int ignore ATTRIBUTE_UNUSED)
   demand_empty_rest_of_line ();
 
   sprintf (insn_str, "ld_i32hi r%d, %s", s3_GP, GP_DISP_LABEL);
-  if (s3_append_insn (insn_str, TRUE) == (int) s3_FAIL)
+  if (s3_append_insn (insn_str, true) == (int) s3_FAIL)
     return;
 
   sprintf (insn_str, "ld_i32lo r%d, %s", s3_GP, GP_DISP_LABEL);
-  if (s3_append_insn (insn_str, TRUE) == (int) s3_FAIL)
+  if (s3_append_insn (insn_str, true) == (int) s3_FAIL)
     return;
 
   sprintf (insn_str, "add r%d, r%d, r%d", s3_GP, s3_GP, reg);
-  if (s3_append_insn (insn_str, TRUE) == (int) s3_FAIL)
+  if (s3_append_insn (insn_str, true) == (int) s3_FAIL)
     return;
 }
 
@@ -5983,7 +5972,7 @@ s3_s_score_cprestore (int ignore ATTRIBUTE_UNUSED)
   if (cprestore_offset <= 0x3fff)
     {
       sprintf (insn_str, "sw r%d, [r%d, %d]", s3_GP, reg, cprestore_offset);
-      if (s3_append_insn (insn_str, TRUE) == (int) s3_FAIL)
+      if (s3_append_insn (insn_str, true) == (int) s3_FAIL)
         return;
     }
   else
@@ -5994,15 +5983,15 @@ s3_s_score_cprestore (int ignore ATTRIBUTE_UNUSED)
       s3_nor1 = 0;
 
       sprintf (insn_str, "li r1, %d", cprestore_offset);
-      if (s3_append_insn (insn_str, TRUE) == (int) s3_FAIL)
+      if (s3_append_insn (insn_str, true) == (int) s3_FAIL)
         return;
 
       sprintf (insn_str, "add r1, r1, r%d", reg);
-      if (s3_append_insn (insn_str, TRUE) == (int) s3_FAIL)
+      if (s3_append_insn (insn_str, true) == (int) s3_FAIL)
         return;
 
       sprintf (insn_str, "sw r%d, [r1]", s3_GP);
-      if (s3_append_insn (insn_str, TRUE) == (int) s3_FAIL)
+      if (s3_append_insn (insn_str, true) == (int) s3_FAIL)
         return;
 
       s3_nor1 = r1_bak;
@@ -6033,7 +6022,7 @@ s3_s_score_gpword (int ignore ATTRIBUTE_UNUSED)
     }
   p = frag_more (4);
   s3_md_number_to_chars (p, (valueT) 0, 4);
-  fix_new_exp (frag_now, p - frag_now->fr_literal, 4, &ex, FALSE, BFD_RELOC_GPREL32);
+  fix_new_exp (frag_now, p - frag_now->fr_literal, 4, &ex, false, BFD_RELOC_GPREL32);
   demand_empty_rest_of_line ();
 }
 
@@ -6060,7 +6049,7 @@ s3_s_score_cpadd (int ignore ATTRIBUTE_UNUSED)
 
   /* Add $gp to the register named as an argument.  */
   sprintf (insn_str, "add r%d, r%d, r%d", reg, reg, s3_GP);
-  if (s3_append_insn (insn_str, TRUE) == (int) s3_FAIL)
+  if (s3_append_insn (insn_str, true) == (int) s3_FAIL)
     return;
 }
 
@@ -6095,10 +6084,9 @@ s3_s_score_lcomm (int bytes_p)
   segT bss_seg = bss_section;
   int needs_align = 0;
 
-  name = input_line_pointer;
-  c = get_symbol_end ();
+  c = get_symbol_name (&name);
   p = input_line_pointer;
-  *p = c;
+  (void) restore_line_pointer (c);
 
   if (name == p)
     {
@@ -6134,15 +6122,14 @@ s3_s_score_lcomm (int bytes_p)
   if (OUTPUT_FLAVOR == bfd_target_ecoff_flavour || OUTPUT_FLAVOR == bfd_target_elf_flavour)
     {
       /* For Score and Alpha ECOFF or ELF, small objects are put in .sbss.  */
-      if ((unsigned)temp <= bfd_get_gp_size (stdoutput))
-        {
-          bss_seg = subseg_new (".sbss", 1);
-          seg_info (bss_seg)->bss = 1;
-#ifdef BFD_ASSEMBLER
-          if (!bfd_set_section_flags (stdoutput, bss_seg, SEC_ALLOC))
-            as_warn (_("error setting flags for \".sbss\": %s"), bfd_errmsg (bfd_get_error ()));
-#endif
-        }
+      if ((unsigned) temp <= bfd_get_gp_size (stdoutput))
+	{
+	  bss_seg = subseg_new (".sbss", 1);
+	  seg_info (bss_seg)->bss = 1;
+	  if (!bfd_set_section_flags (bss_seg, SEC_ALLOC | SEC_SMALL_DATA))
+	    as_warn (_("error setting flags for \".sbss\": %s"),
+		     bfd_errmsg (bfd_get_error ()));
+	}
     }
 #endif
 
@@ -6219,14 +6206,9 @@ s3_s_score_lcomm (int bytes_p)
   *p = c;
 
   if (
-#if (defined (OBJ_AOUT) || defined (OBJ_MAYBE_AOUT)	\
-     || defined (OBJ_BOUT) || defined (OBJ_MAYBE_BOUT))
-#ifdef BFD_ASSEMBLER
+#if (defined (OBJ_AOUT) || defined (OBJ_MAYBE_AOUT))
       (OUTPUT_FLAVOR != bfd_target_aout_flavour
        || (S_GET_OTHER (symbolP) == 0 && S_GET_DESC (symbolP) == 0)) &&
-#else
-      (S_GET_OTHER (symbolP) == 0 && S_GET_DESC (symbolP) == 0) &&
-#endif
 #endif
       (S_GET_SEGMENT (symbolP) == bss_seg || (!S_IS_DEFINED (symbolP) && S_GET_VALUE (symbolP) == 0)))
     {
@@ -6271,22 +6253,16 @@ s3_s_score_lcomm (int bytes_p)
 }
 
 static void
-s3_insert_reg (const struct s3_reg_entry *r, struct hash_control *htab)
+s3_insert_reg (const struct s3_reg_entry *r, htab_t htab)
 {
-  int i = 0;
-  int len = strlen (r->name) + 2;
-  char *buf = xmalloc (len);
-  char *buf2 = xmalloc (len);
+  char *buf = notes_strdup (r->name);
+  char *p;
 
-  strcpy (buf + i, r->name);
-  for (i = 0; buf[i]; i++)
-    {
-      buf2[i] = TOUPPER (buf[i]);
-    }
-  buf2[i] = '\0';
+  for (p = buf; *p; p++)
+    *p = TOUPPER (*p);
 
-  hash_insert (htab, buf, (void *) r);
-  hash_insert (htab, buf2, (void *) r);
+  str_hash_insert (htab, r->name, r, 0);
+  str_hash_insert (htab, buf, r, 0);
 }
 
 static void
@@ -6294,14 +6270,9 @@ s3_build_reg_hsh (struct s3_reg_map *map)
 {
   const struct s3_reg_entry *r;
 
-  if ((map->htab = hash_new ()) == NULL)
-    {
-      as_fatal (_("virtual memory exhausted"));
-    }
+  map->htab = str_htab_create ();
   for (r = map->names; r->name != NULL; r++)
-    {
-      s3_insert_reg (r, map->htab);
-    }
+    s3_insert_reg (r, map->htab);
 }
 
 /* Iterate over the base tables to create the instruction patterns.  */
@@ -6309,28 +6280,25 @@ static void
 s3_build_score_ops_hsh (void)
 {
   unsigned int i;
-  static struct obstack insn_obstack;
 
-  obstack_begin (&insn_obstack, 4000);
   for (i = 0; i < sizeof (s3_score_insns) / sizeof (struct s3_asm_opcode); i++)
     {
       const struct s3_asm_opcode *insn = s3_score_insns + i;
-      unsigned len = strlen (insn->template_name);
+      size_t len = strlen (insn->template_name) + 1;
       struct s3_asm_opcode *new_opcode;
       char *template_name;
-      new_opcode = (struct s3_asm_opcode *)
-	obstack_alloc (&insn_obstack, sizeof (struct s3_asm_opcode));
-      template_name = (char *) obstack_alloc (& insn_obstack, len + 1);
 
-      strcpy (template_name, insn->template_name);
+      new_opcode = notes_alloc (sizeof (*new_opcode));
+      template_name = notes_memdup (insn->template_name, len, len);
+
       new_opcode->template_name = template_name;
       new_opcode->parms = insn->parms;
       new_opcode->value = insn->value;
       new_opcode->relax_value = insn->relax_value;
       new_opcode->type = insn->type;
       new_opcode->bitmask = insn->bitmask;
-      hash_insert (s3_score_ops_hsh, new_opcode->template_name,
-                   (void *) new_opcode);
+      str_hash_insert (s3_score_ops_hsh, new_opcode->template_name,
+		       new_opcode, 0);
     }
 }
 
@@ -6338,25 +6306,20 @@ static void
 s3_build_dependency_insn_hsh (void)
 {
   unsigned int i;
-  static struct obstack dependency_obstack;
 
-  obstack_begin (&dependency_obstack, 4000);
   for (i = 0; i < sizeof (s3_insn_to_dependency_table) / sizeof (s3_insn_to_dependency_table[0]); i++)
     {
       const struct s3_insn_to_dependency *tmp = s3_insn_to_dependency_table + i;
-      unsigned len = strlen (tmp->insn_name);
+      size_t len = strlen (tmp->insn_name) + 1;
       struct s3_insn_to_dependency *new_i2n;
+      char *buf;
 
-      new_i2n = (struct s3_insn_to_dependency *)
-	obstack_alloc (&dependency_obstack,
-		       sizeof (struct s3_insn_to_dependency));
-      new_i2n->insn_name = (char *) obstack_alloc (&dependency_obstack,
-                                                   len + 1);
+      new_i2n = notes_alloc (sizeof (*new_i2n));
+      buf = notes_memdup (tmp->insn_name, len, len);
 
-      strcpy (new_i2n->insn_name, tmp->insn_name);
+      new_i2n->insn_name = buf;
       new_i2n->type = tmp->type;
-      hash_insert (s3_dependency_insn_hsh, new_i2n->insn_name,
-                   (void *) new_i2n);
+      str_hash_insert (s3_dependency_insn_hsh, new_i2n->insn_name, new_i2n, 0);
     }
 }
 
@@ -6496,9 +6459,9 @@ s3_assemble (char *str)
   if (s3_INSN_IS_PCE_P (str))
     s3_parse_pce_inst (str);
   else if (s3_INSN_IS_48_P (str))
-    s3_parse_48_inst (str, TRUE);
+    s3_parse_48_inst (str, true);
   else
-    s3_parse_16_32_inst (str, TRUE);
+    s3_parse_16_32_inst (str, true);
 
   if (s3_inst.error)
     as_bad (_("%s -- `%s'"), s3_inst.error, s3_inst.str);
@@ -6524,13 +6487,11 @@ s3_begin (void)
   segT seg;
   subsegT subseg;
 
-  if ((s3_score_ops_hsh = hash_new ()) == NULL)
-    as_fatal (_("virtual memory exhausted"));
+  s3_score_ops_hsh = str_htab_create ();
 
   s3_build_score_ops_hsh ();
 
-  if ((s3_dependency_insn_hsh = hash_new ()) == NULL)
-    as_fatal (_("virtual memory exhausted"));
+  s3_dependency_insn_hsh = str_htab_create ();
 
   s3_build_dependency_insn_hsh ();
 
@@ -6544,8 +6505,8 @@ s3_begin (void)
   seg = now_seg;
   subseg = now_subseg;
   s3_pdr_seg = subseg_new (".pdr", (subsegT) 0);
-  (void)bfd_set_section_flags (stdoutput, s3_pdr_seg, SEC_READONLY | SEC_RELOC | SEC_DEBUGGING);
-  (void)bfd_set_section_alignment (stdoutput, s3_pdr_seg, 2);
+  bfd_set_section_flags (s3_pdr_seg, SEC_READONLY | SEC_RELOC | SEC_DEBUGGING);
+  bfd_set_section_alignment (s3_pdr_seg, 2);
   subseg_set (seg, subseg);
 
   if (s3_USE_GLOBAL_POINTER_OPT)
@@ -6658,11 +6619,11 @@ s3_md_chars_to_number (char *buf, int n)
   return result;
 }
 
-static char *
+static const char *
 s3_atof (int type, char *litP, int *sizeP)
 {
   int prec;
-  LITTLENUM_TYPE words[s3_MAX_LITTLENUMS];
+  LITTLENUM_TYPE words[MAX_LITTLENUMS];
   char *t;
   int i;
 
@@ -6747,7 +6708,7 @@ s3_force_relocation (struct fix *fixp)
   return retval;
 }
 
-static bfd_boolean
+static bool
 s3_fix_adjustable (fixS * fixP)
 {
   if (fixP->fx_addsy == NULL)
@@ -6807,7 +6768,7 @@ s3_judge_size_before_relax (fragS * fragp, asection *sec)
   if (change == 1)
     {
       /* Only at the first time determining whether s3_GP instruction relax should be done,
-         return the difference between insntruction size and instruction relax size.  */
+         return the difference between instruction size and instruction relax size.  */
       if (fragp->fr_opcode == NULL)
 	{
 	  fragp->fr_fix = s3_RELAX_NEW (fragp->fr_subtype);
@@ -6853,10 +6814,7 @@ s3_relax_branch_inst16 (fragS * fragp)
   if (s == NULL)
     frag_addr = 0;
   else
-    {
-      if (s->bsym != 0)
-        symbol_address = (addressT) s->sy_frag->fr_address;
-    }
+    symbol_address = (addressT) symbol_get_frag (s)->fr_address;
 
   inst_value = s3_md_chars_to_number (fragp->fr_literal, s3_INSN16_SIZE);
   offset = (inst_value & 0x1ff) << 1;
@@ -6868,7 +6826,6 @@ s3_relax_branch_inst16 (fragS * fragp)
   if (relaxable_p
       && (!((value & 0xfffffe00) == 0 || (value & 0xfffffe00) == 0xfffffe00))
       && fragp->fr_fix == 2
-      && (s->bsym != NULL)
       && (S_IS_DEFINED (s)
           && !S_IS_COMMON (s)
           && !S_IS_EXTERNAL (s)))
@@ -6900,10 +6857,7 @@ s3_relax_cmpbranch_inst32 (fragS * fragp)
   if (s == NULL)
     frag_addr = 0;
   else
-    {
-      if (s->bsym != 0)
-        symbol_address = (addressT) s->sy_frag->fr_address;
-    }
+    symbol_address = (addressT) symbol_get_frag (s)->fr_address;
 
   inst_value = s3_md_chars_to_number (fragp->fr_literal, s3_INSN_SIZE);
   offset = (inst_value & 0x1)
@@ -6915,7 +6869,7 @@ s3_relax_cmpbranch_inst32 (fragS * fragp)
 
   value = offset + symbol_address - frag_addr;
   /* change the order of judging rule is because
-     1.not defined symbol or common sysbol or external symbol will change
+     1.not defined symbol or common symbol or external symbol will change
      bcmp to cmp!+beq/bne ,here need to record fragp->fr_opcode
      2.if the flow is as before : it will results to recursive loop
   */
@@ -6924,11 +6878,10 @@ s3_relax_cmpbranch_inst32 (fragS * fragp)
       /* Have already relaxed!  Just return 0 to terminate the loop.  */
       return 0;
     }
-  /* need to translate when extern or not defind or common sysbol */
+  /* need to translate when extern or not defined or common symbol */
   else if ((relaxable_p
 	    && (!((value & 0xfffffe00) == 0 || (value & 0xfffffe00) == 0xfffffe00))
-	    && fragp->fr_fix == 4
-	    && (s->bsym != NULL))
+	    && fragp->fr_fix == 4)
 	   || !S_IS_DEFINED (s)
 	   ||S_IS_COMMON (s)
 	   ||S_IS_EXTERNAL (s))
@@ -7024,8 +6977,8 @@ s3_relax_frag (asection * sec ATTRIBUTE_UNUSED, fragS * fragp, long stretch ATTR
 static void
 s3_convert_frag (bfd * abfd ATTRIBUTE_UNUSED, segT sec ATTRIBUTE_UNUSED, fragS * fragp)
 {
-  int r_old;
-  int r_new;
+  unsigned int r_old;
+  unsigned int r_new;
   char backup[20];
   fixS *fixp;
 
@@ -7090,17 +7043,17 @@ s3_pcrel_from (fixS * fixP)
 static valueT
 s3_section_align (segT segment ATTRIBUTE_UNUSED, valueT size)
 {
-  int align = bfd_get_section_alignment (stdoutput, segment);
-  return ((size + (1 << align) - 1) & (-1 << align));
+  int align = bfd_section_alignment (segment);
+  return ((size + (1 << align) - 1) & -(1 << align));
 }
 
 static void
 s3_apply_fix (fixS *fixP, valueT *valP, segT seg)
 {
-  offsetT value = *valP;
-  offsetT newval;
-  offsetT content;
-  unsigned short HI, LO;
+  valueT value = *valP;
+  valueT newval;
+  valueT content;
+  valueT HI, LO;
 
   char *buf = fixP->fx_frag->fr_literal + fixP->fx_where;
 
@@ -7131,7 +7084,7 @@ s3_apply_fix (fixS *fixP, valueT *valP, segT seg)
       if (fixP->fx_done)        /* For la rd, imm32.  */
         {
           newval = s3_md_chars_to_number (buf, s3_INSN_SIZE);
-          HI = (value) >> 16;   /* mul to 2, then take the hi 16 bit.  */
+          HI = value >> 16;   /* mul to 2, then take the hi 16 bit.  */
           newval |= (HI & 0x3fff) << 1;
           newval |= ((HI >> 14) & 0x3) << 16;
           s3_md_number_to_chars (buf, newval, s3_INSN_SIZE);
@@ -7141,7 +7094,7 @@ s3_apply_fix (fixS *fixP, valueT *valP, segT seg)
       if (fixP->fx_done)        /* For la rd, imm32.  */
         {
           newval = s3_md_chars_to_number (buf, s3_INSN_SIZE);
-          LO = (value) & 0xffff;
+          LO = value & 0xffff;
           newval |= (LO & 0x3fff) << 1; /* 16 bit: imm -> 14 bit in lo, 2 bit in hi.  */
           newval |= ((LO >> 14) & 0x3) << 16;
           s3_md_number_to_chars (buf, newval, s3_INSN_SIZE);
@@ -7195,7 +7148,7 @@ s3_apply_fix (fixS *fixP, valueT *valP, segT seg)
           if ((value & 0xfffffe00) != 0 && (value & 0xfffffe00) != 0xfffffe00)
             {
               as_bad_where (fixP->fx_file, fixP->fx_line,
-                            _(" branch relocation truncate (0x%x) [-2^9 ~ 2^9]"), (unsigned int)value);
+                            _(" branch relocation truncate (0x%x) [-2^9 ~ 2^9-1]"), (unsigned int) value);
               return;
             }
           content = s3_md_chars_to_number (buf, s3_INSN16_SIZE);
@@ -7210,7 +7163,7 @@ s3_apply_fix (fixS *fixP, valueT *valP, segT seg)
           if ((value & 0xfff80000) != 0 && (value & 0xfff80000) != 0xfff80000)
             {
               as_bad_where (fixP->fx_file, fixP->fx_line,
-                            _(" branch relocation truncate (0x%x) [-2^19 ~ 2^19]"), (unsigned int)value);
+                            _(" branch relocation truncate (0x%x) [-2^19 ~ 2^19-1]"), (unsigned int) value);
               return;
             }
           content = s3_md_chars_to_number (buf, s3_INSN_SIZE);
@@ -7239,7 +7192,7 @@ s3_apply_fix (fixS *fixP, valueT *valP, segT seg)
           if ((value & 0xfff80000) != 0 && (value & 0xfff80000) != 0xfff80000)
             {
               as_bad_where (fixP->fx_file, fixP->fx_line,
-                            _(" branch relocation truncate (0x%x) [-2^19 ~ 2^19]"), (unsigned int)value);
+                            _(" branch relocation truncate (0x%x) [-2^19 ~ 2^19-1]"), (unsigned int) value);
               return;
             }
           content = s3_md_chars_to_number (buf, s3_INSN_SIZE);
@@ -7251,7 +7204,7 @@ s3_apply_fix (fixS *fixP, valueT *valP, segT seg)
         }
       else
         {
-          /* In differnt section.  */
+          /* In different section.  */
           if ((S_GET_SEGMENT (fixP->fx_addsy) != seg) ||
               (fixP->fx_addsy != NULL && S_IS_EXTERNAL (fixP->fx_addsy)))
             value = fixP->fx_offset;
@@ -7261,7 +7214,7 @@ s3_apply_fix (fixS *fixP, valueT *valP, segT seg)
           if ((value & 0xfffffe00) != 0 && (value & 0xfffffe00) != 0xfffffe00)
             {
               as_bad_where (fixP->fx_file, fixP->fx_line,
-                            _(" branch relocation truncate (0x%x)  [-2^9 ~ 2^9]"), (unsigned int)value);
+                            _(" branch relocation truncate (0x%x) [-2^9 ~ 2^9-1]"), (unsigned int) value);
               return;
             }
 
@@ -7291,7 +7244,7 @@ s3_apply_fix (fixS *fixP, valueT *valP, segT seg)
           if ((value & 0xfff80000) != 0 && (value & 0xfff80000) != 0xfff80000)
             {
               as_bad_where (fixP->fx_file, fixP->fx_line,
-                            _(" branch relocation truncate (0x%x) [-2^19 ~ 2^19]"), (unsigned int)value);
+                            _(" branch relocation truncate (0x%x) [-2^19 ~ 2^19-1]"), (unsigned int) value);
               return;
             }
 
@@ -7316,7 +7269,7 @@ s3_apply_fix (fixS *fixP, valueT *valP, segT seg)
           if ((value & 0xfffffe00) != 0 && (value & 0xfffffe00) != 0xfffffe00)
             {
               as_bad_where (fixP->fx_file, fixP->fx_line,
-			    _(" branch relocation truncate (0x%x)  [-2^9 ~ 2^9]"), (unsigned int)value);
+			    _(" branch relocation truncate (0x%x)  [-2^9 ~ 2^9-1]"), (unsigned int) value);
               return;
             }
 
@@ -7399,12 +7352,12 @@ s3_gen_reloc (asection * section ATTRIBUTE_UNUSED, fixS * fixp)
   static arelent *retval[MAX_RELOC_EXPANSION + 1];  /* MAX_RELOC_EXPANSION equals 2.  */
   arelent *reloc;
   bfd_reloc_code_real_type code;
-  char *type;
+  const char *type;
 
-  reloc = retval[0] = xmalloc (sizeof (arelent));
+  reloc = retval[0] = XNEW (arelent);
   retval[1] = NULL;
 
-  reloc->sym_ptr_ptr = xmalloc (sizeof (asymbol *));
+  reloc->sym_ptr_ptr = XNEW (asymbol *);
   *reloc->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
   reloc->address = fixp->fx_frag->fr_address + fixp->fx_where;
   reloc->addend = fixp->fx_offset;
@@ -7432,9 +7385,9 @@ s3_gen_reloc (asection * section ATTRIBUTE_UNUSED, fixS * fixp)
       newval |= (((off >> 14) & 0x3) << 16);
       s3_md_number_to_chars (buf, newval, s3_INSN_SIZE);
 
-      retval[1] = xmalloc (sizeof (arelent));
+      retval[1] = XNEW (arelent);
       retval[2] = NULL;
-      retval[1]->sym_ptr_ptr = xmalloc (sizeof (asymbol *));
+      retval[1]->sym_ptr_ptr = XNEW (asymbol *);
       *retval[1]->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
       retval[1]->address = (reloc->address + s3_RELAX_RELOC2 (fixp->fx_frag->fr_subtype));
 
@@ -7454,6 +7407,7 @@ s3_gen_reloc (asection * section ATTRIBUTE_UNUSED, fixS * fixp)
           code = BFD_RELOC_32_PCREL;
           break;
         }
+      /* Fall through.  */
     case BFD_RELOC_HI16_S:
     case BFD_RELOC_LO16:
     case BFD_RELOC_SCORE_JMP:
@@ -7543,7 +7497,7 @@ md_number_to_chars (char *buf, valueT val, int n)
    within the words.  For example, (double) 1.1 in big endian mode is
    the byte sequence 3f f1 99 99 99 99 99 9a, and in little endian mode is
    the byte sequence 99 99 f1 3f 9a 99 99 99.  */
-char *
+const char *
 md_atof (int type, char *litP, int *sizeP)
 {
   if (score3)
@@ -7583,7 +7537,7 @@ score_force_relocation (struct fix *fixp)
 
 /* Implementation of md_frag_check.
    Called after md_convert_frag().  */
-bfd_boolean
+bool
 score_fix_adjustable (fixS * fixP)
 {
   if (score3)
@@ -7717,7 +7671,7 @@ score_set_mach (const char *arg)
 }
 
 int
-md_parse_option (int c, char *arg)
+md_parse_option (int c, const char *arg)
 {
   switch (c)
     {
@@ -7808,29 +7762,29 @@ md_show_usage (FILE * fp)
 #endif
 
   fprintf (fp, _("\
-        -FIXDD\t\tassemble code for fix data dependency\n"));
+        -FIXDD\t\tfix data dependencies\n"));
   fprintf (fp, _("\
-        -NWARN\t\tassemble code for no warning message for fix data dependency\n"));
+        -NWARN\t\tdo not print warning message when fixing data dependencies\n"));
   fprintf (fp, _("\
-        -SCORE5\t\tassemble code for target is SCORE5\n"));
+        -SCORE5\t\tassemble code for target SCORE5\n"));
   fprintf (fp, _("\
-        -SCORE5U\tassemble code for target is SCORE5U\n"));
+        -SCORE5U\tassemble code for target SCORE5U\n"));
   fprintf (fp, _("\
-        -SCORE7\t\tassemble code for target is SCORE7, this is default setting\n"));
+        -SCORE7\t\tassemble code for target SCORE7 [default]\n"));
   fprintf (fp, _("\
-        -SCORE3\t\tassemble code for target is SCORE3\n"));
+        -SCORE3\t\tassemble code for target SCORE3\n"));
   fprintf (fp, _("\
-        -march=score7\tassemble code for target is SCORE7, this is default setting\n"));
+        -march=score7\tassemble code for target SCORE7 [default]\n"));
   fprintf (fp, _("\
-        -march=score3\tassemble code for target is SCORE3\n"));
+        -march=score3\tassemble code for target SCORE3\n"));
   fprintf (fp, _("\
         -USE_R1\t\tassemble code for no warning message when using temp register r1\n"));
   fprintf (fp, _("\
-        -KPIC\t\tassemble code for PIC\n"));
+        -KPIC\t\tgenerate PIC\n"));
   fprintf (fp, _("\
-        -O0\t\tassembler will not perform any optimizations\n"));
+        -O0\t\tdo not perform any optimizations\n"));
   fprintf (fp, _("\
-        -G gpnum\tassemble code for setting gpsize and default is 8 byte\n"));
+        -G gpnum\tassemble code for setting gpsize, default is 8 bytes\n"));
   fprintf (fp, _("\
-        -V \t\tSunplus release version \n"));
+        -V \t\tSunplus release version\n"));
 }

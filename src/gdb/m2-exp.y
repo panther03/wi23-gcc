@@ -1,5 +1,5 @@
 /* YACC grammar for Modula-2 expressions, for GDB.
-   Copyright (C) 1986-2013 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
    Generated from expread.y (now c-exp.y) and contributed by the Department
    of Computer Science at the State University of New York at Buffalo, 1991.
 
@@ -38,7 +38,6 @@
 %{
 
 #include "defs.h"
-#include "gdb_string.h"
 #include "expression.h"
 #include "language.h"
 #include "value.h"
@@ -48,81 +47,33 @@
 #include "symfile.h" /* Required by objfiles.h.  */
 #include "objfiles.h" /* For have_full_symbols and have_partial_symbols */
 #include "block.h"
+#include "m2-exp.h"
 
-#define parse_type builtin_type (parse_gdbarch)
-#define parse_m2_type builtin_m2_type (parse_gdbarch)
+#define parse_type(ps) builtin_type (ps->gdbarch ())
+#define parse_m2_type(ps) builtin_m2_type (ps->gdbarch ())
 
-/* Remap normal yacc parser interface names (yyparse, yylex, yyerror, etc),
-   as well as gratuitiously global symbol names, so we can have multiple
-   yacc generated parsers in gdb.  Note that these are only the variables
-   produced by yacc.  If other parser generators (bison, byacc, etc) produce
-   additional global names that conflict at link time, then those parser
-   generators need to be fixed instead of adding those names to this list.  */
+/* Remap normal yacc parser interface names (yyparse, yylex, yyerror,
+   etc).  */
+#define GDB_YY_REMAP_PREFIX m2_
+#include "yy-remap.h"
 
-#define	yymaxdepth m2_maxdepth
-#define	yyparse	m2_parse
-#define	yylex	m2_lex
-#define	yyerror	m2_error
-#define	yylval	m2_lval
-#define	yychar	m2_char
-#define	yydebug	m2_debug
-#define	yypact	m2_pact
-#define	yyr1	m2_r1
-#define	yyr2	m2_r2
-#define	yydef	m2_def
-#define	yychk	m2_chk
-#define	yypgo	m2_pgo
-#define	yyact	m2_act
-#define	yyexca	m2_exca
-#define	yyerrflag m2_errflag
-#define	yynerrs	m2_nerrs
-#define	yyps	m2_ps
-#define	yypv	m2_pv
-#define	yys	m2_s
-#define	yy_yys	m2_yys
-#define	yystate	m2_state
-#define	yytmp	m2_tmp
-#define	yyv	m2_v
-#define	yy_yyv	m2_yyv
-#define	yyval	m2_val
-#define	yylloc	m2_lloc
-#define	yyreds	m2_reds		/* With YYDEBUG defined */
-#define	yytoks	m2_toks		/* With YYDEBUG defined */
-#define yyname	m2_name		/* With YYDEBUG defined */
-#define yyrule	m2_rule		/* With YYDEBUG defined */
-#define yylhs	m2_yylhs
-#define yylen	m2_yylen
-#define yydefred m2_yydefred
-#define yydgoto	m2_yydgoto
-#define yysindex m2_yysindex
-#define yyrindex m2_yyrindex
-#define yygindex m2_yygindex
-#define yytable	 m2_yytable
-#define yycheck	 m2_yycheck
-#define yyss	m2_yyss
-#define yysslim	m2_yysslim
-#define yyssp	m2_yyssp
-#define yystacksize m2_yystacksize
-#define yyvs	m2_yyvs
-#define yyvsp	m2_yyvsp
+/* The state of the parser, used internally when we are parsing the
+   expression.  */
 
-#ifndef YYDEBUG
-#define	YYDEBUG 1		/* Default to yydebug support */
-#endif
-
-#define YYFPRINTF parser_fprintf
+static struct parser_state *pstate = NULL;
 
 int yyparse (void);
 
 static int yylex (void);
 
-void yyerror (char *);
+static void yyerror (const char *);
 
 static int parse_number (int);
 
 /* The sign of the number being parsed.  */
 static int number_sign = 1;
 
+using namespace expr;
 %}
 
 /* Although the yacc "value" of an expression is not used,
@@ -133,12 +84,12 @@ static int number_sign = 1;
   {
     LONGEST lval;
     ULONGEST ulval;
-    DOUBLEST dval;
+    gdb_byte val[16];
     struct symbol *sym;
     struct type *tval;
     struct stoken sval;
     int voidval;
-    struct block *bval;
+    const struct block *bval;
     enum exp_opcode opcode;
     struct internalvar *ivar;
 
@@ -154,7 +105,7 @@ static int number_sign = 1;
 
 %token <lval> INT HEX ERROR
 %token <ulval> UINT M2_TRUE M2_FALSE CHAR
-%token <dval> FLOAT
+%token <val> FLOAT
 
 /* Both NAME and TYPENAME tokens represent symbols in the input,
    and both convey their data as strings.
@@ -176,7 +127,7 @@ static int number_sign = 1;
 /* The GDB scope operator */
 %token COLONCOLON
 
-%token <voidval> INTERNAL_VAR
+%token <sval> DOLLAR_VARIABLE
 
 /* M2 tokens */
 %left ','
@@ -204,31 +155,28 @@ start   :	exp
 	;
 
 type_exp:	type
-		{ write_exp_elt_opcode(OP_TYPE);
-		  write_exp_elt_type($1);
-		  write_exp_elt_opcode(OP_TYPE);
-		}
+		{ pstate->push_new<type_operation> ($1); }
 	;
 
 /* Expressions */
 
 exp     :       exp '^'   %prec UNARY
-                        { write_exp_elt_opcode (UNOP_IND); }
+			{ pstate->wrap<unop_ind_operation> (); }
 	;
 
 exp	:	'-'
 			{ number_sign = -1; }
 		exp    %prec UNARY
 			{ number_sign = 1;
-			  write_exp_elt_opcode (UNOP_NEG); }
+			  pstate->wrap<unary_neg_operation> (); }
 	;
 
 exp	:	'+' exp    %prec UNARY
-		{ write_exp_elt_opcode(UNOP_PLUS); }
+		{ pstate->wrap<unary_plus_operation> (); }
 	;
 
 exp	:	not_exp exp %prec UNARY
-			{ write_exp_elt_opcode (UNOP_LOGICAL_NOT); }
+			{ pstate->wrap<unary_logical_not_operation> (); }
 	;
 
 not_exp	:	NOT
@@ -236,89 +184,90 @@ not_exp	:	NOT
 	;
 
 exp	:	CAP '(' exp ')'
-			{ write_exp_elt_opcode (UNOP_CAP); }
+			{ error (_("CAP function is not implemented")); }
 	;
 
 exp	:	ORD '(' exp ')'
-			{ write_exp_elt_opcode (UNOP_ORD); }
+			{ error (_("ORD function is not implemented")); }
 	;
 
 exp	:	ABS '(' exp ')'
-			{ write_exp_elt_opcode (UNOP_ABS); }
+			{ error (_("ABS function is not implemented")); }
 	;
 
 exp	: 	HIGH '(' exp ')'
-			{ write_exp_elt_opcode (UNOP_HIGH); }
+			{ pstate->wrap<m2_unop_high_operation> (); }
 	;
 
 exp 	:	MIN_FUNC '(' type ')'
-			{ write_exp_elt_opcode (UNOP_MIN);
-			  write_exp_elt_type ($3);
-			  write_exp_elt_opcode (UNOP_MIN); }
+			{ error (_("MIN function is not implemented")); }
 	;
 
 exp	: 	MAX_FUNC '(' type ')'
-			{ write_exp_elt_opcode (UNOP_MAX);
-			  write_exp_elt_type ($3);
-			  write_exp_elt_opcode (UNOP_MAX); }
+			{ error (_("MAX function is not implemented")); }
 	;
 
 exp	:	FLOAT_FUNC '(' exp ')'
-			{ write_exp_elt_opcode (UNOP_FLOAT); }
+			{ error (_("FLOAT function is not implemented")); }
 	;
 
 exp	:	VAL '(' type ',' exp ')'
-			{ write_exp_elt_opcode (BINOP_VAL);
-			  write_exp_elt_type ($3);
-			  write_exp_elt_opcode (BINOP_VAL); }
+			{ error (_("VAL function is not implemented")); }
 	;
 
 exp	:	CHR '(' exp ')'
-			{ write_exp_elt_opcode (UNOP_CHR); }
+			{ error (_("CHR function is not implemented")); }
 	;
 
 exp	:	ODD '(' exp ')'
-			{ write_exp_elt_opcode (UNOP_ODD); }
+			{ error (_("ODD function is not implemented")); }
 	;
 
 exp	:	TRUNC '(' exp ')'
-			{ write_exp_elt_opcode (UNOP_TRUNC); }
+			{ error (_("TRUNC function is not implemented")); }
 	;
 
 exp	:	TSIZE '(' exp ')'
-			{ write_exp_elt_opcode (UNOP_SIZEOF); }
+			{ pstate->wrap<unop_sizeof_operation> (); }
 	;
 
 exp	:	SIZE exp       %prec UNARY
-			{ write_exp_elt_opcode (UNOP_SIZEOF); }
+			{ pstate->wrap<unop_sizeof_operation> (); }
 	;
 
 
 exp	:	INC '(' exp ')'
-			{ write_exp_elt_opcode(UNOP_PREINCREMENT); }
+			{ pstate->wrap<preinc_operation> (); }
 	;
 
 exp	:	INC '(' exp ',' exp ')'
-			{ write_exp_elt_opcode(BINOP_ASSIGN_MODIFY);
-			  write_exp_elt_opcode(BINOP_ADD);
-			  write_exp_elt_opcode(BINOP_ASSIGN_MODIFY); }
+			{
+			  operation_up rhs = pstate->pop ();
+			  operation_up lhs = pstate->pop ();
+			  pstate->push_new<assign_modify_operation>
+			    (BINOP_ADD, std::move (lhs), std::move (rhs));
+			}
 	;
 
 exp	:	DEC '(' exp ')'
-			{ write_exp_elt_opcode(UNOP_PREDECREMENT);}
+			{ pstate->wrap<predec_operation> (); }
 	;
 
 exp	:	DEC '(' exp ',' exp ')'
-			{ write_exp_elt_opcode(BINOP_ASSIGN_MODIFY);
-			  write_exp_elt_opcode(BINOP_SUB);
-			  write_exp_elt_opcode(BINOP_ASSIGN_MODIFY); }
+			{
+			  operation_up rhs = pstate->pop ();
+			  operation_up lhs = pstate->pop ();
+			  pstate->push_new<assign_modify_operation>
+			    (BINOP_SUB, std::move (lhs), std::move (rhs));
+			}
 	;
 
 exp	:	exp DOT NAME
-			{ write_exp_elt_opcode (STRUCTOP_STRUCT);
-			  write_exp_string ($3);
-			  write_exp_elt_opcode (STRUCTOP_STRUCT); }
-	;
+			{
+			  pstate->push_new<structop_operation>
+			    (pstate->pop (), copy_name ($3));
+			}
+;
 
 exp	:	set
 	;
@@ -342,64 +291,69 @@ set	:	'{' arglist '}'
 	;
 
 
-/* Modula-2 array subscript notation [a,b,c...] */
+/* Modula-2 array subscript notation [a,b,c...].  */
 exp     :       exp '['
-                        /* This function just saves the number of arguments
+			/* This function just saves the number of arguments
 			   that follow in the list.  It is *not* specific to
 			   function types */
-                        { start_arglist(); }
-                non_empty_arglist ']'  %prec DOT
-                        { write_exp_elt_opcode (MULTI_SUBSCRIPT);
-			  write_exp_elt_longcst ((LONGEST) end_arglist());
-			  write_exp_elt_opcode (MULTI_SUBSCRIPT); }
-        ;
-
-exp	:	exp '[' exp ']'
-			{ write_exp_elt_opcode (BINOP_SUBSCRIPT); }
+			{ pstate->start_arglist(); }
+		non_empty_arglist ']'  %prec DOT
+			{
+			  gdb_assert (pstate->arglist_len > 0);
+			  std::vector<operation_up> args
+			    = pstate->pop_vector (pstate->end_arglist ());
+			  pstate->push_new<multi_subscript_operation>
+			    (pstate->pop (), std::move (args));
+			}
 	;
 
 exp	:	exp '('
 			/* This is to save the value of arglist_len
 			   being accumulated by an outer function call.  */
-			{ start_arglist (); }
+			{ pstate->start_arglist (); }
 		arglist ')'	%prec DOT
-			{ write_exp_elt_opcode (OP_FUNCALL);
-			  write_exp_elt_longcst ((LONGEST) end_arglist ());
-			  write_exp_elt_opcode (OP_FUNCALL); }
+			{
+			  std::vector<operation_up> args
+			    = pstate->pop_vector (pstate->end_arglist ());
+			  pstate->push_new<funcall_operation>
+			    (pstate->pop (), std::move (args));
+			}
 	;
 
 arglist	:
 	;
 
 arglist	:	exp
-			{ arglist_len = 1; }
+			{ pstate->arglist_len = 1; }
 	;
 
 arglist	:	arglist ',' exp   %prec ABOVE_COMMA
-			{ arglist_len++; }
+			{ pstate->arglist_len++; }
 	;
 
 non_empty_arglist
-        :       exp
-                        { arglist_len = 1; }
+	:       exp
+			{ pstate->arglist_len = 1; }
 	;
 
 non_empty_arglist
-        :       non_empty_arglist ',' exp %prec ABOVE_COMMA
-     	       	    	{ arglist_len++; }
+	:       non_empty_arglist ',' exp %prec ABOVE_COMMA
+     	       	    	{ pstate->arglist_len++; }
      	;
 
 /* GDB construct */
 exp	:	'{' type '}' exp  %prec UNARY
-			{ write_exp_elt_opcode (UNOP_MEMVAL);
-			  write_exp_elt_type ($2);
-			  write_exp_elt_opcode (UNOP_MEMVAL); }
+			{
+			  pstate->push_new<unop_memval_operation>
+			    (pstate->pop (), $2);
+			}
 	;
 
 exp     :       type '(' exp ')' %prec UNARY
-                        { write_exp_elt_opcode (UNOP_CAST);
-			  write_exp_elt_type ($1);
-			  write_exp_elt_opcode (UNOP_CAST); }
+			{
+			  pstate->push_new<unop_cast_operation>
+			    (pstate->pop (), $1);
+			}
 	;
 
 exp	:	'(' exp ')'
@@ -411,142 +365,139 @@ exp	:	'(' exp ')'
 
 /* GDB construct */
 exp	:	exp '@' exp
-			{ write_exp_elt_opcode (BINOP_REPEAT); }
+			{ pstate->wrap2<repeat_operation> (); }
 	;
 
 exp	:	exp '*' exp
-			{ write_exp_elt_opcode (BINOP_MUL); }
+			{ pstate->wrap2<mul_operation> (); }
 	;
 
 exp	:	exp '/' exp
-			{ write_exp_elt_opcode (BINOP_DIV); }
+			{ pstate->wrap2<div_operation> (); }
 	;
 
 exp     :       exp DIV exp
-                        { write_exp_elt_opcode (BINOP_INTDIV); }
-        ;
+			{ pstate->wrap2<intdiv_operation> (); }
+	;
 
 exp	:	exp MOD exp
-			{ write_exp_elt_opcode (BINOP_REM); }
+			{ pstate->wrap2<rem_operation> (); }
 	;
 
 exp	:	exp '+' exp
-			{ write_exp_elt_opcode (BINOP_ADD); }
+			{ pstate->wrap2<add_operation> (); }
 	;
 
 exp	:	exp '-' exp
-			{ write_exp_elt_opcode (BINOP_SUB); }
+			{ pstate->wrap2<sub_operation> (); }
 	;
 
 exp	:	exp '=' exp
-			{ write_exp_elt_opcode (BINOP_EQUAL); }
+			{ pstate->wrap2<equal_operation> (); }
 	;
 
 exp	:	exp NOTEQUAL exp
-			{ write_exp_elt_opcode (BINOP_NOTEQUAL); }
-        |       exp '#' exp
-                        { write_exp_elt_opcode (BINOP_NOTEQUAL); }
+			{ pstate->wrap2<notequal_operation> (); }
+	|       exp '#' exp
+			{ pstate->wrap2<notequal_operation> (); }
 	;
 
 exp	:	exp LEQ exp
-			{ write_exp_elt_opcode (BINOP_LEQ); }
+			{ pstate->wrap2<leq_operation> (); }
 	;
 
 exp	:	exp GEQ exp
-			{ write_exp_elt_opcode (BINOP_GEQ); }
+			{ pstate->wrap2<geq_operation> (); }
 	;
 
 exp	:	exp '<' exp
-			{ write_exp_elt_opcode (BINOP_LESS); }
+			{ pstate->wrap2<less_operation> (); }
 	;
 
 exp	:	exp '>' exp
-			{ write_exp_elt_opcode (BINOP_GTR); }
+			{ pstate->wrap2<gtr_operation> (); }
 	;
 
 exp	:	exp LOGICAL_AND exp
-			{ write_exp_elt_opcode (BINOP_LOGICAL_AND); }
+			{ pstate->wrap2<logical_and_operation> (); }
 	;
 
 exp	:	exp OROR exp
-			{ write_exp_elt_opcode (BINOP_LOGICAL_OR); }
+			{ pstate->wrap2<logical_or_operation> (); }
 	;
 
 exp	:	exp ASSIGN exp
-			{ write_exp_elt_opcode (BINOP_ASSIGN); }
+			{ pstate->wrap2<assign_operation> (); }
 	;
 
 
 /* Constants */
 
 exp	:	M2_TRUE
-			{ write_exp_elt_opcode (OP_BOOL);
-			  write_exp_elt_longcst ((LONGEST) $1);
-			  write_exp_elt_opcode (OP_BOOL); }
+			{ pstate->push_new<bool_operation> ($1); }
 	;
 
 exp	:	M2_FALSE
-			{ write_exp_elt_opcode (OP_BOOL);
-			  write_exp_elt_longcst ((LONGEST) $1);
-			  write_exp_elt_opcode (OP_BOOL); }
+			{ pstate->push_new<bool_operation> ($1); }
 	;
 
 exp	:	INT
-			{ write_exp_elt_opcode (OP_LONG);
-			  write_exp_elt_type (parse_m2_type->builtin_int);
-			  write_exp_elt_longcst ((LONGEST) $1);
-			  write_exp_elt_opcode (OP_LONG); }
+			{
+			  pstate->push_new<long_const_operation>
+			    (parse_m2_type (pstate)->builtin_int, $1);
+			}
 	;
 
 exp	:	UINT
 			{
-			  write_exp_elt_opcode (OP_LONG);
-			  write_exp_elt_type (parse_m2_type->builtin_card);
-			  write_exp_elt_longcst ((LONGEST) $1);
-			  write_exp_elt_opcode (OP_LONG);
+			  pstate->push_new<long_const_operation>
+			    (parse_m2_type (pstate)->builtin_card, $1);
 			}
 	;
 
 exp	:	CHAR
-			{ write_exp_elt_opcode (OP_LONG);
-			  write_exp_elt_type (parse_m2_type->builtin_char);
-			  write_exp_elt_longcst ((LONGEST) $1);
-			  write_exp_elt_opcode (OP_LONG); }
+			{
+			  pstate->push_new<long_const_operation>
+			    (parse_m2_type (pstate)->builtin_char, $1);
+			}
 	;
 
 
 exp	:	FLOAT
-			{ write_exp_elt_opcode (OP_DOUBLE);
-			  write_exp_elt_type (parse_m2_type->builtin_real);
-			  write_exp_elt_dblcst ($1);
-			  write_exp_elt_opcode (OP_DOUBLE); }
+			{
+			  float_data data;
+			  std::copy (std::begin ($1), std::end ($1),
+				     std::begin (data));
+			  pstate->push_new<float_const_operation>
+			    (parse_m2_type (pstate)->builtin_real, data);
+			}
 	;
 
 exp	:	variable
 	;
 
 exp	:	SIZE '(' type ')'	%prec UNARY
-			{ write_exp_elt_opcode (OP_LONG);
-			  write_exp_elt_type (parse_type->builtin_int);
-			  write_exp_elt_longcst ((LONGEST) TYPE_LENGTH ($3));
-			  write_exp_elt_opcode (OP_LONG); }
+			{
+			  pstate->push_new<long_const_operation>
+			    (parse_m2_type (pstate)->builtin_int,
+			     $3->length ());
+			}
 	;
 
 exp	:	STRING
-			{ write_exp_elt_opcode (OP_M2_STRING);
-			  write_exp_string ($1);
-			  write_exp_elt_opcode (OP_M2_STRING); }
+			{ error (_("strings are not implemented")); }
 	;
 
 /* This will be used for extensions later.  Like adding modules.  */
 block	:	fblock	
-			{ $$ = SYMBOL_BLOCK_VALUE($1); }
+			{ $$ = $1->value_block (); }
 	;
 
 fblock	:	BLOCKNAME
 			{ struct symbol *sym
-			    = lookup_symbol (copy_name ($1), expression_context_block,
-					     VAR_DOMAIN, 0);
+			    = lookup_symbol (copy_name ($1).c_str (),
+					     pstate->expression_context_block,
+					     VAR_DOMAIN, 0).symbol;
 			  $$ = sym;}
 	;
 			     
@@ -554,100 +505,68 @@ fblock	:	BLOCKNAME
 /* GDB scope operator */
 fblock	:	block COLONCOLON BLOCKNAME
 			{ struct symbol *tem
-			    = lookup_symbol (copy_name ($3), $1,
-					     VAR_DOMAIN, 0);
-			  if (!tem || SYMBOL_CLASS (tem) != LOC_BLOCK)
+			    = lookup_symbol (copy_name ($3).c_str (), $1,
+					     VAR_DOMAIN, 0).symbol;
+			  if (!tem || tem->aclass () != LOC_BLOCK)
 			    error (_("No function \"%s\" in specified context."),
-				   copy_name ($3));
+				   copy_name ($3).c_str ());
 			  $$ = tem;
 			}
 	;
 
 /* Useful for assigning to PROCEDURE variables */
 variable:	fblock
-			{ write_exp_elt_opcode(OP_VAR_VALUE);
-			  write_exp_elt_block (NULL);
-			  write_exp_elt_sym ($1);
-			  write_exp_elt_opcode (OP_VAR_VALUE); }
+			{
+			  block_symbol sym { $1, nullptr };
+			  pstate->push_new<var_value_operation> (sym);
+			}
 	;
 
 /* GDB internal ($foo) variable */
-variable:	INTERNAL_VAR
+variable:	DOLLAR_VARIABLE
+			{ pstate->push_dollar ($1); }
 	;
 
 /* GDB scope operator */
 variable:	block COLONCOLON NAME
-			{ struct symbol *sym;
-			  sym = lookup_symbol (copy_name ($3), $1,
-					       VAR_DOMAIN, 0);
-			  if (sym == 0)
-			    error (_("No symbol \"%s\" in specified context."),
-				   copy_name ($3));
-			  if (symbol_read_needs_frame (sym))
-			    {
-			      if (innermost_block == 0
-				  || contained_in (block_found,
-						   innermost_block))
-				innermost_block = block_found;
-			    }
+			{ struct block_symbol sym
+			    = lookup_symbol (copy_name ($3).c_str (), $1,
+					     VAR_DOMAIN, 0);
 
-			  write_exp_elt_opcode (OP_VAR_VALUE);
-			  /* block_found is set by lookup_symbol.  */
-			  write_exp_elt_block (block_found);
-			  write_exp_elt_sym (sym);
-			  write_exp_elt_opcode (OP_VAR_VALUE); }
+			  if (sym.symbol == 0)
+			    error (_("No symbol \"%s\" in specified context."),
+				   copy_name ($3).c_str ());
+			  if (symbol_read_needs_frame (sym.symbol))
+			    pstate->block_tracker->update (sym);
+
+			  pstate->push_new<var_value_operation> (sym);
+			}
 	;
 
 /* Base case for variables.  */
 variable:	NAME
-			{ struct symbol *sym;
+			{ struct block_symbol sym;
 			  struct field_of_this_result is_a_field_of_this;
 
- 			  sym = lookup_symbol (copy_name ($1),
-					       expression_context_block,
-					       VAR_DOMAIN,
-					       &is_a_field_of_this);
-			  if (sym)
-			    {
-			      if (symbol_read_needs_frame (sym))
-				{
-				  if (innermost_block == 0 ||
-				      contained_in (block_found, 
-						    innermost_block))
-				    innermost_block = block_found;
-				}
+			  std::string name = copy_name ($1);
+			  sym
+			    = lookup_symbol (name.c_str (),
+					     pstate->expression_context_block,
+					     VAR_DOMAIN,
+					     &is_a_field_of_this);
 
-			      write_exp_elt_opcode (OP_VAR_VALUE);
-			      /* We want to use the selected frame, not
-				 another more inner frame which happens to
-				 be in the same block.  */
-			      write_exp_elt_block (NULL);
-			      write_exp_elt_sym (sym);
-			      write_exp_elt_opcode (OP_VAR_VALUE);
-			    }
-			  else
-			    {
-			      struct bound_minimal_symbol msymbol;
-			      char *arg = copy_name ($1);
-
-			      msymbol =
-				lookup_bound_minimal_symbol (arg);
-			      if (msymbol.minsym != NULL)
-				write_exp_msymbol (msymbol);
-			      else if (!have_full_symbols () && !have_partial_symbols ())
-				error (_("No symbol table is loaded.  Use the \"symbol-file\" command."));
-			      else
-				error (_("No symbol \"%s\" in current context."),
-				       copy_name ($1));
-			    }
+			  pstate->push_symbol (name.c_str (), sym);
 			}
 	;
 
 type
 	:	TYPENAME
-			{ $$ = lookup_typename (parse_language, parse_gdbarch,
-						copy_name ($1),
-						expression_context_block, 0); }
+			{ $$
+			    = lookup_typename (pstate->language (),
+					       copy_name ($1).c_str (),
+					       pstate->expression_context_block,
+					       0);
+			}
 
 	;
 
@@ -662,13 +581,12 @@ type
 static int
 parse_number (int olen)
 {
-  const char *p = lexptr;
-  LONGEST n = 0;
-  LONGEST prevn = 0;
+  const char *p = pstate->lexptr;
+  ULONGEST n = 0;
+  ULONGEST prevn = 0;
   int c,i,ischar=0;
   int base = input_radix;
   int len = olen;
-  int unsigned_p = number_sign == 1 ? 1 : 0;
 
   if(p[len-1] == 'H')
   {
@@ -688,8 +606,12 @@ parse_number (int olen)
     if (p[c] == '.' && base == 10)
       {
 	/* It's a float since it contains a point.  */
-	yylval.dval = atof (p);
-	lexptr += len;
+	if (!parse_float (p, len,
+			  parse_m2_type (pstate)->builtin_real,
+			  yylval.val))
+	  return ERROR;
+
+	pstate->lexptr += len;
 	return FLOAT;
       }
     if (p[c] == '.' && base != 10)
@@ -716,39 +638,39 @@ parse_number (int olen)
       n+=i;
       if(i >= base)
 	 return ERROR;
-      if(!unsigned_p && number_sign == 1 && (prevn >= n))
-	 unsigned_p=1;		/* Try something unsigned */
-      /* Don't do the range check if n==i and i==0, since that special
-	 case will give an overflow error.  */
-      if(RANGE_CHECK && n!=i && i)
-      {
-	 if((unsigned_p && (unsigned)prevn >= (unsigned)n) ||
-	    ((!unsigned_p && number_sign==-1) && -prevn <= -n))
-	    range_error (_("Overflow on numeric constant."));
-      }
+      if (n == 0 && prevn == 0)
+	;
+      else if (RANGE_CHECK && prevn >= n)
+	range_error (_("Overflow on numeric constant."));
+
 	 prevn=n;
     }
 
-  lexptr = p;
+  pstate->lexptr = p;
   if(*p == 'B' || *p == 'C' || *p == 'H')
-     lexptr++;			/* Advance past B,C or H */
+     pstate->lexptr++;			/* Advance past B,C or H */
 
   if (ischar)
   {
      yylval.ulval = n;
      return CHAR;
   }
-  else if ( unsigned_p && number_sign == 1)
-  {
-     yylval.ulval = n;
-     return UINT;
-  }
-  else if((unsigned_p && (n<0))) {
-     range_error (_("Overflow on numeric constant -- number too large."));
-     /* But, this can return if range_check == range_warn.  */
-  }
-  yylval.lval = n;
-  return INT;
+
+  int int_bits = gdbarch_int_bit (pstate->gdbarch ());
+  bool have_signed = number_sign == -1;
+  bool have_unsigned = number_sign == 1;
+  if (have_signed && fits_in_type (number_sign, n, int_bits, true))
+    {
+      yylval.lval = n;
+      return INT;
+    }
+  else if (have_unsigned && fits_in_type (number_sign, n, int_bits, false))
+    {
+      yylval.ulval = n;
+      return UINT;
+    }
+  else
+    error (_("Overflow on numeric constant."));
 }
 
 
@@ -803,10 +725,13 @@ static struct keyword keytab[] =
 };
 
 
+/* Depth of parentheses.  */
+static int paren_depth;
+
 /* Read one token, getting characters through lexptr.  */
 
-/* This is where we will check to make sure that the language and the operators used are
-   compatible  */
+/* This is where we will check to make sure that the language and the
+   operators used are compatible  */
 
 static int
 yylex (void)
@@ -819,16 +744,16 @@ yylex (void)
 
  retry:
 
-  prev_lexptr = lexptr;
+  pstate->prev_lexptr = pstate->lexptr;
 
-  tokstart = lexptr;
+  tokstart = pstate->lexptr;
 
 
   /* See if it is a special token of length 2 */
   for( i = 0 ; i < (int) (sizeof tokentab2 / sizeof tokentab2[0]) ; i++)
      if (strncmp (tokentab2[i].name, tokstart, 2) == 0)
      {
-	lexptr += 2;
+	pstate->lexptr += 2;
 	return tokentab2[i].token;
      }
 
@@ -840,34 +765,34 @@ yylex (void)
     case ' ':
     case '\t':
     case '\n':
-      lexptr++;
+      pstate->lexptr++;
       goto retry;
 
     case '(':
       paren_depth++;
-      lexptr++;
+      pstate->lexptr++;
       return c;
 
     case ')':
       if (paren_depth == 0)
 	return 0;
       paren_depth--;
-      lexptr++;
+      pstate->lexptr++;
       return c;
 
     case ',':
-      if (comma_terminates && paren_depth == 0)
+      if (pstate->comma_terminates && paren_depth == 0)
 	return 0;
-      lexptr++;
+      pstate->lexptr++;
       return c;
 
     case '.':
       /* Might be a floating point number.  */
-      if (lexptr[1] >= '0' && lexptr[1] <= '9')
+      if (pstate->lexptr[1] >= '0' && pstate->lexptr[1] <= '9')
 	break;			/* Falls into number code.  */
       else
       {
-	 lexptr++;
+	 pstate->lexptr++;
 	 return DOT;
       }
 
@@ -888,7 +813,7 @@ yylex (void)
     case '@':
     case '~':
     case '&':
-      lexptr++;
+      pstate->lexptr++;
       return c;
 
     case '\'' :
@@ -909,7 +834,7 @@ yylex (void)
 	 error (_("Unterminated string or character constant."));
       yylval.sval.ptr = tokstart + 1;
       yylval.sval.length = namelen - 1;
-      lexptr += namelen + 1;
+      pstate->lexptr += namelen + 1;
 
       if(namelen == 2)  	/* Single character */
       {
@@ -947,7 +872,7 @@ yylex (void)
 	    break;
 	}
 	toktype = parse_number (p - tokstart);
-        if (toktype == ERROR)
+	if (toktype == ERROR)
 	  {
 	    char *err_copy = (char *) alloca (p - tokstart + 1);
 
@@ -955,7 +880,7 @@ yylex (void)
 	    err_copy[p - tokstart] = 0;
 	    error (_("Invalid number \"%s\"."), err_copy);
 	  }
-	lexptr = p;
+	pstate->lexptr = p;
 	return toktype;
     }
 
@@ -979,7 +904,7 @@ yylex (void)
       return 0;
     }
 
-  lexptr += namelen;
+  pstate->lexptr += namelen;
 
   /*  Lookup special keywords */
   for(i = 0 ; i < (int) (sizeof(keytab) / sizeof(keytab[0])) ; i++)
@@ -991,10 +916,7 @@ yylex (void)
   yylval.sval.length = namelen;
 
   if (*tokstart == '$')
-    {
-      write_dollar_variable (yylval.sval);
-      return INTERNAL_VAR;
-    }
+    return DOLLAR_VARIABLE;
 
   /* Use token-type BLOCKNAME for symbols that happen to be defined as
      functions.  If this is not so, then ...
@@ -1002,23 +924,22 @@ yylex (void)
      currently as names of types; NAME for other symbols.
      The caller is not constrained to care about the distinction.  */
  {
-
-
-    char *tmp = copy_name (yylval.sval);
+    std::string tmp = copy_name (yylval.sval);
     struct symbol *sym;
 
-    if (lookup_symtab (tmp))
+    if (lookup_symtab (tmp.c_str ()))
       return BLOCKNAME;
-    sym = lookup_symbol (tmp, expression_context_block, VAR_DOMAIN, 0);
-    if (sym && SYMBOL_CLASS (sym) == LOC_BLOCK)
+    sym = lookup_symbol (tmp.c_str (), pstate->expression_context_block,
+			 VAR_DOMAIN, 0).symbol;
+    if (sym && sym->aclass () == LOC_BLOCK)
       return BLOCKNAME;
-    if (lookup_typename (parse_language, parse_gdbarch,
-			 copy_name (yylval.sval), expression_context_block, 1))
+    if (lookup_typename (pstate->language (),
+			 tmp.c_str (), pstate->expression_context_block, 1))
       return TYPENAME;
 
     if(sym)
     {
-      switch(SYMBOL_CLASS (sym))
+      switch(sym->aclass ())
        {
        case LOC_STATIC:
        case LOC_REGISTER:
@@ -1053,12 +974,12 @@ yylex (void)
     else
     {
        /* Built-in BOOLEAN type.  This is sort of a hack.  */
-       if (strncmp (tokstart, "TRUE", 4) == 0)
+       if (startswith (tokstart, "TRUE"))
        {
 	  yylval.ulval = 1;
 	  return M2_TRUE;
        }
-       else if (strncmp (tokstart, "FALSE", 5) == 0)
+       else if (startswith (tokstart, "FALSE"))
        {
 	  yylval.ulval = 0;
 	  return M2_FALSE;
@@ -1070,11 +991,26 @@ yylex (void)
  }
 }
 
-void
-yyerror (char *msg)
+int
+m2_language::parser (struct parser_state *par_state) const
 {
-  if (prev_lexptr)
-    lexptr = prev_lexptr;
+  /* Setting up the parser state.  */
+  scoped_restore pstate_restore = make_scoped_restore (&pstate);
+  gdb_assert (par_state != NULL);
+  pstate = par_state;
+  paren_depth = 0;
 
-  error (_("A %s in expression, near `%s'."), (msg ? msg : "error"), lexptr);
+  int result = yyparse ();
+  if (!result)
+    pstate->set_operation (pstate->pop ());
+  return result;
+}
+
+static void
+yyerror (const char *msg)
+{
+  if (pstate->prev_lexptr)
+    pstate->lexptr = pstate->prev_lexptr;
+
+  error (_("A %s in expression, near `%s'."), msg, pstate->lexptr);
 }

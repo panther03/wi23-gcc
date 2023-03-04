@@ -1,6 +1,6 @@
 /* TUI display locator.
 
-   Copyright (C) 1998-2013 Free Software Foundation, Inc.
+   Copyright (C) 1998-2023 Free Software Foundation, Inc.
 
    Contributed by Hewlett-Packard Company.
 
@@ -19,13 +19,66 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef TUI_STACK_H
-#define TUI_STACK_H
+#ifndef TUI_TUI_STACK_H
+#define TUI_TUI_STACK_H
 
-struct frame_info;
+#include "tui/tui-data.h"
 
-extern void tui_update_locator_fullname (const char *);
+class frame_info_ptr;
+
+/* Locator window class.  */
+
+struct tui_locator_window : public tui_win_info
+{
+  tui_locator_window () = default;
+
+  const char *name () const override
+  {
+    return STATUS_NAME;
+  }
+
+  int max_height () const override
+  {
+    return 1;
+  }
+
+  int min_height () const override
+  {
+    return 1;
+  }
+
+  bool can_box () const override
+  {
+    return false;
+  }
+
+  bool can_focus () const override
+  {
+    return false;
+  }
+
+  void rerender () override;
+
+protected:
+
+  void do_scroll_vertical (int n) override
+  {
+  }
+
+  void do_scroll_horizontal (int n) override
+  {
+  }
+
+private:
+
+  /* Create the status line to display as much information as we can
+     on this single line: target name, process number, current
+     function, current line, current PC, SingleKey mode.  */
+
+  std::string make_status_line () const;
+};
+
 extern void tui_show_locator_content (void);
-extern void tui_show_frame_info (struct frame_info *);
+extern bool tui_show_frame_info (frame_info_ptr);
 
-#endif
+#endif /* TUI_TUI_STACK_H */

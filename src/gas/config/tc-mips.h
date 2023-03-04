@@ -1,6 +1,5 @@
 /* tc-mips.h -- header file for tc-mips.c.
-   Copyright 1993, 1994, 1995, 1996, 1997, 2000, 2001, 2002, 2003, 2004,
-   2005, 2006, 2007, 2008, 2009, 2010  Free Software Foundation, Inc.
+   Copyright (C) 1993-2023 Free Software Foundation, Inc.
    Contributed by the OSF and Ralph Campbell.
    Written by Keith Knowles and Ralph Campbell, working independently.
    Modified for ECOFF support by Ian Lance Taylor of Cygnus Support.
@@ -127,6 +126,11 @@ extern void mips_frob_file (void);
 extern void mips_frob_file_after_relocs (void);
 #endif
 
+#ifdef TE_IRIX
+#define tc_frob_symbol(sym, punt) mips_frob_symbol (sym)
+extern void mips_frob_symbol (symbolS *);
+#endif
+
 #define tc_fix_adjustable(fixp) mips_fix_adjustable (fixp)
 extern int mips_fix_adjustable (struct fix *);
 
@@ -141,7 +145,11 @@ extern int mips_fix_adjustable (struct fix *);
 extern int mips_force_relocation (struct fix *);
 
 #define TC_FORCE_RELOCATION_SUB_SAME(FIX, SEG) \
-  (! SEG_NORMAL (SEG) || mips_force_relocation (FIX))
+  (GENERIC_FORCE_RELOCATION_SUB_SAME (FIX, SEG) \
+   || mips_force_relocation (FIX))
+
+#define TC_FORCE_RELOCATION_ABS(FIX) mips_force_relocation_abs (FIX)
+extern bool mips_force_relocation_abs (struct fix *);
 
 /* Register mask variables.  These are set by the MIPS assembly code
    and used by ECOFF and possibly other object file formats.  */
@@ -155,8 +163,8 @@ extern void mips_elf_final_processing (void);
 
 #endif
 
-extern void md_mips_end (void);
-#define md_end()	md_mips_end()
+extern void mips_md_finish (void);
+#define md_finish()	mips_md_finish()
 
 extern void mips_pop_insert (void);
 #define md_pop_insert()		mips_pop_insert()
@@ -177,7 +185,9 @@ extern enum dwarf2_format mips_dwarf2_format (asection *);
 
 extern int mips_dwarf2_addr_size (void);
 #define DWARF2_ADDR_SIZE(bfd) mips_dwarf2_addr_size ()
-#define DWARF2_FDE_RELOC_SIZE mips_dwarf2_addr_size ()
+#define DWARF2_FDE_RELOC_SIZE (compact_eh ? 4 : mips_dwarf2_addr_size ())
+#define DWARF2_FDE_RELOC_ENCODING(enc) \
+  (enc | (compact_eh ? DW_EH_PE_pcrel : 0))
 
 #define TARGET_USE_CFIPOP 1
 
@@ -189,5 +199,22 @@ extern int tc_mips_regname_to_dw2regnum (char *regname);
 
 #define DWARF2_DEFAULT_RETURN_COLUMN 31
 #define DWARF2_CIE_DATA_ALIGNMENT (-4)
+
+#if defined(OBJ_ELF)
+
+#define tc_cfi_reloc_for_encoding mips_cfi_reloc_for_encoding
+extern bfd_reloc_code_real_type mips_cfi_reloc_for_encoding (int encoding);
+
+#define tc_compact_eh_opcode_stop 0x5c
+#define tc_compact_eh_opcode_pad 0x5f
+
+#endif
+#define DIFF_EXPR_OK
+/* We define DIFF_EXPR_OK because of R_MIPS_PC32, but we have no
+   64-bit form for n64 CFIs.  */
+#define CFI_DIFF_EXPR_OK 0
+
+#define CONVERT_SYMBOLIC_ATTRIBUTE(name) mips_convert_symbolic_attribute (name)
+extern int mips_convert_symbolic_attribute (const char *);
 
 #endif /* TC_MIPS */

@@ -1,5 +1,5 @@
 /* Target-dependent code for GNU/Linux on Alpha.
-   Copyright (C) 2002-2013 Free Software Foundation, Inc.
+   Copyright (C) 2002-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -18,8 +18,6 @@
 
 #include "defs.h"
 #include "frame.h"
-#include "gdb_assert.h"
-#include "gdb_string.h"
 #include "osabi.h"
 #include "solib-svr4.h"
 #include "symtab.h"
@@ -27,6 +25,7 @@
 #include "regcache.h"
 #include "linux-tdep.h"
 #include "alpha-tdep.h"
+#include "gdbarch.h"
 
 /* This enum represents the signals' numbers on the Alpha
    architecture.  It just contains the signal definitions which are
@@ -65,11 +64,11 @@ enum
 
    This is somewhat complicated in that:
      (1) the expansion of the "mov" assembler macro has changed over
-         time, from "bis src,src,dst" to "bis zero,src,dst",
+	 time, from "bis src,src,dst" to "bis zero,src,dst",
      (2) the kernel has changed from using "addq" to "lda" to load the
-         syscall number,
+	 syscall number,
      (3) there is a "normal" sigreturn and an "rt" sigreturn which
-         has a different stack layout.  */
+	 has a different stack layout.  */
 
 static long
 alpha_linux_sigtramp_offset_1 (struct gdbarch *gdbarch, CORE_ADDR pc)
@@ -127,7 +126,7 @@ alpha_linux_pc_in_sigtramp (struct gdbarch *gdbarch,
 }
 
 static CORE_ADDR
-alpha_linux_sigcontext_addr (struct frame_info *this_frame)
+alpha_linux_sigcontext_addr (frame_info_ptr this_frame)
 {
   struct gdbarch *gdbarch = get_frame_arch (this_frame);
   CORE_ADDR pc;
@@ -145,7 +144,7 @@ alpha_linux_sigcontext_addr (struct frame_info *this_frame)
 	struct rt_sigframe {
 	  struct siginfo info;
 	  struct ucontext uc;
-        };
+	};
 
 	offsetof (struct rt_sigframe, uc.uc_mcontext);  */
 
@@ -165,22 +164,28 @@ alpha_linux_supply_gregset (const struct regset *regset,
 			    struct regcache *regcache,
 			    int regnum, const void *gregs, size_t len)
 {
-  const gdb_byte *regs = gregs;
-  int i;
+  const gdb_byte *regs = (const gdb_byte *) gregs;
+
   gdb_assert (len >= 32 * 8);
-
-  for (i = 0; i < ALPHA_ZERO_REGNUM; i++)
-    {
-      if (regnum == i || regnum == -1)
-	regcache_raw_supply (regcache, i, regs + i * 8);
-    }
-
-  if (regnum == ALPHA_PC_REGNUM || regnum == -1)
-    regcache_raw_supply (regcache, ALPHA_PC_REGNUM, regs + 31 * 8);
-
-  if (regnum == ALPHA_UNIQUE_REGNUM || regnum == -1)
-    regcache_raw_supply (regcache, ALPHA_UNIQUE_REGNUM,
+  alpha_supply_int_regs (regcache, regnum, regs, regs + 31 * 8,
 			 len >= 33 * 8 ? regs + 32 * 8 : NULL);
+}
+
+/* Collect register REGNUM from the register cache REGCACHE and store
+   it in the buffer specified by GREGS and LEN as described by the
+   general-purpose register set REGSET.  If REGNUM is -1, do this for
+   all registers in REGSET.  */
+
+static void
+alpha_linux_collect_gregset (const struct regset *regset,
+			     const struct regcache *regcache,
+			     int regnum, void *gregs, size_t len)
+{
+  gdb_byte *regs = (gdb_byte *) gregs;
+
+  gdb_assert (len >= 32 * 8);
+  alpha_fill_int_regs (regcache, regnum, regs, regs + 31 * 8,
+		       len >= 33 * 8 ? regs + 32 * 8 : NULL);
 }
 
 /* Supply register REGNUM from the buffer specified by FPREGS and LEN
@@ -192,46 +197,50 @@ alpha_linux_supply_fpregset (const struct regset *regset,
 			     struct regcache *regcache,
 			     int regnum, const void *fpregs, size_t len)
 {
-  const gdb_byte *regs = fpregs;
-  int i;
+  const gdb_byte *regs = (const gdb_byte *) fpregs;
+
   gdb_assert (len >= 32 * 8);
-
-  for (i = ALPHA_FP0_REGNUM; i < ALPHA_FP0_REGNUM + 31; i++)
-    {
-      if (regnum == i || regnum == -1)
-	regcache_raw_supply (regcache, i, regs + (i - ALPHA_FP0_REGNUM) * 8);
-    }
-
-  if (regnum == ALPHA_FPCR_REGNUM || regnum == -1)
-    regcache_raw_supply (regcache, ALPHA_FPCR_REGNUM, regs + 31 * 8);
+  alpha_supply_fp_regs (regcache, regnum, regs, regs + 31 * 8);
 }
 
-static struct regset alpha_linux_gregset =
+/* Collect register REGNUM from the register cache REGCACHE and store
+   it in the buffer specified by FPREGS and LEN as described by the
+   general-purpose register set REGSET.  If REGNUM is -1, do this for
+   all registers in REGSET.  */
+
+static void
+alpha_linux_collect_fpregset (const struct regset *regset,
+			      const struct regcache *regcache,
+			      int regnum, void *fpregs, size_t len)
+{
+  gdb_byte *regs = (gdb_byte *) fpregs;
+
+  gdb_assert (len >= 32 * 8);
+  alpha_fill_fp_regs (regcache, regnum, regs, regs + 31 * 8);
+}
+
+static const struct regset alpha_linux_gregset =
 {
   NULL,
-  alpha_linux_supply_gregset
+  alpha_linux_supply_gregset, alpha_linux_collect_gregset
 };
 
-static struct regset alpha_linux_fpregset =
+static const struct regset alpha_linux_fpregset =
 {
   NULL,
-  alpha_linux_supply_fpregset
+  alpha_linux_supply_fpregset, alpha_linux_collect_fpregset
 };
 
-/* Return the appropriate register set for the core section identified
-   by SECT_NAME and SECT_SIZE.  */
+/* Iterate over core file register note sections.  */
 
-static const struct regset *
-alpha_linux_regset_from_core_section (struct gdbarch *gdbarch,
-				      const char *sect_name, size_t sect_size)
+static void
+alpha_linux_iterate_over_regset_sections (struct gdbarch *gdbarch,
+					  iterate_over_regset_sections_cb *cb,
+					  void *cb_data,
+					  const struct regcache *regcache)
 {
-  if (strcmp (sect_name, ".reg") == 0 && sect_size >= 32 * 8)
-    return &alpha_linux_gregset;
-
-  if (strcmp (sect_name, ".reg2") == 0 && sect_size >= 32 * 8)
-    return &alpha_linux_fpregset;
-
-  return NULL;
+  cb (".reg", 32 * 8, 32 * 8, &alpha_linux_gregset, NULL, cb_data);
+  cb (".reg2", 32 * 8, 32 * 8, &alpha_linux_fpregset, NULL, cb_data);
 }
 
 /* Implementation of `gdbarch_gdb_signal_from_target', as defined in
@@ -345,9 +354,7 @@ alpha_linux_gdb_signal_to_target (struct gdbarch *gdbarch,
 static void
 alpha_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
 {
-  struct gdbarch_tdep *tdep;
-
-  linux_init_abi (info, gdbarch);
+  linux_init_abi (info, gdbarch, 0);
 
   /* Hook into the DWARF CFI frame unwinder.  */
   alpha_dwarf2_init_abi (info, gdbarch);
@@ -355,7 +362,7 @@ alpha_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
   /* Hook into the MDEBUG frame unwinder.  */
   alpha_mdebug_init_abi (info, gdbarch);
 
-  tdep = gdbarch_tdep (gdbarch);
+  alpha_gdbarch_tdep *tdep = gdbarch_tdep<alpha_gdbarch_tdep> (gdbarch);
   tdep->dynamic_sigtramp_offset = alpha_linux_sigtramp_offset;
   tdep->sigcontext_addr = alpha_linux_sigcontext_addr;
   tdep->pc_in_sigtramp = alpha_linux_pc_in_sigtramp;
@@ -365,14 +372,14 @@ alpha_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
   set_gdbarch_skip_trampoline_code (gdbarch, find_solib_trampoline_target);
 
   set_solib_svr4_fetch_link_map_offsets
-    (gdbarch, svr4_lp64_fetch_link_map_offsets);
+    (gdbarch, linux_lp64_fetch_link_map_offsets);
 
   /* Enable TLS support.  */
   set_gdbarch_fetch_tls_load_module_address (gdbarch,
-                                             svr4_fetch_objfile_link_map);
+					     svr4_fetch_objfile_link_map);
 
-  set_gdbarch_regset_from_core_section
-    (gdbarch, alpha_linux_regset_from_core_section);
+  set_gdbarch_iterate_over_regset_sections
+    (gdbarch, alpha_linux_iterate_over_regset_sections);
 
   set_gdbarch_gdb_signal_from_target (gdbarch,
 				      alpha_linux_gdb_signal_from_target);
@@ -380,12 +387,10 @@ alpha_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
 				    alpha_linux_gdb_signal_to_target);
 }
 
-/* Provide a prototype to silence -Wmissing-prototypes.  */
-extern initialize_file_ftype _initialize_alpha_linux_tdep;
-
+void _initialize_alpha_linux_tdep ();
 void
-_initialize_alpha_linux_tdep (void)
+_initialize_alpha_linux_tdep ()
 {
   gdbarch_register_osabi (bfd_arch_alpha, 0, GDB_OSABI_LINUX,
-                          alpha_linux_init_abi);
+			  alpha_linux_init_abi);
 }

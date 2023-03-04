@@ -1,4 +1,4 @@
-# Copyright 2007-2013 Free Software Foundation, Inc.
+# Copyright 2007-2023 Free Software Foundation, Inc.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -14,6 +14,8 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 load_lib "ada.exp"
+
+require allow_ada_tests
 
 standard_ada_testfile foo
 
@@ -32,14 +34,13 @@ set sp "\[ \t\]*"
 
 set info_break_header "Num${sp}Type${sp}Disp${sp}Enb${sp}Address${sp}What"
 set catch_exception_info \
-  "$any_nb${sp}breakpoint${sp}keep${sp}y${sp}$any_addr${sp}all Ada exceptions"
+  "$any_nb${sp}catchpoint${sp}keep${sp}y${sp}all Ada exceptions"
 
 ####################################
 # 1. Try catching all exceptions.  #
 ####################################
 
-if ![runto_main] then {
-   fail "Cannot run to main, testcase aborted"
+if {![runto_main]} {
    return 0
 }
 
@@ -62,13 +63,13 @@ gdb_test "info break" \
          "info break, catch all Ada exceptions"
 
 set catchpoint_msg \
-  "Catchpoint $any_nb, CONSTRAINT_ERROR at $any_addr in foo \\\(\\\).*at .*foo.adb:$any_nb"
+  "Catchpoint $any_nb, CONSTRAINT_ERROR (\\\(ignore C_E\\\) )?at $any_addr in foo \\\(\\\).*at .*foo.adb:$any_nb"
 gdb_test "continue" \
          "Continuing\.$eol$catchpoint_msg$eol.*SPOT1" \
          "continuing to first exception"
 
 set catchpoint_msg \
-  "Catchpoint $any_nb, PROGRAM_ERROR at $any_addr in foo \\\(\\\).*at .*foo.adb:$any_nb"
+  "Catchpoint $any_nb, PROGRAM_ERROR (\\\(foo\\.adb:$decimal explicit raise\\\) )?at $any_addr in foo \\\(\\\).*at .*foo.adb:$any_nb"
 gdb_test "continue" \
          "Continuing\.$eol$catchpoint_msg$eol.*SPOT2" \
          "continuing to second exception"
@@ -87,8 +88,7 @@ gdb_test "continue" \
 #  - continue, we should see the unhandled Constrait_Error exception
 #  - continue, the program exits.
 
-if ![runto_main] then {
-   fail "Cannot run to main, testcase aborted"
+if {![runto_main]} {
    return 0
 }
 
@@ -105,18 +105,18 @@ gdb_test "catch exception unhandled" \
          "insert catchpoint on unhandled exceptions"
 
 set catch_exception_entry \
-  "$any_nb${sp}breakpoint${sp}keep${sp}y${sp}$any_addr${sp}\`Program_Error' Ada exception"
+  "$any_nb${sp}catchpoint${sp}keep${sp}y${sp}\`Program_Error' Ada exception"
 set catch_assert_entry \
-  "$any_nb${sp}breakpoint${sp}keep${sp}y${sp}$any_addr${sp}failed Ada assertions"
+  "$any_nb${sp}catchpoint${sp}keep${sp}y${sp}failed Ada assertions"
 set catch_unhandled_entry \
-  "$any_nb${sp}breakpoint${sp}keep${sp}y${sp}$any_addr${sp}unhandled Ada exceptions"
+  "$any_nb${sp}catchpoint${sp}keep${sp}y${sp}unhandled Ada exceptions"
 
 gdb_test "info break" \
          "$info_break_header$eol.*$catch_exception_entry$eol$catch_assert_entry$eol$catch_unhandled_entry" \
          "info break, second run"
 
 set catchpoint_msg \
-  "Catchpoint $any_nb, PROGRAM_ERROR at $any_addr in foo \\\(\\\).*at .*foo.adb:$any_nb"
+  "Catchpoint $any_nb, PROGRAM_ERROR (\\\(foo.adb:$decimal explicit raise\\\) )?at $any_addr in foo \\\(\\\).*at .*foo.adb:$any_nb"
 gdb_test "continue" \
          "Continuing\.$eol$catchpoint_msg$eol.*SPOT2" \
          "continuing to Program_Error exception"
@@ -148,8 +148,7 @@ gdb_test "continue" \
 #     at any of the other exceptions that are being raised inside
 #     the program.
 
-if ![runto_main] then {
-   fail "Cannot run to main, testcase aborted"
+if {![runto_main]} {
    return 0
 }
 
@@ -157,14 +156,15 @@ gdb_test "tcatch exception" \
          "Temporary catchpoint $any_nb: all Ada exceptions"
 
 set temp_catchpoint_msg \
-  "Temporary catchpoint $any_nb, CONSTRAINT_ERROR at $any_addr in foo \\\(\\\).*at .*foo.adb:$any_nb"
+  "Temporary catchpoint $any_nb, CONSTRAINT_ERROR (\\\(.*\\\) )?at $any_addr in foo \\\(\\\).*at .*foo.adb:$any_nb"
 gdb_test "continue" \
          "Continuing\.$eol$temp_catchpoint_msg$eol.*SPOT1" \
          "continuing to temporary catchpoint"
 
-gdb_test "continue" \
-         "Continuing\..*$inferior_exited_re.*" \
-         "continuing to program completion"
-
+with_test_prefix "temporary catchpoint" {
+    gdb_test "continue" \
+	"Continuing\..*$inferior_exited_re.*" \
+	"continuing to program completion"
+}
 
 

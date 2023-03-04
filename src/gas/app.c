@@ -1,7 +1,5 @@
 /* This is the Assembler Pre-Processor
-   Copyright 1987, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997, 1998,
-   1999, 2000, 2001, 2002, 2003, 2005, 2006, 2007, 2008, 2009, 2010, 2012
-   Free Software Foundation, Inc.
+   Copyright (C) 1987-2023 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -57,6 +55,8 @@ static const char mri_pseudo[] = ".mri 0";
 static const char   symver_pseudo[] = ".symver";
 static const char * symver_state;
 #endif
+
+static char last_char;
 
 static char lex[256];
 static const char symbol_chars[] =
@@ -119,8 +119,7 @@ do_scrub_begin (int m68k_mri ATTRIBUTE_UNUSED)
     {
       lex['"'] = LEX_IS_STRINGQUOTE;
 
-#if ! defined (TC_HPPA) && ! defined (TC_I370)
-      /* I370 uses single-quotes to delimit integer, float constants.  */
+#if ! defined (TC_HPPA)
       lex['\''] = LEX_IS_ONECHAR_QUOTE;
 #endif
 
@@ -160,7 +159,10 @@ do_scrub_begin (int m68k_mri ATTRIBUTE_UNUSED)
   for (p = line_comment_chars; *p; p++)
     lex[(unsigned char) *p] = LEX_IS_LINE_COMMENT_START;
 
-  for (p = line_separator_chars; *p; p++)
+#ifndef tc_line_separator_chars
+#define tc_line_separator_chars line_separator_chars
+#endif
+  for (p = tc_line_separator_chars; *p; p++)
     lex[(unsigned char) *p] = LEX_IS_LINE_SEPARATOR;
 
 #ifdef tc_parallel_separator_chars
@@ -210,7 +212,7 @@ do_scrub_begin (int m68k_mri ATTRIBUTE_UNUSED)
 /* Saved state of the scrubber.  */
 static int state;
 static int old_state;
-static char *out_string;
+static const char *out_string;
 static char out_buf[20];
 static int add_newlines;
 static char *saved_input;
@@ -228,7 +230,7 @@ struct app_save
 {
   int          state;
   int          old_state;
-  char *       out_string;
+  const char * out_string;
   char         out_buf[sizeof (out_buf)];
   int          add_newlines;
   char *       saved_input;
@@ -241,14 +243,15 @@ struct app_save
 #if defined TC_ARM && defined OBJ_ELF
   const char * symver_state;
 #endif
+  char         last_char;
 };
 
 char *
 app_push (void)
 {
-  register struct app_save *saved;
+  struct app_save *saved;
 
-  saved = (struct app_save *) xmalloc (sizeof (*saved));
+  saved = XNEW (struct app_save);
   saved->state = state;
   saved->old_state = old_state;
   saved->out_string = out_string;
@@ -258,7 +261,7 @@ app_push (void)
     saved->saved_input = NULL;
   else
     {
-      saved->saved_input = (char *) xmalloc (saved_input_len);
+      saved->saved_input = XNEWVEC (char, saved_input_len);
       memcpy (saved->saved_input, saved_input, saved_input_len);
       saved->saved_input_len = saved_input_len;
     }
@@ -270,6 +273,7 @@ app_push (void)
 #if defined TC_ARM && defined OBJ_ELF
   saved->symver_state = symver_state;
 #endif
+  saved->last_char = last_char;
 
   /* do_scrub_begin() is not useful, just wastes time.  */
 
@@ -283,7 +287,7 @@ app_push (void)
 void
 app_pop (char *arg)
 {
-  register struct app_save *saved = (struct app_save *) arg;
+  struct app_save *saved = (struct app_save *) arg;
 
   /* There is no do_scrub_end ().  */
   state = saved->state;
@@ -309,6 +313,7 @@ app_pop (char *arg)
 #if defined TC_ARM && defined OBJ_ELF
   symver_state = saved->symver_state;
 #endif
+  last_char = saved->last_char;
 
   free (arg);
 }
@@ -340,6 +345,55 @@ process_escape (int ch)
     }
 }
 
+#define MULTIBYTE_WARN_COUNT_LIMIT 10
+static unsigned int multibyte_warn_count = 0;
+
+bool
+scan_for_multibyte_characters (const unsigned char *  start,
+			       const unsigned char *  end,
+			       bool                   warn)
+{
+  if (end <= start)
+    return false;
+
+  if (warn && multibyte_warn_count > MULTIBYTE_WARN_COUNT_LIMIT)
+    return false;
+
+  bool found = false;
+
+  while (start < end)
+    {
+      unsigned char c;
+
+      if ((c = * start++) <= 0x7f)
+	continue;
+
+      if (!warn)
+	return true;
+
+      found = true;
+
+      const char * filename;
+      unsigned int lineno;
+
+      filename = as_where (& lineno);
+      if (filename == NULL)
+	as_warn (_("multibyte character (%#x) encountered in input"), c);
+      else if (lineno == 0)
+	as_warn (_("multibyte character (%#x) encountered in %s"), c, filename);
+      else
+	as_warn (_("multibyte character (%#x) encountered in %s at or near line %u"), c, filename, lineno);
+
+      if (++ multibyte_warn_count == MULTIBYTE_WARN_COUNT_LIMIT)
+	{
+	  as_warn (_("further multibyte character warnings suppressed"));
+	  break;
+	}
+    }
+
+  return found;
+}
+
 /* This function is called to process input characters.  The GET
    parameter is used to retrieve more input characters.  GET should
    set its parameter to point to a buffer, and return the length of
@@ -359,7 +413,7 @@ do_scrub_chars (size_t (*get) (char *, size_t), char *tostart, size_t tolen)
   char *from;
   char *fromend;
   size_t fromlen;
-  register int ch, ch2 = 0;
+  int ch, ch2 = 0;
   /* Character that started the string we're working on.  */
   static char quotechar;
 
@@ -458,6 +512,11 @@ do_scrub_chars (size_t (*get) (char *, size_t), char *tostart, size_t tolen)
 	return 0;
       from = input_buffer;
       fromend = from + fromlen;
+
+      if (multibyte_handling == multibyte_warn)
+	(void) scan_for_multibyte_characters ((const unsigned char *) from,
+					      (const unsigned char* ) fromend,
+					      true /* Generate warnings.  */);
     }
 
   while (1)
@@ -590,13 +649,11 @@ do_scrub_chars (size_t (*get) (char *, size_t), char *tostart, size_t tolen)
 	      state = old_state;
 	      PUT (ch);
 	    }
-#ifndef NO_STRING_ESCAPES
-	  else if (ch == '\\')
+	  else if (TC_STRING_ESCAPES && ch == '\\')
 	    {
 	      state = 6;
 	      PUT (ch);
 	    }
-#endif
 	  else if (scrub_m68k_mri && ch == '\n')
 	    {
 	      /* Just quietly terminate the string.  This permits lines like
@@ -691,9 +748,12 @@ do_scrub_chars (size_t (*get) (char *, size_t), char *tostart, size_t tolen)
 	    }
 	  else
 	    {
+	      if (ch != EOF)
+		UNGET (ch);
 	      state = 9;
 	      break;
 	    }
+	  /* Fall through.  */
 	case 17:
 	  /* We have seen "af" at the start of a symbol,
 	     a ' here is a part of that symbol.  */
@@ -870,7 +930,6 @@ do_scrub_chars (size_t (*get) (char *, size_t), char *tostart, size_t tolen)
 	    }
 #endif
 	  if (IS_COMMENT (ch)
-	      || ch == '/'
 	      || IS_LINE_SEPARATOR (ch)
 	      || IS_PARALLEL_SEPARATOR (ch))
 	    {
@@ -1029,17 +1088,16 @@ do_scrub_chars (size_t (*get) (char *, size_t), char *tostart, size_t tolen)
 	      /* PUT didn't jump out.  We could just break, but we
 		 know what will happen, so optimize a bit.  */
 	      ch = GET ();
-	      old_state = 3;
+	      old_state = 9;
 	    }
-	  else if (state == 9)
-	    old_state = 3;
+	  else if (state == 3)
+	    old_state = 9;
 	  else
 	    old_state = state;
 	  state = 5;
 	  PUT (ch);
 	  break;
 
-#ifndef IEEE_STYLE
 	case LEX_IS_ONECHAR_QUOTE:
 #ifdef H_TICK_HEX
 	  if (state == 9 && enable_h_tick_hex)
@@ -1101,7 +1159,6 @@ do_scrub_chars (size_t (*get) (char *, size_t), char *tostart, size_t tolen)
 	  out_string = out_buf;
 	  PUT (*out_string++);
 	  break;
-#endif
 
 	case LEX_IS_COLON:
 #ifdef KEEP_WHITE_AROUND_COLON
@@ -1186,7 +1243,7 @@ do_scrub_chars (size_t (*get) (char *, size_t), char *tostart, size_t tolen)
 		  state = -2;
 		  break;
 		}
-	      else
+	      else if (ch2 != EOF)
 		{
 		  UNGET (ch2);
 		}
@@ -1217,9 +1274,16 @@ do_scrub_chars (size_t (*get) (char *, size_t), char *tostart, size_t tolen)
 		  while (ch != EOF && !IS_NEWLINE (ch))
 		    ch = GET ();
 		  if (ch == EOF)
-		    as_warn (_("end of file in comment; newline inserted"));
+		    {
+		      as_warn (_("end of file in comment; newline inserted"));
+		      PUT ('\n');
+		    }
+		  else /* IS_NEWLINE (ch) */
+		    {
+		      /* To process non-zero add_newlines.  */
+		      UNGET (ch);
+		    }
 		  state = 0;
-		  PUT ('\n');
 		  break;
 		}
 	      /* Looks like `# 123 "filename"' from cpp.  */
@@ -1273,17 +1337,15 @@ do_scrub_chars (size_t (*get) (char *, size_t), char *tostart, size_t tolen)
 	    goto de_fault;
 #endif
 
-#ifdef TC_ARM
-	  /* For the ARM, care is needed not to damage occurrences of \@
-	     by stripping the @ onwards.  Yuck.  */
-	  if (to > tostart && *(to - 1) == '\\')
-	    /* Do not treat the @ as a start-of-comment.  */
+	  /* Care is needed not to damage occurrences of \<comment-char>
+	     by stripping the <comment-char> onwards.  Yuck.  */
+	  if ((to > tostart ? to[-1] : last_char) == '\\')
+	    /* Do not treat the <comment-char> as a start-of-comment.  */
 	    goto de_fault;
-#endif
 
 #ifdef WARN_COMMENTS
 	  if (!found_comment)
-	    as_where (&found_comment_file, &found_comment);
+	    found_comment_file = as_where (&found_comment);
 #endif
 	  do
 	    {
@@ -1313,8 +1375,8 @@ do_scrub_chars (size_t (*get) (char *, size_t), char *tostart, size_t tolen)
 	      else
 		UNGET (quot);
 	    }
-	  /* FALL THROUGH */
 #endif
+	  /* Fall through.  */
 
 	case LEX_IS_SYMBOL_COMPONENT:
 	  if (state == 10)
@@ -1456,6 +1518,8 @@ do_scrub_chars (size_t (*get) (char *, size_t), char *tostart, size_t tolen)
 
  fromeof:
   /* We have reached the end of the input.  */
+  if (to > tostart)
+    last_char = to[-1];
   return to - tostart;
 
  tofull:
@@ -1469,5 +1533,20 @@ do_scrub_chars (size_t (*get) (char *, size_t), char *tostart, size_t tolen)
   else
     saved_input = NULL;
 
+  if (to > tostart)
+    last_char = to[-1];
   return to - tostart;
+}
+
+/* Return amount of pending input.  */
+
+size_t
+do_scrub_pending (void)
+{
+  size_t len = 0;
+  if (saved_input)
+    len += saved_input_len;
+  if (state == -1)
+    len += strlen (out_string);
+  return len;
 }

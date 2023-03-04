@@ -1,6 +1,5 @@
 /* BFD library support routines for the AVR architecture.
-   Copyright 1999, 2000, 2002, 2005, 2006, 2007, 2008
-   Free Software Foundation, Inc.
+   Copyright (C) 1999-2023 Free Software Foundation, Inc.
    Contributed by Denis Chertykov <denisc@overta.ru>
 
    This file is part of BFD, the Binary File Descriptor library.
@@ -49,7 +48,7 @@ compatible (const bfd_arch_info_type * a,
     {
       /* Special case for ATmega[16]03 (avr:3) and ATmega83 (avr:4).  */
       if ((a->mach == bfd_mach_avr3 && b->mach == bfd_mach_avr4)
-         || (a->mach == bfd_mach_avr4 && b->mach == bfd_mach_avr3))
+	 || (a->mach == bfd_mach_avr4 && b->mach == bfd_mach_avr3))
        return NULL;
 
       if (a->mach <= b->mach)
@@ -68,7 +67,6 @@ compatible (const bfd_arch_info_type * a,
     return a;
   if (a->mach == bfd_mach_avr31 && b->mach == bfd_mach_avr3)
     return b;
-
   if (a->mach == bfd_mach_avr3 && b->mach == bfd_mach_avr35)
     return a;
   if (a->mach == bfd_mach_avr35 && b->mach == bfd_mach_avr3)
@@ -79,15 +77,14 @@ compatible (const bfd_arch_info_type * a,
   if (a->mach == bfd_mach_avr51 && b->mach == bfd_mach_avr5)
     return b;
 
-
   return NULL;
 }
 
 #define N(addr_bits, machine, print, default, next)		\
 {								\
-  8,				/* 8 bits in a word.  */	\
-  addr_bits,			/* bits in an address.  */	\
-  8,				/* 8 bits in a byte.  */	\
+  8,				/* Bits in a word.  */		\
+  addr_bits,			/* Bits in an address.  */	\
+  8,				/* Bits in a byte.  */		\
   bfd_arch_avr,							\
   machine,			/* Machine number.  */		\
   "avr",			/* Architecture name.   */	\
@@ -97,67 +94,71 @@ compatible (const bfd_arch_info_type * a,
   compatible,							\
   bfd_default_scan,						\
   bfd_arch_default_fill,					\
-  next								\
+  next,								\
+  0 /* Maximum offset of a reloc from the start of an insn.  */	\
 }
 
 static const bfd_arch_info_type arch_info_struct[] =
 {
   /* Assembler only.  */
-  N (16, bfd_mach_avr1, "avr:1", FALSE, & arch_info_struct[1]),
+  N (16, bfd_mach_avr1, "avr:1", false, & arch_info_struct[1]),
 
   /* Classic, <= 8K.  */
-  N (16, bfd_mach_avr2, "avr:2", FALSE, & arch_info_struct[2]),
+  N (16, bfd_mach_avr2, "avr:2", false, & arch_info_struct[2]),
 
   /* Classic + MOVW, <= 8K.  */
-  N (16, bfd_mach_avr25, "avr:25", FALSE, & arch_info_struct[3]),
+  N (16, bfd_mach_avr25, "avr:25", false, & arch_info_struct[3]),
 
   /* Classic, > 8K, <= 64K.  */
   /* TODO:  addr_bits should be 16, but set to 22 for some following
      version of GCC (from 4.3) for backward compatibility.  */
-  N (22, bfd_mach_avr3, "avr:3", FALSE, & arch_info_struct[4]),
+  N (22, bfd_mach_avr3, "avr:3", false, & arch_info_struct[4]),
 
   /* Classic, == 128K.  */
-  N (22, bfd_mach_avr31, "avr:31", FALSE, & arch_info_struct[5]),
+  N (22, bfd_mach_avr31, "avr:31", false, & arch_info_struct[5]),
 
   /* Classic + MOVW + JMP/CALL, > 8K, <= 64K. */
-  N (16, bfd_mach_avr35, "avr:35", FALSE, & arch_info_struct[6]),
+  N (16, bfd_mach_avr35, "avr:35", false, & arch_info_struct[6]),
 
   /* Enhanced, <= 8K.  */
-  N (16, bfd_mach_avr4, "avr:4", FALSE, & arch_info_struct[7]),
+  N (16, bfd_mach_avr4, "avr:4", false, & arch_info_struct[7]),
 
   /* Enhanced, > 8K, <= 64K.  */
   /* TODO:  addr_bits should be 16, but set to 22 for some following
      version of GCC (from 4.3) for backward compatibility.  */
-  N (22, bfd_mach_avr5, "avr:5", FALSE, & arch_info_struct[8]),
+  N (22, bfd_mach_avr5, "avr:5", false, & arch_info_struct[8]),
 
   /* Enhanced, == 128K.  */
-  N (22, bfd_mach_avr51, "avr:51", FALSE, & arch_info_struct[9]),
+  N (22, bfd_mach_avr51, "avr:51", false, & arch_info_struct[9]),
 
   /* 3-Byte PC.  */
-  N (22, bfd_mach_avr6, "avr:6", FALSE, & arch_info_struct[10]),
+  N (22, bfd_mach_avr6, "avr:6", false, & arch_info_struct[10]),
 
-  /* Xmega 1 */
-  N (24, bfd_mach_avrxmega1, "avr:101", FALSE, & arch_info_struct[11]),
+  /* Tiny core (AVR Tiny).  */
+  N (16, bfd_mach_avrtiny, "avr:100", false, & arch_info_struct[11]),
 
-  /* Xmega 2 */
-  N (24, bfd_mach_avrxmega2, "avr:102", FALSE, & arch_info_struct[12]),
+  /* Xmega 1.  */
+  N (24, bfd_mach_avrxmega1, "avr:101", false, & arch_info_struct[12]),
 
-  /* Xmega 3 */
-  N (24, bfd_mach_avrxmega3, "avr:103", FALSE, & arch_info_struct[13]),
+  /* Xmega 2.  */
+  N (24, bfd_mach_avrxmega2, "avr:102", false, & arch_info_struct[13]),
 
-  /* Xmega 4 */
-  N (24, bfd_mach_avrxmega4, "avr:104", FALSE, & arch_info_struct[14]),
+  /* Xmega 3.  */
+  N (24, bfd_mach_avrxmega3, "avr:103", false, & arch_info_struct[14]),
 
-  /* Xmega 5 */
-  N (24, bfd_mach_avrxmega5, "avr:105", FALSE, & arch_info_struct[15]),
+  /* Xmega 4.  */
+  N (24, bfd_mach_avrxmega4, "avr:104", false, & arch_info_struct[15]),
 
-  /* Xmega 6 */
-  N (24, bfd_mach_avrxmega6, "avr:106", FALSE, & arch_info_struct[16]),
+  /* Xmega 5.  */
+  N (24, bfd_mach_avrxmega5, "avr:105", false, & arch_info_struct[16]),
 
-  /* Xmega 7 */
-  N (24, bfd_mach_avrxmega7, "avr:107", FALSE, NULL)
+  /* Xmega 6.  */
+  N (24, bfd_mach_avrxmega6, "avr:106", false, & arch_info_struct[17]),
+
+  /* Xmega 7.  */
+  N (24, bfd_mach_avrxmega7, "avr:107", false, NULL)
 
 };
 
 const bfd_arch_info_type bfd_avr_arch =
-  N (16, bfd_mach_avr2, "avr", TRUE, & arch_info_struct[0]);
+  N (16, bfd_mach_avr2, "avr", true, & arch_info_struct[0]);

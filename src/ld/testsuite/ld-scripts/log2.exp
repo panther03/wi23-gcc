@@ -1,7 +1,6 @@
 # Test LOG2() expression in linker script language.
 # By Clemens Lang
-#   Copyright 2013
-#   Free Software Foundation, Inc.
+#   Copyright (C) 2013-2023 Free Software Foundation, Inc.
 #
 # This file is part of the GNU Binutils.
 #
@@ -23,12 +22,19 @@
 set testname "binary logarithm"
 
 if {![ld_assemble $as $srcdir/$subdir/log2.s tmpdir/log2.o]} {
-	unresolved $testname
-	return
+    unsupported $testname
+    return
 }
 
-if {![ld_simple_link $ld tmpdir/log2 "-T $srcdir/$subdir/log2.t tmpdir/log2.o"]} {
-	fail $testname
+if { [is_pecoff_format] } {
+    set IMAGE_BASE "--image-base 0"
 } else {
-	pass $testname
+    set IMAGE_BASE ""
+}
+
+if {![ld_link $ld tmpdir/log2 "$LDFLAGS -T $srcdir/$subdir/log2.t \
+	$IMAGE_BASE tmpdir/log2.o"]} {
+    fail $testname
+} else {
+    pass $testname
 }

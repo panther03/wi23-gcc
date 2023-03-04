@@ -1,6 +1,6 @@
 /* General functions for the WDB TUI.
 
-   Copyright (C) 1998-2013 Free Software Foundation, Inc.
+   Copyright (C) 1998-2023 Free Software Foundation, Inc.
 
    Contributed by Hewlett-Packard Company.
 
@@ -23,32 +23,45 @@
 #include "gdbcmd.h"
 #include "tui/tui.h"
 #include "tui/tui-hooks.h"
+#include "tui/tui-command.h"
 #include "tui/tui-data.h"
 #include "tui/tui-layout.h"
 #include "tui/tui-io.h"
 #include "tui/tui-regs.h"
 #include "tui/tui-stack.h"
 #include "tui/tui-win.h"
+#include "tui/tui-wingeneral.h"
 #include "tui/tui-winsource.h"
-#include "tui/tui-windata.h"
+#include "tui/tui-source.h"
 #include "target.h"
 #include "frame.h"
 #include "breakpoint.h"
 #include "inferior.h"
 #include "symtab.h"
 #include "source.h"
+#include "terminal.h"
+#include "top.h"
 
-#include <stdio.h>
-#include <stdlib.h>
 #include <ctype.h>
 #include <signal.h>
 #include <fcntl.h>
-#if 0
-#include <termio.h>
-#endif
 #include <setjmp.h>
 
 #include "gdb_curses.h"
+#include "interps.h"
+
+/* See tui.h.  */
+
+bool debug_tui = false;
+
+/* Implement 'show debug tui'.  */
+
+static void
+show_tui_debug (struct ui_file *file, int from_tty,
+		struct cmd_list_element *c, const char *value)
+{
+  gdb_printf (file, _("TUI debugging is \"%s\".\n"), value);
+}
 
 /* This redefines CTRL if it is not already defined, so it must come
    after terminal state releated include files like <term.h> and
@@ -56,8 +69,8 @@
 #include "readline/readline.h"
 
 /* Tells whether the TUI is active or not.  */
-int tui_active = 0;
-static int tui_finish_init = 1;
+bool tui_active = false;
+static bool tui_finish_init = true;
 
 enum tui_key_mode tui_current_key_mode = TUI_COMMAND_MODE;
 
@@ -74,8 +87,10 @@ static const struct tui_char_command tui_commands[] = {
   { 'd', "down" },
   { 'f', "finish" },
   { 'n', "next" },
+  { 'o', "nexti" },
   { 'r', "run" },
   { 's', "step" },
+  { 'i', "stepi" },
   { 'u', "up" },
   { 'v', "info locals" },
   { 'w', "where" },
@@ -90,15 +105,36 @@ static Keymap tui_readline_standard_keymap;
 static int
 tui_rl_switch_mode (int notused1, int notused2)
 {
-  if (tui_active)
+
+  /* Don't let exceptions escape.  We're in the middle of a readline
+     callback that isn't prepared for that.  */
+  try
     {
-      tui_disable ();
-      rl_prep_terminal (0);
+      if (tui_active)
+	{
+	  tui_disable ();
+	  rl_prep_terminal (0);
+	}
+      else
+	{
+	  /* If tui_enable throws, we'll re-prep below.  */
+	  rl_deprep_terminal ();
+	  tui_enable ();
+	}
     }
-  else
+  catch (const gdb_exception_forced_quit &ex)
     {
-      rl_deprep_terminal ();
-      tui_enable ();
+      /* Ideally, we'd do a 'throw' here, but as noted above, we can't
+	 do that, so, instead, we'll set the necessary flags so that
+	 a later QUIT check will restart the forced quit.  */
+      set_force_quit_flag ();
+    }
+  catch (const gdb_exception &ex)
+    {
+      exception_print (gdb_stderr, ex);
+
+      if (!tui_active)
+	rl_prep_terminal (0);
     }
 
   /* Clear the readline in case switching occurred in middle of
@@ -124,8 +160,7 @@ tui_rl_switch_mode (int notused1, int notused2)
 /* TUI readline command.
    Change the TUI layout to show a next layout.
    This function is bound to CTRL-X 2.  It is intended to provide
-   a functionality close to the Emacs split-window command.  We
-   always show two windows (src+asm), (src+regs) or (asm+regs).  */
+   a functionality close to the Emacs split-window command.  */
 static int
 tui_rl_change_windows (int notused1, int notused2)
 {
@@ -133,42 +168,8 @@ tui_rl_change_windows (int notused1, int notused2)
     tui_rl_switch_mode (0 /* notused */, 0 /* notused */);
 
   if (tui_active)
-    {
-      enum tui_layout_type new_layout;
-      enum tui_register_display_type regs_type = TUI_UNDEFINED_REGS;
+    tui_next_layout ();
 
-      new_layout = tui_current_layout ();
-
-      /* Select a new layout to have a rolling layout behavior with
-	 always two windows (except when undefined).  */
-      switch (new_layout)
-	{
-	case SRC_COMMAND:
-	  new_layout = SRC_DISASSEM_COMMAND;
-	  break;
-
-	case DISASSEM_COMMAND:
-	  new_layout = SRC_DISASSEM_COMMAND;
-	  break;
-
-	case SRC_DATA_COMMAND:
-	  new_layout = SRC_DISASSEM_COMMAND;
-	  break;
-
-	case SRC_DISASSEM_COMMAND:
-	  new_layout = DISASSEM_DATA_COMMAND;
-	  break;
-	  
-	case DISASSEM_DATA_COMMAND:
-	  new_layout = SRC_DATA_COMMAND;
-	  break;
-
-	default:
-	  new_layout = SRC_COMMAND;
-	  break;
-	}
-      tui_set_layout (new_layout, regs_type);
-    }
   return 0;
 }
 
@@ -181,29 +182,8 @@ tui_rl_delete_other_windows (int notused1, int notused2)
     tui_rl_switch_mode (0 /* notused */, 0 /* notused */);
 
   if (tui_active)
-    {
-      enum tui_layout_type new_layout;
-      enum tui_register_display_type regs_type = TUI_UNDEFINED_REGS;
+    tui_remove_some_windows ();
 
-      new_layout = tui_current_layout ();
-
-      /* Kill one window.  */
-      switch (new_layout)
-	{
-	case SRC_COMMAND:
-	case SRC_DATA_COMMAND:
-	case SRC_DISASSEM_COMMAND:
-	default:
-	  new_layout = SRC_COMMAND;
-	  break;
-
-	case DISASSEM_COMMAND:
-	case DISASSEM_DATA_COMMAND:
-	  new_layout = DISASSEM_COMMAND;
-	  break;
-	}
-      tui_set_layout (new_layout, regs_type);
-    }
   return 0;
 }
 
@@ -219,12 +199,7 @@ tui_rl_other_window (int count, int key)
 
   win_info = tui_next_win (tui_win_with_focus ());
   if (win_info)
-    {
-      tui_set_win_focus_to (win_info);
-      if (TUI_DATA_WIN && TUI_DATA_WIN->generic.is_visible)
-        tui_refresh_data_win ();
-      keypad (TUI_CMD_WIN->generic.handle, (win_info != TUI_CMD_WIN));
-    }
+    tui_set_win_focus_to (win_info);
   return 0;
 }
 
@@ -239,20 +214,20 @@ tui_rl_command_key (int count, int key)
   for (i = 0; tui_commands[i].cmd; i++)
     {
       if (tui_commands[i].key == key)
-        {
-          /* Insert the command in the readline buffer.
-             Avoid calling the gdb command here since it creates
-             a possible recursion on readline if prompt_for_continue
-             is called (See PR 9584).  The command will also appear
-             in the readline history which turns out to be better.  */
-          rl_insert_text (tui_commands[i].cmd);
-          rl_newline (1, '\n');
+	{
+	  /* Insert the command in the readline buffer.
+	     Avoid calling the gdb command here since it creates
+	     a possible recursion on readline if prompt_for_continue
+	     is called (See PR 9584).  The command will also appear
+	     in the readline history which turns out to be better.  */
+	  rl_insert_text (tui_commands[i].cmd);
+	  rl_newline (1, '\n');
 
-          /* Switch to gdb command mode while executing the command.
-             This way the gdb's continue prompty will be displayed.  */
-          tui_set_key_mode (TUI_ONE_COMMAND_MODE);
-          return 0;
-        }
+	  /* Switch to gdb command mode while executing the command.
+	     This way the gdb's continue prompty will be displayed.  */
+	  tui_set_key_mode (TUI_ONE_COMMAND_MODE);
+	  return 0;
+	}
     }
   return 0;
 }
@@ -277,7 +252,7 @@ tui_rl_next_keymap (int notused1, int notused2)
     tui_rl_switch_mode (0 /* notused */, 0 /* notused */);
 
   tui_set_key_mode (tui_current_key_mode == TUI_COMMAND_MODE
-                    ? TUI_SINGLE_KEY_MODE : TUI_COMMAND_MODE);
+		    ? TUI_SINGLE_KEY_MODE : TUI_COMMAND_MODE);
   return 0;
 }
 
@@ -289,7 +264,8 @@ static int
 tui_rl_startup_hook (void)
 {
   rl_already_prompted = 1;
-  if (tui_current_key_mode != TUI_COMMAND_MODE && immediate_quit == 0)
+  if (tui_current_key_mode != TUI_COMMAND_MODE
+      && !gdb_in_secondary_prompt_p (current_ui))
     tui_set_key_mode (TUI_SINGLE_KEY_MODE);
   tui_redisplay_readline ();
   return 0;
@@ -302,25 +278,37 @@ tui_set_key_mode (enum tui_key_mode mode)
 {
   tui_current_key_mode = mode;
   rl_set_keymap (mode == TUI_SINGLE_KEY_MODE
-                 ? tui_keymap : tui_readline_standard_keymap);
+		 ? tui_keymap : tui_readline_standard_keymap);
   tui_show_locator_content ();
 }
 
 /* Initialize readline and configure the keymap for the switching
    key shortcut.  */
 void
-tui_initialize_readline (void)
+tui_ensure_readline_initialized ()
 {
+  static bool initialized;
+
+  if (initialized)
+    return;
+  initialized = true;
+
   int i;
   Keymap tui_ctlx_keymap;
 
-  rl_initialize ();
-
   rl_add_defun ("tui-switch-mode", tui_rl_switch_mode, -1);
-  rl_add_defun ("gdb-command", tui_rl_command_key, -1);
   rl_add_defun ("next-keymap", tui_rl_next_keymap, -1);
+  rl_add_defun ("tui-delete-other-windows", tui_rl_delete_other_windows, -1);
+  rl_add_defun ("tui-change-windows", tui_rl_change_windows, -1);
+  rl_add_defun ("tui-other-window", tui_rl_other_window, -1);
 
   tui_keymap = rl_make_bare_keymap ();
+
+  /* The named keymap feature was added in Readline 8.0.  */
+#if RL_READLINE_VERSION >= 0x800
+  rl_set_keymap_name ("SingleKey", tui_keymap);
+#endif
+
   tui_ctlx_keymap = rl_make_bare_keymap ();
   tui_readline_standard_keymap = rl_get_keymap ();
 
@@ -336,11 +324,11 @@ tui_initialize_readline (void)
       int j;
 
       for (j = 0; tui_commands[j].cmd; j++)
-        if (tui_commands[j].key == i)
-          break;
+	if (tui_commands[j].key == i)
+	  break;
 
       if (tui_commands[j].cmd)
-        continue;
+	continue;
 
       rl_bind_key_in_map (i, tui_rl_command_mode, tui_keymap);
     }
@@ -360,6 +348,23 @@ tui_initialize_readline (void)
   rl_bind_key_in_map ('q', tui_rl_next_keymap, tui_keymap);
   rl_bind_key_in_map ('s', tui_rl_next_keymap, emacs_ctlx_keymap);
   rl_bind_key_in_map ('s', tui_rl_next_keymap, tui_ctlx_keymap);
+
+  /* Initialize readline after the above.  */
+  rl_initialize ();
+}
+
+/* Return the TERM variable from the environment, or "<unset>"
+   if not set.  */
+
+static const char *
+gdb_getenv_term (void)
+{
+  const char *term;
+
+  term = getenv ("TERM");
+  if (term != NULL)
+    return term;
+  return "<unset>";
 }
 
 /* Enter in the tui mode (curses).
@@ -369,65 +374,138 @@ tui_initialize_readline (void)
 void
 tui_enable (void)
 {
-  if (!tui_allowed_p ())
-    error (_("TUI mode not allowed"));
+  TUI_SCOPED_DEBUG_ENTER_EXIT;
 
   if (tui_active)
     return;
 
-  /* To avoid to initialize curses when gdb starts, there is a defered
+  /* To avoid to initialize curses when gdb starts, there is a deferred
      curses initialization.  This initialization is made only once
      and the first time the curses mode is entered.  */
   if (tui_finish_init)
     {
       WINDOW *w;
+      SCREEN *s;
+#ifndef __MINGW32__
+       const char *cap;
+#endif
+      const char *interp;
 
-      w = initscr ();
-  
+      /* If the top level interpreter is not the console/tui (e.g.,
+	 MI), enabling curses will certainly lose.  */
+      interp = top_level_interpreter ()->name ();
+      if (strcmp (interp, INTERP_TUI) != 0)
+	error (_("Cannot enable the TUI when the interpreter is '%s'"), interp);
+
+      /* Don't try to setup curses (and print funny control
+	 characters) if we're not outputting to a terminal.  */
+      if (!gdb_stderr->isatty ())
+	error (_("Cannot enable the TUI when output is not a terminal"));
+
+      s = newterm (NULL, stdout, stdin);
+#ifdef __MINGW32__
+      /* The MinGW port of ncurses requires $TERM to be unset in order
+	 to activate the Windows console driver.  */
+      if (s == NULL)
+	s = newterm ((char *) "unknown", stdout, stdin);
+#endif
+      if (s == NULL)
+	{
+	  error (_("Cannot enable the TUI: error opening terminal [TERM=%s]"),
+		 gdb_getenv_term ());
+	}
+      w = stdscr;
+      if (has_colors ())
+	{
+#ifdef HAVE_USE_DEFAULT_COLORS
+	  /* Ncurses extension to help with resetting to the default
+	     color.  */
+	  use_default_colors ();
+#endif
+	  start_color ();
+	}
+
+      /* Check required terminal capabilities.  The MinGW port of
+	 ncurses does have them, but doesn't expose them through "cup".  */
+#ifndef __MINGW32__
+      cap = tigetstr ((char *) "cup");
+      if (cap == NULL || cap == (char *) -1 || *cap == '\0')
+	{
+	  endwin ();
+	  delscreen (s);
+	  error (_("Cannot enable the TUI: "
+		   "terminal doesn't support cursor addressing [TERM=%s]"),
+		 gdb_getenv_term ());
+	}
+#endif
+
+      /* We must mark the tui sub-system active before trying to setup the
+	 current layout as tui windows defined by an extension language
+	 rely on this flag being true in order to know that the window
+	 they are creating is currently valid.  */
+      tui_active = true;
+
       cbreak ();
       noecho ();
       /* timeout (1); */
       nodelay(w, FALSE);
       nl();
       keypad (w, TRUE);
-      rl_initialize ();
       tui_set_term_height_to (LINES);
       tui_set_term_width_to (COLS);
       def_prog_mode ();
 
       tui_show_frame_info (0);
-      tui_set_layout (SRC_COMMAND, TUI_UNDEFINED_REGS);
+      tui_set_initial_layout ();
       tui_set_win_focus_to (TUI_SRC_WIN);
-      keypad (TUI_CMD_WIN->generic.handle, TRUE);
-      wrefresh (TUI_CMD_WIN->generic.handle);
-      tui_finish_init = 0;
+      keypad (TUI_CMD_WIN->handle.get (), TRUE);
+      wrefresh (TUI_CMD_WIN->handle.get ());
+      tui_finish_init = false;
     }
   else
     {
-     /* Save the current gdb setting of the terminal.
-        Curses will restore this state when endwin() is called.  */
-     def_shell_mode ();
-     clearok (stdscr, TRUE);
-   }
+      /* Save the current gdb setting of the terminal.
+	 Curses will restore this state when endwin() is called.  */
+      def_shell_mode ();
+      clearok (stdscr, TRUE);
 
-  /* Install the TUI specific hooks.  */
+      tui_active = true;
+    }
+
+  gdb_assert (tui_active);
+
+  if (tui_update_variables ())
+    tui_rehighlight_all ();
+
+  tui_setup_io (1);
+
+  /* Resize windows before anything might display/refresh a
+     window.  */
+  if (tui_win_resized ())
+    {
+      tui_set_win_resized_to (false);
+      tui_resize_all ();
+    }
+
+  if (deprecated_safe_get_selected_frame ())
+    tui_show_frame_info (deprecated_safe_get_selected_frame ());
+  else
+    tui_display_main ();
+
+  /* Install the TUI specific hooks.  This must be done after the call to
+     tui_display_main so that we don't detect the symtab changed event it
+     can cause.  */
   tui_install_hooks ();
   rl_startup_hook = tui_rl_startup_hook;
 
-  tui_update_variables ();
-  
-  tui_setup_io (1);
-
-  tui_active = 1;
-  if (deprecated_safe_get_selected_frame ())
-     tui_show_frame_info (deprecated_safe_get_selected_frame ());
-
   /* Restore TUI keymap.  */
   tui_set_key_mode (tui_current_key_mode);
+
+  /* Refresh the screen.  */
   tui_refresh_all_win ();
 
   /* Update gdb's knowledge of its terminal.  */
-  target_terminal_save_ours ();
+  gdb_save_tty_state ();
   tui_update_gdb_sizes ();
 }
 
@@ -438,6 +516,8 @@ tui_enable (void)
 void
 tui_disable (void)
 {
+  TUI_SCOPED_DEBUG_ENTER_EXIT;
+
   if (!tui_active)
     return;
 
@@ -449,6 +529,10 @@ tui_disable (void)
   rl_startup_hook = 0;
   rl_already_prompted = 0;
 
+#ifdef NCURSES_MOUSE_VERSION
+  mousemask (0, NULL);
+#endif
+
   /* Leave curses and restore previous gdb terminal setting.  */
   endwin ();
 
@@ -457,121 +541,83 @@ tui_disable (void)
   tui_setup_io (0);
 
   /* Update gdb's knowledge of its terminal.  */
-  target_terminal_save_ours ();
+  gdb_save_tty_state ();
 
-  tui_active = 0;
+  tui_active = false;
   tui_update_gdb_sizes ();
 }
 
-void
-strcat_to_buf (char *buf, int buflen, 
-	       const char *item_to_add)
-{
-  if (item_to_add != (char *) NULL && buf != (char *) NULL)
-    {
-      if ((strlen (buf) + strlen (item_to_add)) <= buflen)
-	strcat (buf, item_to_add);
-      else
-	strncat (buf, item_to_add, (buflen - strlen (buf)));
-    }
-}
-
-#if 0
-/* Solaris <sys/termios.h> defines CTRL.  */
-#ifndef CTRL
-#define CTRL(x)         (x & ~0140)
-#endif
-
-#define FILEDES         2
-#define CHK(val, dft)   (val<=0 ? dft : val)
+/* Command wrapper for enabling tui mode.  */
 
 static void
-tui_reset (void)
+tui_enable_command (const char *args, int from_tty)
 {
-  struct termio mode;
-
-  /* Reset the teletype mode bits to a sensible state.
-     Copied tset.c.  */
-#if defined (TIOCGETC)
-  struct tchars tbuf;
-#endif /* TIOCGETC */
-#ifdef UCB_NTTY
-  struct ltchars ltc;
-
-  if (ldisc == NTTYDISC)
-    {
-      ioctl (FILEDES, TIOCGLTC, &ltc);
-      ltc.t_suspc = CHK (ltc.t_suspc, CTRL ('Z'));
-      ltc.t_dsuspc = CHK (ltc.t_dsuspc, CTRL ('Y'));
-      ltc.t_rprntc = CHK (ltc.t_rprntc, CTRL ('R'));
-      ltc.t_flushc = CHK (ltc.t_flushc, CTRL ('O'));
-      ltc.t_werasc = CHK (ltc.t_werasc, CTRL ('W'));
-      ltc.t_lnextc = CHK (ltc.t_lnextc, CTRL ('V'));
-      ioctl (FILEDES, TIOCSLTC, &ltc);
-    }
-#endif /* UCB_NTTY */
-#ifdef TIOCGETC
-  ioctl (FILEDES, TIOCGETC, &tbuf);
-  tbuf.t_intrc = CHK (tbuf.t_intrc, CTRL ('?'));
-  tbuf.t_quitc = CHK (tbuf.t_quitc, CTRL ('\\'));
-  tbuf.t_startc = CHK (tbuf.t_startc, CTRL ('Q'));
-  tbuf.t_stopc = CHK (tbuf.t_stopc, CTRL ('S'));
-  tbuf.t_eofc = CHK (tbuf.t_eofc, CTRL ('D'));
-  /* brkc is left alone.  */
-  ioctl (FILEDES, TIOCSETC, &tbuf);
-#endif /* TIOCGETC */
-  mode.sg_flags &= ~(RAW
-#ifdef CBREAK
-		     | CBREAK
-#endif /* CBREAK */
-		     | VTDELAY | ALLDELAY);
-  mode.sg_flags |= XTABS | ECHO | CRMOD | ANYP;
-
-  return;
+  tui_enable ();
 }
-#endif
 
-void
-tui_show_source (const char *fullname, int line)
+/* Command wrapper for leaving tui mode.  */
+
+static void
+tui_disable_command (const char *args, int from_tty)
 {
-  struct symtab_and_line cursal = get_current_source_symtab_and_line ();
-
-  /* Make sure that the source window is displayed.  */
-  tui_add_win_to_layout (SRC_WIN);
-
-  tui_update_source_windows_with_line (cursal.symtab, line);
-  tui_update_locator_fullname (fullname);
+  tui_disable ();
 }
 
 void
 tui_show_assembly (struct gdbarch *gdbarch, CORE_ADDR addr)
 {
+  tui_suppress_output suppress;
   tui_add_win_to_layout (DISASSEM_WIN);
   tui_update_source_windows_with_addr (gdbarch, addr);
 }
 
-int
+bool
 tui_is_window_visible (enum tui_win_type type)
 {
-  if (tui_active == 0)
-    return 0;
+  if (!tui_active)
+    return false;
 
-  if (tui_win_list[type] == 0)
-    return 0;
-  
-  return tui_win_list[type]->generic.is_visible;
+  if (tui_win_list[type] == nullptr)
+    return false;
+
+  return tui_win_list[type]->is_visible ();
 }
 
-int
+bool
 tui_get_command_dimension (unsigned int *width, 
 			   unsigned int *height)
 {
   if (!tui_active || (TUI_CMD_WIN == NULL))
-    {
-      return 0;
-    }
+    return false;
   
-  *width = TUI_CMD_WIN->generic.width;
-  *height = TUI_CMD_WIN->generic.height;
-  return 1;
+  *width = TUI_CMD_WIN->width;
+  *height = TUI_CMD_WIN->height;
+  return true;
+}
+
+void _initialize_tui ();
+void
+_initialize_tui ()
+{
+  struct cmd_list_element **tuicmd;
+
+  tuicmd = tui_get_cmd_list ();
+
+  add_cmd ("enable", class_tui, tui_enable_command,
+	   _("Enable TUI display mode.\n\
+Usage: tui enable"),
+	   tuicmd);
+  add_cmd ("disable", class_tui, tui_disable_command,
+	   _("Disable TUI display mode.\n\
+Usage: tui disable"),
+	   tuicmd);
+
+  /* Debug this tui internals.  */
+  add_setshow_boolean_cmd ("tui", class_maintenance, &debug_tui,  _("\
+Set tui debugging."), _("\
+Show tui debugging."), _("\
+When true, tui specific internal debugging is enabled."),
+			   NULL,
+			   show_tui_debug,
+			   &setdebuglist, &showdebuglist);
 }

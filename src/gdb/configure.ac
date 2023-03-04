@@ -1,8 +1,8 @@
 dnl Autoconf configure script for GDB, the GNU debugger.
-dnl Copyright (C) 1995-2013 Free Software Foundation, Inc.
+dnl Copyright (C) 1995-2023 Free Software Foundation, Inc.
 dnl
 dnl This file is part of GDB.
-dnl 
+dnl
 dnl This program is free software; you can redistribute it and/or modify
 dnl it under the terms of the GNU General Public License as published by
 dnl the Free Software Foundation; either version 3 of the License, or
@@ -18,43 +18,53 @@ dnl along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 dnl Process this file with autoconf to produce a configure script.
 
-AC_PREREQ(2.59)dnl
-AC_INIT(main.c)
-AC_CONFIG_HEADER(config.h:config.in)
+AC_INIT
+AC_CONFIG_MACRO_DIRS([.. ../config])
+AC_CONFIG_SRCDIR([main.c])
+AC_CONFIG_HEADERS(config.h:config.in, [echo > stamp-h])
 AM_MAINTAINER_MODE
 
-# Set the 'development' global.
-. $srcdir/development.sh
-
 AC_PROG_CC
+AC_PROG_CXX
+
 AC_USE_SYSTEM_EXTENSIONS
 ACX_LARGEFILE
-AM_PROG_CC_STDC
+AM_PROG_INSTALL_STRIP
 
 AC_CONFIG_AUX_DIR(..)
-AC_CANONICAL_SYSTEM
+
+# Set build, build_cpu, build_vendor and build_os.
+AC_CANONICAL_BUILD
+
+# Set host, host_cpu, host_vendor, and host_os.
+AC_CANONICAL_HOST
+
+# Set target, target_cpu, target_vendor, and target_os.
+AC_CANONICAL_TARGET
+
+ACX_NONCANONICAL_TARGET
+
 AC_ARG_PROGRAM
+
+# We require libtool to link with the in-tree libtool libraries
+# the proper way.
+LT_INIT
+# ... and we need it soon, since it is used by some of the
+# link tests in the configure script.
+LT_OUTPUT
+
+# We require a C++11 compiler.  Check if one is available, and if
+# necessary, set CXX_DIALECT to some -std=xxx switch.
+AX_CXX_COMPILE_STDCXX(11, , mandatory)
 
 # Dependency checking.
 ZW_CREATE_DEPDIR
 ZW_PROG_COMPILER_DEPENDENCIES([CC])
 
-# Check for the 'make' the user wants to use.
-AC_CHECK_PROGS(MAKE, make)
-MAKE_IS_GNU=
-case "`$MAKE --version 2>&1 | sed 1q`" in
-  *GNU*)
-    MAKE_IS_GNU=yes
-    ;;
-esac
-AM_CONDITIONAL(GMAKE, test "$MAKE_IS_GNU" = yes)
-AC_PROG_MAKE_SET
-
-# Configure gnulib.  We need to build gnulib under some other
-# directory not "gnulib", to avoid the problem of both GDB and
-# GDBserver wanting to build it in the same directory, when building
-# in the source dir.
-ACX_CONFIGURE_DIR(["gnulib"], ["build-gnulib"])
+# Since the first call to PKG_CHECK_MODULES may not happen (is guarded by
+# a condition), we must call PKG_PROG_PKG_CONFIG explicitly to probe for
+# pkg-config.
+PKG_PROG_PKG_CONFIG
 
 dnl List of object files and targets accumulated by configure.
 
@@ -76,19 +86,10 @@ AC_SUBST(localedir)
 
 if test x"$USE_NLS" = xyes; then
    CONFIG_ALL="$CONFIG_ALL all-po"
-   CONFIG_CLEAN="$CONFIG_CLEAN clean-po"		   
+   CONFIG_CLEAN="$CONFIG_CLEAN clean-po"
    CONFIG_INSTALL="$CONFIG_INSTALL install-po"
    CONFIG_UNINSTALL="$CONFIG_UNINSTALL uninstall-po"
 fi
-
-GNULIB=build-gnulib/import
-
-# For Makefile dependencies.
-GNULIB_STDINT_H=
-if test x"$STDINT_H" != x; then
-  GNULIB_STDINT_H=$GNULIB/$STDINT_H
-fi
-AC_SUBST(GNULIB_STDINT_H)
 
 PACKAGE=gdb
 AC_DEFINE_UNQUOTED(PACKAGE, "$PACKAGE", [Name of this package. ])
@@ -144,7 +145,7 @@ AC_ARG_WITH(auto-load-dir,
 AS_HELP_STRING([--with-auto-load-dir=PATH],
   [directories from which to load auto-loaded scripts @<:@$debugdir:$datadir/auto-load@:>@]),,
   [with_auto_load_dir='$debugdir:$datadir/auto-load'])
-escape_dir=`echo $with_auto_load_dir | sed 's/[[$]]\(datadir\|debugdir\)\>/\\\\\\\\\\\\&/g'`
+escape_dir=`echo $with_auto_load_dir | sed -e 's/[[$]]datadir\>/\\\\\\\\\\\\&/g' -e 's/[[$]]debugdir\>/\\\\\\\\\\\\&/g'`
 AC_DEFINE_DIR(AUTO_LOAD_DIR, escape_dir,
 	      [Directories from which to load auto-loaded scripts.])
 AC_MSG_RESULT([$with_auto_load_dir])
@@ -159,7 +160,7 @@ AS_HELP_STRING([--without-auto-load-safe-path],
      with_auto_load_safe_path="/"
      fi],
 [with_auto_load_safe_path="$with_auto_load_dir"])
-escape_dir=`echo $with_auto_load_safe_path | sed 's/[[$]]\(datadir\|debugdir\)\>/\\\\\\\\\\\\&/g'`
+escape_dir=`echo $with_auto_load_safe_path | sed -e 's/[[$]]datadir\>/\\\\\\\\\\\\&/g' -e 's/[[$]]debugdir\>/\\\\\\\\\\\\&/g'`
 AC_DEFINE_DIR(AUTO_LOAD_SAFE_PATH, escape_dir,
 	      [Directories safe to hold auto-loaded files.])
 AC_MSG_RESULT([$with_auto_load_safe_path])
@@ -170,20 +171,13 @@ AC_CONFIG_SUBDIRS(testsuite)
 AC_ARG_ENABLE(targets,
 AS_HELP_STRING([--enable-targets=TARGETS], [alternative target configurations]),
 [case "${enableval}" in
-  yes | "") AC_ERROR(enable-targets option must specify target names or 'all')
+  yes | "") AC_MSG_ERROR(enable-targets option must specify target names or 'all')
             ;;
   no)       enable_targets= ;;
   *)        enable_targets=$enableval ;;
 esac])
 
-# Check whether to enable 64-bit support on 32-bit hosts
-AC_ARG_ENABLE(64-bit-bfd,
-AS_HELP_STRING([--enable-64-bit-bfd], [64-bit support (on hosts with narrower word sizes)]),
-[case "${enableval}" in
-  yes)  want64=true  ;;
-  no)   want64=false ;;
-  *)    AC_MSG_ERROR(bad value ${enableval} for 64-bit-bfd option) ;;
-esac],[want64=false])dnl
+BFD_64_BIT
 
 # Provide defaults for some variables set by the per-host and per-target
 # configuration.
@@ -232,7 +226,7 @@ do
     done
 
     # Check whether this target needs 64-bit CORE_ADDR
-    if test x${want64} = xfalse; then
+    if test x${enable_64_bit_bfd} = xno; then
       . ${srcdir}/../bfd/config.bfd
     fi
 
@@ -245,26 +239,58 @@ do
 done
 
 if test x${all_targets} = xtrue; then
-
-  # We want all 64-bit targets if we either:
-  #  - run on a 64-bit host  or
-  #  - already require 64-bit support for some other target  or
-  #  - the --enable-64-bit-bfd option was supplied
-  # Otherwise we only support all 32-bit targets.
-  #
-  # NOTE: This test must be in sync with the corresponding
-  #       tests in BFD!
-
-  if test x${want64} = xfalse; then
-    AC_CHECK_SIZEOF(long)
-    if test "x${ac_cv_sizeof_long}" = "x8"; then
-      want64=true
-    fi
-  fi
-  if test x${want64} = xtrue; then
+  if test x${enable_64_bit_bfd} = xyes; then
     TARGET_OBS='$(ALL_TARGET_OBS) $(ALL_64_TARGET_OBS)'
   else
     TARGET_OBS='$(ALL_TARGET_OBS)'
+  fi
+fi
+
+# AMD debugger API support.
+
+AC_ARG_WITH([amd-dbgapi],
+	    [AS_HELP_STRING([--with-amd-dbgapi],
+			    [support for the amd-dbgapi target (yes / no / auto)])],
+	    [GDB_CHECK_YES_NO_AUTO_VAL([$withval], [--with-amd-dbgapi])],
+	    [with_amd_dbgapi=auto])
+
+# If the user passes --without-amd-dbgapi but also explicitly enables a target
+# that requires amd-dbgapi, it is an error.
+if test "$with_amd_dbgapi" = no -a "$gdb_require_amd_dbgapi" = true; then
+  AC_MSG_ERROR([an explicitly enabled target requires amd-dbgapi, but amd-dbgapi is explicitly disabled])
+fi
+
+# Look for amd-dbgapi if:
+#
+#   - a target architecture requiring it has explicitly been enabled, or
+#   - --enable-targets=all was provided and the user did not explicitly disable
+#     amd-dbgapi support
+if test "$gdb_require_amd_dbgapi" = true \
+     -o \( "$all_targets" = true -a "$with_amd_dbgapi" != no \); then
+  # amd-dbgapi version 0.68 is part of ROCm 5.4.  There is no guarantee of API
+  # stability until amd-dbgapi hits 1.0, but for convenience, still check for
+  # greater or equal that version.  It can be handy when testing with a newer
+  # version of the library.
+  PKG_CHECK_MODULES([AMD_DBGAPI], [amd-dbgapi >= 0.68.0],
+		    [has_amd_dbgapi=yes], [has_amd_dbgapi=no])
+
+  if test "$has_amd_dbgapi" = "yes"; then
+    AC_DEFINE(HAVE_AMD_DBGAPI, 1, [Define if amd-dbgapi is being linked in.])
+    TARGET_OBS="$TARGET_OBS amd-dbgapi-target.o"
+
+    # If --enable-targets=all was provided, use the list of all files depending
+    # on amd-dbgapi that is hardcoded in the Makefile.  Else, the appropriate
+    # architecture entry in configure.tgt will have added the files to
+    # gdb_target_obs.
+    if test "$all_targets" = true; then
+      TARGET_OBS="$TARGET_OBS \$(ALL_AMD_DBGAPI_TARGET_OBS)"
+    fi
+  elif test "$gdb_require_amd_dbgapi" = true -o "$with_amd_dbgapi" = yes; then
+    # amd-dbgapi was not found and...
+    #
+    #   - a target requiring it was explicitly enabled, or
+    #   - the user explicitly wants to enable amd-dbgapi
+    AC_MSG_ERROR([amd-dbgapi is required, but cannot find an appropriate version: $AMD_DBGAPI_PKG_ERRORS])
   fi
 fi
 
@@ -274,7 +300,6 @@ AC_SUBST(HAVE_NATIVE_GCORE_TARGET)
 # For other settings, only the main target counts.
 gdb_sim=
 gdb_osabi=
-build_gdbserver=
 targ=$target; . ${srcdir}/configure.tgt
 
 # Fetch the default architecture and default target vector from BFD.
@@ -293,72 +318,22 @@ if test "x$targ_defvec" != x; then
     [Define to BFD's default target vector. ])
 fi
 
-# The CLI cannot be disabled yet, but may be in the future.
-
-# Enable CLI.
-AC_ARG_ENABLE(gdbcli,
-AS_HELP_STRING([--disable-gdbcli], [disable command-line interface (CLI)]),
-  [case $enableval in
-    yes)
-      ;;
-    no)
-      AC_MSG_ERROR([the command-line interface cannot be disabled yet]) ;;
-    *)
-      AC_MSG_ERROR([bad value $enableval for --enable-gdbcli]) ;;
-  esac],
-  [enable_gdbcli=yes])
-if test x"$enable_gdbcli" = xyes; then
-  if test -d $srcdir/cli; then
-    CONFIG_OBS="$CONFIG_OBS \$(SUBDIR_CLI_OBS)"
-    CONFIG_DEPS="$CONFIG_DEPS \$(SUBDIR_CLI_DEPS)"
-    CONFIG_SRCS="$CONFIG_SRCS \$(SUBDIR_CLI_SRCS)"
-    ENABLE_CFLAGS="$ENABLE_CFLAGS \$(SUBDIR_CLI_CFLAGS)"
-  fi
-fi
-
-# Enable MI.
-AC_ARG_ENABLE(gdbmi,
-AS_HELP_STRING([--disable-gdbmi], [disable machine-interface (MI)]),
-  [case $enableval in
-    yes | no)
-      ;;
-    *)
-      AC_MSG_ERROR([bad value $enableval for --enable-gdbmi]) ;;
-  esac],
-  [enable_gdbmi=yes])
-if test x"$enable_gdbmi" = xyes; then
-  if test -d $srcdir/mi; then
-    CONFIG_OBS="$CONFIG_OBS \$(SUBDIR_MI_OBS)"
-    CONFIG_DEPS="$CONFIG_DEPS \$(SUBDIR_MI_DEPS)"
-    CONFIG_SRCS="$CONFIG_SRCS \$(SUBDIR_MI_SRCS)"
-    ENABLE_CFLAGS="$ENABLE_CFLAGS \$(SUBDIR_MI_CFLAGS)"
-  fi
-fi
-
 # Enable TUI.
 AC_ARG_ENABLE(tui,
-AS_HELP_STRING([--enable-tui], [enable full-screen terminal user interface (TUI)]),
-  [case $enableval in
-    yes | no | auto)
-      ;;
-    *)
-      AC_MSG_ERROR([bad value $enableval for --enable-tui]) ;;
-  esac],enable_tui=auto)
+AS_HELP_STRING([--enable-tui],
+	       [enable full-screen terminal user interface (TUI)]),
+	       [GDB_CHECK_YES_NO_AUTO_VAL([$enableval], [--enable-tui])],
+	       [enable_tui=auto])
 
 # Enable gdbtk.
-AC_ARG_ENABLE(gdbtk,
-AS_HELP_STRING([--enable-gdbtk], [enable gdbtk graphical user interface (GUI)]),
-  [case $enableval in
-    yes | no)
-      ;;
-    *)
-      AC_MSG_ERROR([bad value $enableval for --enable-gdbtk]) ;;
-  esac],
-  [if test -d $srcdir/gdbtk; then
-    enable_gdbtk=yes
-  else
-    enable_gdbtk=no
-  fi])
+AC_ARG_ENABLE([gdbtk],
+	      [AS_HELP_STRING([--enable-gdbtk], [enable gdbtk graphical user interface (GUI)])],
+	      [GDB_CHECK_YES_NO_VAL([$enableval], [--enable-gdbtk])],
+	      [if test -d "$srcdir/gdbtk"; then
+		 enable_gdbtk=yes
+	       else
+		 enable_gdbtk=no
+	       fi])
 # We unconditionally disable gdbtk tests on selected platforms.
 case $host_os in
   go32* | windows*)
@@ -366,8 +341,10 @@ case $host_os in
     enable_gdbtk=no ;;
 esac
 
-# Libunwind support for ia64.
+# Handle optional debuginfod support
+AC_DEBUGINFOD
 
+# Libunwind support for ia64.
 AC_ARG_WITH(libunwind-ia64,
 AS_HELP_STRING([--with-libunwind-ia64],
 	       [use libunwind frame unwinding for ia64 targets]),,
@@ -415,58 +392,80 @@ if test "$opt_curses" = "yes"; then
 fi
 
 # Profiling support.
-AC_ARG_ENABLE(profiling,
-AS_HELP_STRING([--enable-profiling], [enable profiling of GDB]),
-  [case $enableval in
-    yes | no)
-      ;;
-    *)
-      AC_MSG_ERROR([bad value $enableval for --enable-profile]) ;;
-  esac],
- [enable_profiling=no])
+AC_ARG_ENABLE([profiling],
+	      [AS_HELP_STRING([--enable-profiling], [enable profiling of GDB])],
+	      [GDB_CHECK_YES_NO_VAL([$enableval], [--enable-profiling])],
+	      [enable_profiling=no])
 
 AC_CHECK_FUNCS(monstartup _mcleanup)
-AC_CACHE_CHECK([for _etext], ac_cv_var__etext,
-[AC_TRY_LINK(
-[#include <stdlib.h>
-extern char _etext;
-],
-[free (&_etext);], ac_cv_var__etext=yes, ac_cv_var__etext=no)])
-if test $ac_cv_var__etext = yes; then
+AC_CACHE_CHECK(
+  [for _etext],
+  [ac_cv_var__etext],
+  [AC_LINK_IFELSE(
+     [AC_LANG_PROGRAM(
+	[#include <stdlib.h>
+	 extern char _etext;],
+	[free (&_etext);]
+      )],
+     [ac_cv_var__etext=yes],
+     [ac_cv_var__etext=no]
+   )]
+)
+if test "$ac_cv_var__etext" = yes; then
   AC_DEFINE(HAVE__ETEXT, 1,
             [Define to 1 if your system has the _etext variable. ])
 fi
-AC_CACHE_CHECK([for etext], ac_cv_var_etext,
-[AC_TRY_LINK(
-[#include <stdlib.h>
-extern char etext;
-],
-[free (&etext);], ac_cv_var_etext=yes, ac_cv_var_etext=no)])
-if test $ac_cv_var_etext = yes; then
+AC_CACHE_CHECK(
+  [for etext],
+  [ac_cv_var_etext],
+  [AC_LINK_IFELSE(
+     [AC_LANG_PROGRAM(
+	[#include <stdlib.h>
+	 extern char etext;],
+	[free (&etext);]
+      )],
+     [ac_cv_var_etext=yes],
+     [ac_cv_var_etext=no]
+   )]
+)
+if test "$ac_cv_var_etext" = yes; then
   AC_DEFINE(HAVE_ETEXT, 1,
             [Define to 1 if your system has the etext variable. ])
 fi
 if test "$enable_profiling" = yes ; then
-  if test $ac_cv_func_monstartup = no || test $ac_cv_func__mcleanup = no; then
+  if test "$ac_cv_func_monstartup" = no || test "$ac_cv_func__mcleanup" = no; then
     AC_MSG_ERROR(--enable-profiling requires monstartup and _mcleanup)
   fi
   PROFILE_CFLAGS=-pg
   OLD_CFLAGS="$CFLAGS"
   CFLAGS="$CFLAGS $PROFILE_CFLAGS"
 
-  AC_CACHE_CHECK([whether $CC supports -pg], ac_cv_cc_supports_pg,
-    [AC_TRY_COMPILE([], [int x;], ac_cv_cc_supports_pg=yes,
-     ac_cv_cc_supports_pg=no)])
+  AC_CACHE_CHECK(
+    [whether $CC supports -pg],
+    [ac_cv_cc_supports_pg],
+    [AC_COMPILE_IFELSE(
+       [AC_LANG_PROGRAM([], [int x;])],
+       [ac_cv_cc_supports_pg=yes],
+       [ac_cv_cc_supports_pg=no]
+     )]
+  )
 
-  if test $ac_cv_cc_supports_pg = no; then
+  if test "$ac_cv_cc_supports_pg" = no; then
     AC_MSG_ERROR(--enable-profiling requires a compiler which supports -pg)
   fi
 
   CFLAGS="$OLD_CFLAGS"
 fi
 
+CODESIGN_CERT=
+AC_ARG_ENABLE([codesign],
+  AS_HELP_STRING([--enable-codesign=CERT],
+                 [sign gdb with 'codesign -s CERT']),
+  [CODESIGN_CERT=$enableval])
+AC_SUBST([CODESIGN_CERT])
+
 ACX_PKGVERSION([GDB])
-ACX_BUGURL([http://www.gnu.org/software/gdb/bugs/])
+ACX_BUGURL([https://www.gnu.org/software/gdb/bugs/])
 AC_DEFINE_UNQUOTED([PKGVERSION], ["$PKGVERSION"], [Additional package description])
 AC_DEFINE_UNQUOTED([REPORT_BUGS_TO], ["$REPORT_BUGS_TO"], [Bug reporting address])
 
@@ -501,24 +500,16 @@ esac
 # We might need to link with -lm; most simulators need it.
 AC_CHECK_LIB(m, main)
 
-# We need to link with -lw to get `wctype' on Solaris before Solaris
-# 2.6.  Solaris 2.6 and beyond have this function in libc, and have a
-# libw that some versions of the GNU linker cannot hanle (GNU ld 2.9.1
-# is known to have this problem).  Therefore we avoid libw if we can.
-AC_CHECK_FUNC(wctype, [],
-  [AC_CHECK_LIB(w, wctype)])
-
 # Some systems (e.g. Solaris) have `gethostbyname' in libnsl.
 AC_SEARCH_LIBS(gethostbyname, nsl)
 
 # Some systems (e.g. Solaris) have `socketpair' in libsocket.
 AC_SEARCH_LIBS(socketpair, socket)
 
-# Link in zlib if we can.  This allows us to read compressed debug sections.
+# Link in zlib/zstd if we can.  This allows us to read compressed debug
+# sections.
 AM_ZLIB
-
-# On HP/UX we may need libxpdl for dlgetmodinfo (used by solib-pa64.c).
-AC_SEARCH_LIBS(dlgetmodinfo, [dl xpdl])
+AC_ZSTD
 
 AM_ICONV
 
@@ -545,33 +536,6 @@ AS_HELP_STRING([--with-iconv-bin=PATH], [specify where to find the iconv program
  GDB_AC_DEFINE_RELOCATABLE(ICONV_BIN, iconv, ${iconv_bin})
 ])
 
-# On alpha-osf, it appears that libtermcap and libcurses are not compatible.
-# There is a very specific comment in /usr/include/curses.h explaining that
-# termcap routines built into libcurses must not be used.
-# 
-# The symptoms we observed so far is GDB unexpectedly changing
-# the terminal settings when tgetent is called - this is particularly
-# visible as the output is missing carriage returns, and so rapidly
-# becomes very hard to read.
-#
-# The readline configure script has already decided that libtermcap
-# was enough for its purposes, and so decided to build readline using
-# libtermcap.  Since the TUI mode requires curses, building GDB with
-# TUI enabled results in both libraries to be used at the same time,
-# which is not allowed.  This basically means that GDB with TUI is
-# broken on alpha-osf.
-
-case $host_os in
-  osf* )
-    if test x"$enable_tui" = xyes; then
-      AC_MSG_ERROR([Building GDB with TUI mode is not supported on this host])
-    fi
-    if test x"$enable_tui" = xauto; then
-      enable_tui=no
-    fi
-    ;;
-esac
-
 # For the TUI, we need enhanced curses functionality.
 if test x"$enable_tui" != xno; then
   prefer_curses=yes
@@ -586,56 +550,50 @@ if test x"$prefer_curses" = xyes; then
   # search /usr/local/include, if ncurses is installed in /usr/local.  A
   # default installation of ncurses on alpha*-dec-osf* will lead to such
   # a situation.
-  AC_SEARCH_LIBS(waddstr, [ncurses cursesX curses])
-
-  if test "$ac_cv_search_waddstr" != no; then
-    curses_found=yes
-  fi
+  AC_SEARCH_LIBS(waddstr, [ncursesw ncurses cursesX curses],
+                 [curses_found=yes
+                  AC_DEFINE([HAVE_LIBCURSES], [1],
+                            [Define to 1 if curses is enabled.])
+                 ])
 fi
 
 # Check whether we should enable the TUI, but only do so if we really
 # can.
 if test x"$enable_tui" != xno; then
-  if test -d $srcdir/tui; then
-    if test "$curses_found" != no; then
-      CONFIG_OBS="$CONFIG_OBS \$(SUBDIR_TUI_OBS)"
-      CONFIG_DEPS="$CONFIG_DEPS \$(SUBDIR_TUI_DEPS)"
-      CONFIG_SRCS="$CONFIG_SRCS \$(SUBDIR_TUI_SRCS)"
-      ENABLE_CFLAGS="$ENABLE_CFLAGS \$(SUBDIR_TUI_CFLAGS)"
+  if test "$curses_found" != no; then
+    CONFIG_OBS="$CONFIG_OBS \$(SUBDIR_TUI_OBS)"
+    CONFIG_DEPS="$CONFIG_DEPS \$(SUBDIR_TUI_DEPS)"
+    CONFIG_SRCS="$CONFIG_SRCS \$(SUBDIR_TUI_SRCS)"
+    ENABLE_CFLAGS="$ENABLE_CFLAGS \$(SUBDIR_TUI_CFLAGS)"
+  else
+    if test x"$enable_tui" = xyes; then
+      AC_MSG_ERROR([no enhanced curses library found; disable TUI])
     else
-      if test x"$enable_tui" = xyes; then
-	AC_MSG_ERROR([no enhanced curses library found; disable TUI])
-      else
-	AC_MSG_WARN([no enhanced curses library found; disabling TUI])
-      fi
+      AC_MSG_WARN([no enhanced curses library found; disabling TUI])
     fi
   fi
 fi
 
 # Since GDB uses Readline, we need termcap functionality.  In many
 # cases this will be provided by the curses library, but some systems
-# have a seperate termcap library, or no curses library at all.
+# have a separate termcap library, or no curses library at all.
 
 case $host_os in
   cygwin*)
-    if test -d $srcdir/libtermcap; then
+    if test -d "$srcdir/libtermcap"; then
       LIBS="../libtermcap/libtermcap.a $LIBS"
       ac_cv_search_tgetent="../libtermcap/libtermcap.a"
     fi ;;
   go32* | *djgpp*)
     ac_cv_search_tgetent="none required"
     ;;
-  *mingw32*)	 
-    ac_cv_search_tgetent="none required"
-    CONFIG_OBS="$CONFIG_OBS windows-termcap.o"
-    ;;
 esac
 
 # These are the libraries checked by Readline.
-AC_SEARCH_LIBS(tgetent, [termcap tinfo curses ncurses])
+AC_SEARCH_LIBS(tgetent, [termcap tinfow tinfo curses ncursesw ncurses])
 
 if test "$ac_cv_search_tgetent" = no; then
-  AC_MSG_ERROR([no termcap library found])
+  CONFIG_OBS="$CONFIG_OBS stub-termcap.o"
 fi
 
 AC_ARG_WITH([system-readline],
@@ -643,20 +601,46 @@ AC_ARG_WITH([system-readline],
                   [use installed readline library])])
 
 if test "$with_system_readline" = yes; then
+  AC_CHECK_HEADERS(readline/readline.h, [readline_h=yes], [readline_h=no])
+  if test "$readline_h" = "no"; then
+    AC_MSG_ERROR([readline development packages are probably missing])
+  fi
+  AC_CACHE_CHECK(
+    [whether system readline is new enough],
+    [gdb_cv_readline_ok],
+    [AC_COMPILE_IFELSE(
+       [AC_LANG_PROGRAM(
+	  [#include <stdio.h>
+	   #include <readline/readline.h>],
+	  [#if RL_VERSION_MAJOR < 7
+	   # error "readline version 7 required"
+	   #endif]
+	)],
+       [gdb_cv_readline_ok=yes],
+       [gdb_cv_readline_ok=no]
+     )]
+  )
+  if test "$gdb_cv_readline_ok" != yes; then
+    AC_MSG_ERROR([system readline is not new enough])
+  fi
+
   READLINE=-lreadline
   READLINE_DEPS=
   READLINE_CFLAGS=
   READLINE_TEXI_INCFLAG=
+  READLINE_DOC_SOURCE_INCLUDES='$(READLINE_SYSTEM_DOC_INCLUDES)'
 else
   READLINE='$(READLINE_DIR)/libreadline.a'
   READLINE_DEPS='$(READLINE)'
   READLINE_CFLAGS='-I$(READLINE_SRC)/..'
   READLINE_TEXI_INCFLAG='-I $(READLINE_DIR)'
+  READLINE_DOC_SOURCE_INCLUDES='$(READLINE_INTREE_DOC_INCLUDES)'
 fi
 AC_SUBST(READLINE)
 AC_SUBST(READLINE_DEPS)
 AC_SUBST(READLINE_CFLAGS)
 AC_SUBST(READLINE_TEXI_INCFLAG)
+AC_SUBST(READLINE_DOC_SOURCE_INCLUDES)
 
 # Generate jit-reader.h
 
@@ -712,28 +696,38 @@ else
   fi
 fi
 
+AC_ARG_VAR(GMPLIBS,[How to link GMP])
+AC_ARG_VAR(GMPINC,[How to find GMP include files])
+
+# --------------------- #
+# Check for libpython.  #
+# --------------------- #
+
 dnl Utility to simplify finding libpython.
-dnl $1 = pythonX.Y
-dnl $2 = the shell variable to assign the result to
+dnl $1 = the shell variable to assign the result to
 dnl      If libpython is found we store $version here.
-dnl $3 = additional flags to add to CPPFLAGS
-dnl $4 = additional flags to add to LIBS
+dnl $2 = additional flags to add to CPPFLAGS
+dnl $3 = additional flags to add to LIBS
 
 AC_DEFUN([AC_TRY_LIBPYTHON],
 [
-  version=$1
-  define([have_libpython_var],$2)
-  new_CPPFLAGS=$3
-  new_LIBS=$4
-  AC_MSG_CHECKING([for ${version}])
+  define([have_libpython_var],$1)
+  new_CPPFLAGS=$2
+  new_LIBS=$3
+  AC_MSG_CHECKING([for python])
   save_CPPFLAGS=$CPPFLAGS
   save_LIBS=$LIBS
   CPPFLAGS="$CPPFLAGS $new_CPPFLAGS"
-  LIBS="$LIBS $new_LIBS"
+  LIBS="$new_LIBS $LIBS"
   found_usable_python=no
-  AC_LINK_IFELSE(AC_LANG_PROGRAM([[#include "Python.h"]],
-                                 [[Py_Initialize ();]]),
-                 [have_libpython_var=${version}
+  AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include "Python.h"]],
+                                 [[
+				    #if PY_MAJOR_VERSION != 3
+				    # error "We only support Python 3"
+				    #endif
+				    Py_Initialize ();
+				 ]])],
+                 [have_libpython_var=yes
                   found_usable_python=yes
                   PYTHON_CPPFLAGS=$new_CPPFLAGS
                   PYTHON_LIBS=$new_LIBS])
@@ -748,7 +742,6 @@ dnl no -   Don't include python support.
 dnl yes -  Include python support, error if it's missing.
 dnl        If we find python in $PATH, use it to fetch configure options,
 dnl        otherwise assume the compiler can find it with no help from us.
-dnl        Python 2.7, 2.6, 2.5, and then 2.4 are tried in turn.
 dnl auto - Same as "yes", but if python is missing from the system,
 dnl        fall back to "no".
 dnl /path/to/python/exec-prefix -
@@ -757,7 +750,6 @@ dnl        If /path/to/python/exec-prefix/bin/python exists, use it to find
 dnl        the compilation parameters.  Otherwise use
 dnl        -I/path/to/python/exec-prefix/include,
 dnl        -L/path/to/python/exec-prefix/lib.
-dnl        Python 2.7, 2.6, 2.5, and then 2.4 are tried in turn.
 dnl        NOTE: This case is historical.  It is what was done for 7.0/7.1
 dnl        but is deprecated.
 dnl /path/to/python/executable -
@@ -786,7 +778,7 @@ if test "${with_python}" = no; then
 else
   case "${with_python}" in
   [[\\/]]* | ?:[[\\/]]*)
-    if test -d ${with_python}; then
+    if test -d "${with_python}"; then
       # Assume the python binary is ${with_python}/bin/python.
       python_prog="${with_python}/bin/python"
       python_prefix=
@@ -809,12 +801,12 @@ else
       python_prog=${with_python}
       python_prefix=
     else
-      AC_ERROR(invalid value for --with-python)
+      AC_MSG_ERROR(invalid value for --with-python)
     fi
     ;;
   */*)
     # Disallow --with-python=foo/bar.
-    AC_ERROR(invalid value for --with-python)
+    AC_MSG_ERROR(invalid value for --with-python)
     ;;
   *)
     # The user has either specified auto, yes, or the name of the python
@@ -822,8 +814,9 @@ else
     python_prefix=
     case "${with_python}" in
     yes | auto)
-      if test ${build} = ${host}; then
-        AC_PATH_PROG(python_prog_path, python, missing)
+      if test "${build}" = "${host}"; then
+        # Look first for 'python', then 'python3'.
+        AC_PATH_PROGS(python_prog_path, [python python3], missing)
         if test "${python_prog_path}" = missing; then
           python_prog=missing
         else
@@ -842,7 +835,7 @@ else
       python_prog="${with_python}"
       AC_PATH_PROG(python_prog_path, ${python_prog}, missing)
       if test "${python_prog_path}" = missing; then
-        AC_ERROR(unable to find python program ${python_prog})
+	AC_MSG_ERROR(unable to find python program ${python_prog})
       fi
       ;;
     esac
@@ -856,21 +849,21 @@ else
     if test $? != 0; then
       have_python_config=failed
       if test "${with_python}" != auto; then
-        AC_ERROR(failure running python-config --includes)
+	AC_MSG_ERROR(failure running python-config --includes)
       fi
     fi
     python_libs=`${python_prog} ${srcdir}/python/python-config.py --ldflags`
     if test $? != 0; then
       have_python_config=failed
       if test "${with_python}" != auto; then
-        AC_ERROR(failure running python-config --ldflags)
+	AC_MSG_ERROR(failure running python-config --ldflags)
       fi
     fi
     python_prefix=`${python_prog} ${srcdir}/python/python-config.py --exec-prefix`
     if test $? != 0; then
       have_python_config=failed
       if test "${with_python}" != auto; then
-        AC_ERROR(failure running python-config --exec-prefix)
+	AC_MSG_ERROR(failure running python-config --exec-prefix)
       fi
     fi
   else
@@ -890,58 +883,8 @@ else
 
   have_libpython=no
   if test "${have_python_config}" = yes; then
-    # Determine the Python version by extracting "-lpython<version>"
-    # part of the python_libs. <version> is usually X.Y with X and Y
-    # being decimal numbers, but can also be XY (seen on Windows).
-    #
-    # The extraction is performed using sed with a regular expression.
-    # Initially, the regexp used was using the '?' quantifier to make
-    # the dot in the version number optional.  Unfortunately, this
-    # does not work with non-GNU versions of sed because, because of
-    # what looks like a limitation (the '?' quantifier does not work
-    # with back-references).  We work around this limitation by using
-    # the '*' quantifier instead.  It means that, in theory, we might
-    # match unexpected version strings such as "-lpython2..7", but
-    # this seems unlikely in practice.  And even if that happens,
-    # an error will be triggered later on, when checking that version
-    # number.
-    python_version=`echo " ${python_libs} " \
-                         | sed -e 's,^.* -l\(python[[0-9]]*[[.]]*[[0-9]]*\).*$,\1,'`
-    case "${python_version}" in
-    python*)
-      AC_TRY_LIBPYTHON(${python_version}, have_libpython,
-                       ${python_includes}, ${python_libs})
-      ;;
-    *)
-      AC_MSG_ERROR([unable to determine python version from ${python_libs}])
-      ;;
-    esac
-  elif test "${have_python_config}" != failed; then
-    if test "${have_libpython}" = no; then
-      AC_TRY_LIBPYTHON(python2.7, have_libpython,
-                       ${python_includes}, "${python_libs} -lpython2.7")
-    fi
-    if test "${have_libpython}" = no; then
-      AC_TRY_LIBPYTHON(python2.6, have_libpython,
-                       ${python_includes}, "${python_libs} -lpython2.6")
-    fi
-    if test ${have_libpython} = no; then
-      AC_TRY_LIBPYTHON(python2.5, have_libpython,
-                       ${python_includes}, "${python_libs} -lpython2.5")
-    fi
-    if test ${have_libpython} = no; then
-      AC_TRY_LIBPYTHON(python2.4, have_libpython,
-                       ${python_includes}, "${python_libs} -lpython2.4")
-    fi
-  fi
-  if test "${have_libpython}" = python2.7 -o "${have_libpython}" = python27; then
-    AC_DEFINE(HAVE_LIBPYTHON2_7, 1, [Define if Python 2.7 is being used.])
-  elif test "${have_libpython}" = python2.6 -o "${have_libpython}" = python26; then
-    AC_DEFINE(HAVE_LIBPYTHON2_6, 1, [Define if Python 2.6 is being used.])
-  elif test "${have_libpython}" = python2.5 -o "${have_libpython}" = python25; then
-    AC_DEFINE(HAVE_LIBPYTHON2_5, 1, [Define if Python 2.5 is being used.])
-  elif test "${have_libpython}" = python2.4 -o "${have_libpython}" = python24; then
-    AC_DEFINE(HAVE_LIBPYTHON2_4, 1, [Define if Python 2.4 is being used.])
+    AC_TRY_LIBPYTHON(have_libpython,
+                     ${python_includes}, ${python_libs})
   fi
 
   if test "${have_libpython}" = no; then
@@ -965,6 +908,24 @@ else
   fi
 fi
 
+dnl Use --with-python-libdir to control where GDB looks for the Python
+dnl libraries.
+dnl
+dnl If this is not given then the default will be based on the value
+dnl passed to --with-python, which is in the python_prefix variable.
+dnl If the --with-python option wasn't given then the default value in
+dnl python_prefix is based on running the 'gdb/python/python-config
+dnl --exec-prefix' script.
+AC_ARG_WITH(python-libdir,
+  AS_HELP_STRING([--with-python-libdir@<:@=DIR@:>@], [search for python's libraries in DIR]),
+  [],[
+    # If no python libdir is specified then select one based on
+    # python's prefix path.
+    if test -n "${python_prefix}"; then
+      with_python_libdir=${python_prefix}/lib
+    fi
+  ])
+
 if test "${have_libpython}" != no; then
   AC_DEFINE(HAVE_PYTHON, 1, [Define if Python interpreter is being linked in.])
   CONFIG_OBS="$CONFIG_OBS \$(SUBDIR_PYTHON_OBS)"
@@ -973,13 +934,23 @@ if test "${have_libpython}" != no; then
   CONFIG_INSTALL="$CONFIG_INSTALL install-python"
   ENABLE_CFLAGS="$ENABLE_CFLAGS \$(SUBDIR_PYTHON_CFLAGS)"
 
+  if test -n "${with_python_libdir}"; then
+    AC_DEFINE_UNQUOTED(WITH_PYTHON_LIBDIR, "${with_python_libdir}",
+		       [Directory containing Python's standard libraries from --with-python-libdir.])
+    GDB_AC_DEFINE_RELOCATABLE(PYTHON_LIBDIR, [python lib], ${with_python_libdir})
+  fi
+
   # Flags needed to compile Python code (taken from python-config --cflags).
   # We cannot call python-config directly because it will output whatever was
   # used when compiling the Python interpreter itself, including flags which
   # would make the python-related objects be compiled differently from the
   # rest of GDB (e.g., -O2 and -fPIC).
   if test "${GCC}" = yes; then
-    tentative_python_cflags="-fno-strict-aliasing -DNDEBUG -fwrapv"
+    tentative_python_cflags="-fno-strict-aliasing -fwrapv"
+    # Python headers recommend -DNDEBUG, but it's unclear if that just
+    # refers to building Python itself.  In release mode, though, it
+    # doesn't hurt for the Python code in gdb to follow.
+    $development || tentative_python_cflags="$tentative_python_cflags -DNDEBUG"
   fi
 
   if test "x${tentative_python_cflags}" != x; then
@@ -988,21 +959,16 @@ if test "${have_libpython}" != no; then
       # Check that the compiler accepts it
       saved_CFLAGS="$CFLAGS"
       CFLAGS="$CFLAGS $flag"
-      AC_TRY_COMPILE([],[],PYTHON_CFLAGS="${PYTHON_CFLAGS} $flag",)
+      AC_COMPILE_IFELSE(
+	[AC_LANG_PROGRAM([], [])],
+	[PYTHON_CFLAGS="${PYTHON_CFLAGS} $flag"],
+	[]
+      )
       CFLAGS="$saved_CFLAGS"
     done
     AC_MSG_RESULT(${PYTHON_CFLAGS})
   fi
 
-  # On IRIX, type siginfo is not defined.  Instead, sys/siginfo.h provides:
-  #    #if _SGIAPI
-  #    #define siginfo __siginfo
-  #    #endif
-  # The problem is that including Python causes some XOPEN macros to be
-  # unilaterally defined, and that in turn causes _SGIAPI to evaluate
-  # to false.  So, we work around this issue by defining siginfo ourself
-  # though the command-line.
-  #
   # On x64 Windows, Python's include headers, and pyconfig.h in
   # particular, rely on MS_WIN64 macro to detect that it's a 64bit
   # version of Windows.  Unfortunately, MS_WIN64 is only defined if
@@ -1012,137 +978,354 @@ if test "${have_libpython}" != no; then
   # solved as of 2012-10-02 (http://bugs.python.org/issue4709).
 
   case "$gdb_host" in
-    irix*) if test "${GCC}" = yes; then
-             CPPFLAGS="$CPPFLAGS -Dsiginfo=__siginfo"
-           fi
-           ;;
     mingw64)
            if test "${GCC}" = yes; then
              CPPFLAGS="$CPPFLAGS -DMS_WIN64"
            fi
            ;;
   esac
-
-  # Note that "python -m threading" cannot be used to check for
-  # threading support due to a bug in Python 2.7.3
-  # (http://bugs.python.org/issue15567).
-  AC_MSG_CHECKING(whether python supports threads)
-  saved_CPPFLAGS="${CPPFLAGS}"
-  CPPFLAGS="${PYTHON_CPPFLAGS}"
-  # Note that the test is reversed so that python_has_threads=yes on
-  # unexpected failures.
-  AC_PREPROC_IFELSE(AC_LANG_SOURCE([[
-#include <Python.h>
-#ifdef WITH_THREAD
-# error
-#endif
-  ]]), [python_has_threads=no], [python_has_threads=yes])
-  AC_MSG_RESULT(${python_has_threads})
-  CPPFLAGS="${saved_CPPFLAGS}"
 else
-  # Even if Python support is not compiled in, we need to have these files
-  # included.
-  CONFIG_OBS="$CONFIG_OBS python.o py-value.o py-prettyprint.o py-auto-load.o"
-  CONFIG_SRCS="$CONFIG_SRCS python/python.c python/py-value.c \
-	python/py-prettyprint.c python/py-auto-load.c"
+  # Even if Python support is not compiled in, we need to have this file
+  # included so that the "python" command, et.al., still exists.
+  CONFIG_OBS="$CONFIG_OBS python/python.o"
+  CONFIG_SRCS="$CONFIG_SRCS python/python.c"
 fi
+
+# Work around Python http://bugs.python.org/issue10112.  See also
+# http://bugs.python.org/issue11410, otherwise -Wl,--dynamic-list has
+# no effect.  Note that the only test after this that uses Python is
+# the -rdynamic/-Wl,--dynamic-list test, and we do want that one to be
+# run without -export-dynamic too.
+PYTHON_LIBS=`echo $PYTHON_LIBS | sed -e 's/-Xlinker -export-dynamic//'`
+
 AC_SUBST(PYTHON_CFLAGS)
 AC_SUBST(PYTHON_CPPFLAGS)
 AC_SUBST(PYTHON_LIBS)
+AM_CONDITIONAL(HAVE_PYTHON, test "${have_libpython}" != no)
 
-# Enable -lmcheck by default (it provides cheap-enough memory mangling),
-# but turn it off if Python is enabled with threads, since -lmcheck is
-# not thread safe (http://sourceware.org/bugzilla/show_bug.cgi?id=9939),
-# and for releases.
-if test \( "${have_libpython}" = "no" -o "${python_has_threads}" = "no" \) \
-   && $development; then
-  libmcheck_default=yes
+# -------------------- #
+# Check for libguile.  #
+# -------------------- #
+
+dnl Utility to simplify finding libguile.
+dnl $1 = pkg-config-program
+dnl $2 = space-separate list of guile versions to try
+dnl $3 = yes|no, indicating whether to flag errors or ignore them
+dnl $4 = the shell variable to assign the result to
+dnl      If libguile is found we store "yes" here.
+
+AC_DEFUN([AC_TRY_LIBGUILE],
+[
+  pkg_config=$1
+  guile_version_list=$2
+  flag_errors=$3
+  define([have_libguile_var],$4)
+  found_usable_guile=checking
+  AC_MSG_CHECKING([for usable guile from ${pkg_config}])
+  for guile_version in ${guile_version_list}; do
+    ${pkg_config} --exists ${guile_version} 2>/dev/null
+    if test $? != 0; then
+      continue
+    fi
+    dnl pkg-config says the package exists, so if we get an error now,
+    dnl that's bad.
+    new_CPPFLAGS=`${pkg_config} --cflags ${guile_version}`
+    if test $? != 0; then
+      AC_MSG_ERROR([failure running pkg-config --cflags ${guile_version}])
+    fi
+    new_LIBS=`${pkg_config} --libs ${guile_version}`
+    if test $? != 0; then
+      AC_MSG_ERROR([failure running pkg-config --libs ${guile_version}])
+    fi
+    dnl If we get this far, great.
+    found_usable_guile=${guile_version}
+    break
+  done
+  if test "${found_usable_guile}" = "checking"; then
+    if test "${flag_errors}" = "yes"; then
+      AC_MSG_ERROR([unable to find usable guile version from "${guile_version_list}"])
+    else
+      found_usable_guile=no
+    fi
+  fi
+  dnl One final sanity check.
+  dnl The user could have said --with-guile=python-2.7.
+  if test "${found_usable_guile}" != no; then
+    save_CPPFLAGS=$CPPFLAGS
+    save_LIBS=$LIBS
+    CPPFLAGS="$CPPFLAGS $new_CPPFLAGS"
+    LIBS="$LIBS $new_LIBS"
+    AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include "libguile.h"]],
+                                   [[scm_init_guile ();]])],
+                   [have_libguile_var=yes
+                    GUILE_CPPFLAGS=$new_CPPFLAGS
+                    GUILE_LIBS=$new_LIBS],
+                   [found_usable_guile=no])
+    dnl scm_set_automatic_finalization_enabled added in Guile 2.2.
+    AC_CHECK_FUNC(scm_set_automatic_finalization_enabled,
+      AC_DEFINE(HAVE_GUILE_MANUAL_FINALIZATION, 1,
+                [Define if Guile supports manual finalization.])
+    )
+    CPPFLAGS=$save_CPPFLAGS
+    LIBS=$save_LIBS
+    if test "${found_usable_guile}" = no; then
+      if test "${flag_errors}" = yes; then
+        AC_MSG_FAILURE([linking guile version ${guile_version} test program failed])
+      fi
+    fi
+  fi
+  AC_MSG_RESULT([${found_usable_guile}])
+])
+
+dnl There are several different values for --with-guile:
+dnl
+dnl no -   Don't include guile support.
+dnl yes -  Include guile support, error if it's missing.
+dnl        The pkg-config program must be in $PATH.
+dnl auto - Same as "yes", but if guile is missing from the system,
+dnl        fall back to "no".
+dnl guile-version [guile-version-choice-2 ...] -
+dnl        A space-separated list of guile package versions to try.
+dnl        These are passed to pkg-config as-is.
+dnl        E.g., guile-2.0 or guile-2.2-uninstalled
+dnl        This requires making sure PKG_CONFIG_PATH is set appropriately.
+dnl /path/to/pkg-config -
+dnl        Use this pkg-config program.
+dnl        NOTE: This needn't be the "real" pkg-config program.
+dnl        It could be a shell script.  It is invoked as:
+dnl        pkg-config --exists $version
+dnl        pkg-config --cflags $version
+dnl        pkg-config --libs $version
+dnl        pkg-config --variable guild $version
+dnl        The script will be called with $version having each value in
+dnl        $try_guile_versions until --exists indicates success.
+
+AC_ARG_WITH(guile,
+  AS_HELP_STRING([--with-guile@<:@=GUILE@:>@], [include guile support (auto/yes/no/<guile-version>/<pkg-config-program>)]),
+  [], [with_guile=auto])
+AC_MSG_CHECKING([whether to use guile])
+AC_MSG_RESULT([$with_guile])
+
+dnl We check guile with pkg-config.
+AC_PATH_PROG(pkg_config_prog_path, pkg-config, missing)
+
+try_guile_versions="guile-3.0 guile-2.2 guile-2.0"
+have_libguile=no
+case "${with_guile}" in
+no)
+  AC_MSG_WARN([guile support disabled; some features will be unavailable.])
+  ;;
+auto)
+  if test "${pkg_config_prog_path}" = "missing"; then
+    AC_MSG_WARN([pkg-config not found, guile support disabled])
+  else
+    AC_TRY_LIBGUILE(${pkg_config_prog_path}, ${try_guile_versions}, no, have_libguile)
+  fi
+  ;;
+yes)
+  if test "${pkg_config_prog_path}" = "missing"; then
+    AC_MSG_ERROR([pkg-config not found])
+  fi
+  AC_TRY_LIBGUILE(${pkg_config_prog_path}, ${try_guile_versions}, yes, have_libguile)
+  ;;
+[[\\/]]* | ?:[[\\/]]*)
+  if test -x "${with_guile}"; then
+    AC_TRY_LIBGUILE(${with_guile}, ${try_guile_versions}, yes, have_libguile)
+  else
+    AC_MSG_ERROR([Guile config program not executable: ${with_guile}])
+  fi
+  ;;
+"" | */*)
+  # Disallow --with=guile="" and --with-guile=foo/bar.
+  AC_MSG_ERROR([invalid value for --with-guile])
+  ;;
+*)
+  # A space separate list of guile versions to try, in order.
+  if test "${pkg_config_prog_path}" = "missing"; then
+    AC_MSG_ERROR([pkg-config not found])
+  fi
+  AC_TRY_LIBGUILE(${pkg_config_prog_path}, ${with_guile}, yes, have_libguile)
+  ;;
+esac
+
+if test "${have_libguile}" != no; then
+  dnl Get the name of the 'guild' program.
+  case "${with_guile}" in
+  [[\\/]]* | ?:[[\\/]]*)
+    GDB_GUILE_PROGRAM_NAMES(["${with_guile}"], ["${guile_version}"])
+    ;;
+  *)
+    GDB_GUILE_PROGRAM_NAMES(["${pkg_config_prog_path}"], ["${guile_version}"])
+    ;;
+  esac
+
+  dnl Make sure guild can handle this host.
+  GDB_TRY_GUILD([$srcdir/guile/lib/gdb/support.scm])
+  dnl If not, disable guile support.
+  if test "$ac_cv_guild_ok" = no; then
+    have_libguile=no
+    AC_MSG_WARN(disabling guile support, $GUILD fails compiling for $host)
+  fi
+fi
+
+if test "${have_libguile}" != no; then
+  AC_DEFINE(HAVE_GUILE, 1, [Define if Guile interpreter is being linked in.])
+  CONFIG_OBS="$CONFIG_OBS \$(SUBDIR_GUILE_OBS)"
+  CONFIG_DEPS="$CONFIG_DEPS \$(SUBDIR_GUILE_DEPS)"
+  CONFIG_SRCS="$CONFIG_SRCS \$(SUBDIR_GUILE_SRCS)"
+  CONFIG_INSTALL="$CONFIG_INSTALL install-guile"
+  ENABLE_CFLAGS="$ENABLE_CFLAGS \$(SUBDIR_GUILE_CFLAGS)"
+
+  dnl The 'scm_new_smob' function appeared in Guile 2.0.6.
+  save_LIBS="$LIBS"
+  save_CPPFLAGS="$CPPFLAGS"
+  LIBS="$GUILE_LIBS"
+  CPPFLAGS="$GUILE_CPPFLAGS"
+  AC_CHECK_FUNCS([scm_new_smob])
+  LIBS="$save_LIBS"
+  CPPFLAGS="$save_CPPFLAGS"
 else
-  libmcheck_default=no
+  # Even if Guile support is not compiled in, we need to have these files
+  # included.
+  CONFIG_OBS="$CONFIG_OBS guile/guile.o"
+  CONFIG_SRCS="$CONFIG_SRCS guile/guile.c"
 fi
-GDB_AC_LIBMCHECK(${libmcheck_default})
+AC_SUBST(GUILE_CPPFLAGS)
+AC_SUBST(GUILE_LIBS)
+AM_CONDITIONAL(HAVE_GUILE, test "${have_libguile}" != no)
 
-if test "$ENABLE_LIBMCHECK" = "yes" \
-	-a "${have_libpython}" != "no" \
-	-a "${python_has_threads}" = "yes" ; then
-  AC_MSG_WARN(--enable-libmcheck may lead to spurious crashes if threads are used in python)
+# ---------------------------- #
+# Check for source highlight.  #
+# ---------------------------- #
+
+SRCHIGH_LIBS=
+SRCHIGH_CFLAGS=
+
+AC_ARG_ENABLE([source-highlight],
+	      [AS_HELP_STRING([--enable-source-highlight],
+			      [enable source-highlight for source listings])],
+	      [GDB_CHECK_YES_NO_AUTO_VAL([$enableval], [--enable-source-highlight])],
+	      [enable_source_highlight=auto])
+
+if test "${enable_source_highlight}" != "no"; then
+  AC_MSG_CHECKING([for the source-highlight library])
+  if test "${pkg_config_prog_path}" = "missing"; then
+    AC_MSG_RESULT([no - pkg-config not found])
+    if test "${enable_source_highlight}" = "yes"; then
+      AC_MSG_ERROR([pkg-config was not found in your system])
+    fi
+  else
+    if ${pkg_config_prog_path} --exists source-highlight; then
+      case "$LDFLAGS" in
+        *static-libstdc*)
+          AC_MSG_ERROR([source highlight is incompatible with -static-libstdc++; dnl
+either use --disable-source-highlight or dnl
+--without-static-standard-libraries])
+          ;;
+      esac
+
+      srchigh_pkg_cflags=`${pkg_config_prog_path} --cflags source-highlight`
+      srchigh_pkg_libs=`${pkg_config_prog_path} --libs source-highlight`
+
+      # Now that we have found a source-highlight library, check if we can use
+      # it.  In particular, we're trying to detect the situation that the
+      # library is using the new libstdc++ library abi ( see
+      # https://gcc.gnu.org/onlinedocs/libstdc++/manual/using_dual_abi.html )
+      # while the compiler being used to compile gdb is using the old abi.
+      # Such a situation will result in an undefined reference to
+      # srchilite::SourceHighlight::SourceHighlight(std::string const&).
+      # This situation can occur for instance when using a source highlight
+      # library compiled with g++ 7.5.0 while building gdb with g++ 4.8.5.
+      AC_LANG_PUSH(C++)
+      save_CXXFLAGS="$CXXFLAGS"
+      save_LIBS="$LIBS"
+      CXXFLAGS="$CXXFLAGS $srchigh_pkg_cflags"
+      LIBS="$LIBS $srchigh_pkg_libs"
+      AC_LINK_IFELSE(
+        [AC_LANG_PROGRAM(
+          [#include <srchilite/sourcehighlight.h>],
+          [std::string outlang = "esc.outlang";
+           new srchilite::SourceHighlight (outlang);]
+        )],
+        [have_usable_source_highlight=yes],
+        [have_usable_source_highlight=no]
+      )
+      CXXFLAGS="$save_CXXFLAGS"
+      LIBS="$save_LIBS"
+      AC_LANG_POP(C++)
+
+      if test "${have_usable_source_highlight}" = "yes"; then
+        AC_DEFINE([HAVE_SOURCE_HIGHLIGHT], 1,
+                  [Define to 1 if the source-highlight library is available])
+        AC_MSG_RESULT([yes])
+        SRCHIGH_CFLAGS="$srchigh_pkg_cflags"
+        SRCHIGH_LIBS="$srchigh_pkg_libs"
+      else
+        AC_MSG_RESULT([no])
+        if test "${enable_source_highlight}" = "yes"; then
+          AC_MSG_ERROR([source-highlight in your system could not be used])
+        fi
+      fi
+    else
+      AC_MSG_RESULT([no])
+      if test "${enable_source_highlight}" = "yes"; then
+        AC_MSG_ERROR([source-highlight was not found in your system])
+      fi
+    fi
+  fi
 fi
+AC_SUBST(SRCHIGH_LIBS)
+AC_SUBST(SRCHIGH_CFLAGS)
 
 # ------------------------- #
 # Checks for header files.  #
 # ------------------------- #
 
-AC_HEADER_DIRENT
 AC_HEADER_STDC
 # elf_hp.h is for HP/UX 64-bit shared library support.
-AC_CHECK_HEADERS([nlist.h machine/reg.h poll.h sys/poll.h sys/socket.h proc_service.h \
-                  thread_db.h signal.h stddef.h \
-		  stdlib.h string.h memory.h strings.h sys/fault.h \
+AC_CHECK_HEADERS([nlist.h machine/reg.h \
+                  thread_db.h \
 		  sys/file.h sys/filio.h sys/ioctl.h sys/param.h \
-		  sys/resource.h sys/procfs.h sys/ptrace.h ptrace.h \
-		  sys/reg.h sys/debugreg.h sys/select.h sys/syscall.h \
-		  sys/types.h sys/wait.h wait.h termios.h termio.h \
-		  sgtty.h unistd.h elf_hp.h locale.h \
-		  dlfcn.h sys/un.h linux/perf_event.h])
-AC_CHECK_HEADERS(link.h, [], [],
-[#if HAVE_SYS_TYPES_H
-# include <sys/types.h>
-#endif
-#if HAVE_NLIST_H
-# include <nlist.h>
-#endif
-])
-AC_CHECK_HEADERS(sys/proc.h, [], [],
-[#if HAVE_SYS_PARAM_H
-# include <sys/param.h>
-#endif
-])
+		  sys/procctl.h sys/resource.h sys/ptrace.h ptrace.h \
+		  sys/reg.h sys/debugreg.h \
+		  termios.h elf_hp.h])
 AC_CHECK_HEADERS(sys/user.h, [], [],
 [#if HAVE_SYS_PARAM_H
 # include <sys/param.h>
 #endif
 ])
 
-# On Solaris 2.[789], we need to define _MSE_INT_H to avoid a clash
-# between <widec.h> and <wchar.h> that would cause AC_CHECK_HEADERS to
-# think that we don't have <curses.h> if we're using GCC.
-case $host_os in
-  solaris2.[[789]])
-    if test "$GCC" = yes; then
-      AC_DEFINE(_MSE_INT_H, 1,
-        [Define to 1 to avoid a clash between <widec.h> and <wchar.h> on
-   Solaris 2.[789] when using GCC. ])
-    fi ;;
-esac
-AC_CHECK_HEADERS(curses.h cursesX.h ncurses.h ncurses/ncurses.h ncurses/term.h)
+AC_CHECK_HEADERS(curses.h cursesX.h ncurses.h ncursesw/ncurses.h ncurses/ncurses.h ncurses/term.h)
 AC_CHECK_HEADERS(term.h, [], [],
 [#if HAVE_CURSES_H
 # include <curses.h>
 #endif
 ])
 
+AC_CHECK_HEADERS([sys/socket.h])
+AC_CHECK_HEADERS([ws2tcpip.h])
+AC_CHECK_HEADERS([execinfo.h])
+
 # ------------------------- #
 # Checks for declarations.  #
 # ------------------------- #
 
-AC_CHECK_DECLS([free, malloc, realloc, strerror, strstr, getopt,
-                snprintf, vsnprintf])
+libiberty_INIT
+
+AC_CHECK_DECLS([snprintf])
 AM_LC_MESSAGES
-
-# ----------------------- #
-# Checks for structures.  #
-# ----------------------- #
-
-AC_CHECK_MEMBERS([struct stat.st_blocks, struct stat.st_blksize])
 
 # ------------------ #
 # Checks for types.  #
 # ------------------ #
 
-AC_TYPE_SIGNAL
 AC_CHECK_TYPES(socklen_t, [], [],
 [#include <sys/types.h>
-#include <sys/socket.h>
+#if HAVE_SYS_SOCKET_H
+# include <sys/socket.h>
+#elif HAVE_WS2TCPIP_H
+# include <ws2tcpip.h>
+#endif
 ])
 
 # ------------------------------------- #
@@ -1157,147 +1340,42 @@ AC_C_BIGENDIAN
 # Checks for library functions.  #
 # ------------------------------ #
 
-AC_FUNC_ALLOCA
-AC_FUNC_MMAP
-AC_FUNC_VFORK
-AC_CHECK_FUNCS([canonicalize_file_name realpath getrusage getuid getgid \
-		pipe poll pread pread64 pwrite readlink resize_term \
-		sbrk setpgid setpgrp setsid \
-		sigaction sigprocmask sigsetmask socketpair syscall \
+AC_CHECK_FUNCS([getuid getgid \
+		pipe pread pread64 pwrite resize_term \
+		getpgid setsid \
+		sigaction sigsetmask socketpair \
 		ttrace wborder wresize setlocale iconvlist libiconvlist btowc \
-		setrlimit getrlimit posix_madvise waitpid lstat \
-		fdwalk pipe2 ptrace64])
+		setrlimit getrlimit posix_madvise waitpid \
+		use_default_colors])
 AM_LANGINFO_CODESET
+GDB_AC_COMMON
 
-# Check the return and argument types of ptrace.  No canned test for
-# this, so roll our own.
-gdb_ptrace_headers='
-#if HAVE_SYS_TYPES_H
-# include <sys/types.h>
-#endif
-#if HAVE_SYS_PTRACE_H
-# include <sys/ptrace.h>
-#endif
-#if HAVE_UNISTD_H
-# include <unistd.h>
-#endif
-'
-# There is no point in checking if we don't have a prototype.
-AC_CHECK_DECLS(ptrace, [], [
-  : ${gdb_cv_func_ptrace_ret='int'}
-  : ${gdb_cv_func_ptrace_args='int,int,long,long'}
-], $gdb_ptrace_headers)
-# Check return type.  Varargs (used on GNU/Linux) conflict with the
-# empty argument list, so check for that explicitly.
-AC_CACHE_CHECK([return type of ptrace], gdb_cv_func_ptrace_ret,
-  AC_TRY_COMPILE($gdb_ptrace_headers,
-    [extern long ptrace (enum __ptrace_request, ...);],
-    gdb_cv_func_ptrace_ret='long',
-    AC_TRY_COMPILE($gdb_ptrace_headers,
-      [extern int ptrace ();],
-      gdb_cv_func_ptrace_ret='int',
-      gdb_cv_func_ptrace_ret='long')))
-AC_DEFINE_UNQUOTED(PTRACE_TYPE_RET, $gdb_cv_func_ptrace_ret,
-  [Define as the return type of ptrace.])
-# Check argument types.
-AC_CACHE_CHECK([types of arguments for ptrace], gdb_cv_func_ptrace_args, [
-  AC_TRY_COMPILE($gdb_ptrace_headers,
-    [extern long ptrace (enum __ptrace_request, ...);],
-    [gdb_cv_func_ptrace_args='int,int,long,long'],[
-for gdb_arg1 in 'int' 'long'; do
- for gdb_arg2 in 'pid_t' 'int' 'long'; do
-  for gdb_arg3 in 'int *' 'caddr_t' 'int' 'long' 'void *'; do
-   for gdb_arg4 in 'int' 'long' 'void *'; do
-     AC_TRY_COMPILE($gdb_ptrace_headers, [
-extern $gdb_cv_func_ptrace_ret
-  ptrace ($gdb_arg1, $gdb_arg2, $gdb_arg3, $gdb_arg4);
-], [gdb_cv_func_ptrace_args="$gdb_arg1,$gdb_arg2,$gdb_arg3,$gdb_arg4";
-    break 4;])
-    for gdb_arg5 in 'int *' 'int' 'long'; do
-     AC_TRY_COMPILE($gdb_ptrace_headers, [
-extern $gdb_cv_func_ptrace_ret
-  ptrace ($gdb_arg1, $gdb_arg2, $gdb_arg3, $gdb_arg4, $gdb_arg5);
-], [
-gdb_cv_func_ptrace_args="$gdb_arg1,$gdb_arg2,$gdb_arg3,$gdb_arg4,$gdb_arg5";
-    break 5;])
-    done
-   done
-  done
- done
-done
-# Provide a safe default value.
-: ${gdb_cv_func_ptrace_args='int,int,long,long'}
-])])
-ac_save_IFS=$IFS; IFS=','
-set dummy `echo "$gdb_cv_func_ptrace_args" | sed 's/\*/\*/g'`
-IFS=$ac_save_IFS
-shift
-AC_DEFINE_UNQUOTED(PTRACE_TYPE_ARG3, $[3],
-  [Define to the type of arg 3 for ptrace.])
-AC_DEFINE_UNQUOTED(PTRACE_TYPE_ARG4, $[4],
-  [Define to the type of arg 4 for ptrace.])
-if test -n "$[5]"; then
-  AC_DEFINE_UNQUOTED(PTRACE_TYPE_ARG5, $[5],
-    [Define to the type of arg 5 for ptrace.])
-fi
+# Check the return and argument types of ptrace.
+GDB_AC_PTRACE
 
 dnl AC_FUNC_SETPGRP does not work when cross compiling
 dnl Instead, assume we will have a prototype for setpgrp if cross compiling.
 if test "$cross_compiling" = no; then
   AC_FUNC_SETPGRP
 else
-  AC_CACHE_CHECK([whether setpgrp takes no argument], ac_cv_func_setpgrp_void,
-    [AC_TRY_COMPILE([
-#include <unistd.h>
-], [
-  if (setpgrp(1,1) == -1)
-    exit (0);
-  else
-    exit (1);
-], ac_cv_func_setpgrp_void=no, ac_cv_func_setpgrp_void=yes)])
-if test $ac_cv_func_setpgrp_void = yes; then
+  AC_CACHE_CHECK(
+    [whether setpgrp takes no argument],
+    [ac_cv_func_setpgrp_void],
+    [AC_COMPILE_IFELSE(
+       [AC_LANG_PROGRAM(
+	  [#include <unistd.h>],
+	  [if (setpgrp(1,1) == -1)
+	     exit (0);
+	   else
+	     exit (1);]
+	)],
+       [ac_cv_func_setpgrp_void=no],
+       [ac_cv_func_setpgrp_void=yes]
+     )]
+  )
+if test "$ac_cv_func_setpgrp_void" = yes; then
   AC_DEFINE(SETPGRP_VOID, 1)
 fi
-fi
-
-# Check if sigsetjmp is available.  Using AC_CHECK_FUNCS won't do
-# since sigsetjmp might only be defined as a macro.
-AC_CACHE_CHECK([for sigsetjmp], gdb_cv_func_sigsetjmp,
-[AC_TRY_COMPILE([
-#include <setjmp.h>
-], [sigjmp_buf env; while (! sigsetjmp (env, 1)) siglongjmp (env, 1);],
-gdb_cv_func_sigsetjmp=yes, gdb_cv_func_sigsetjmp=no)])
-if test $gdb_cv_func_sigsetjmp = yes; then
-  AC_DEFINE(HAVE_SIGSETJMP, 1, [Define if sigsetjmp is available. ])
-fi
-
-# Assume we'll default to using the included libiberty regex.
-gdb_use_included_regex=yes
-
-# However, if the system regex is GNU regex, then default to *not*
-# using the included regex.
-AC_CACHE_CHECK(
-  [for GNU regex],
-  [gdb_cv_have_gnu_regex],
-  [AC_TRY_COMPILE(
-    [#include <gnu-versions.h>],
-    [#define REGEX_INTERFACE_VERSION 1
-#if _GNU_REGEX_INTERFACE_VERSION != REGEX_INTERFACE_VERSION
-# error "Version mismatch"
-#endif],
-    gdb_cv_have_gnu_regex=yes,
-    gdb_cv_have_gnu_regex=no)])
-if test $gdb_cv_have_gnu_regex = yes; then
-  gdb_use_included_regex=no
-fi
-
-AC_ARG_WITH(included-regex,
-  AS_HELP_STRING([--without-included-regex], [don't use included regex; this is the default on systems with version 2 of the GNU C library (use with caution on other system)]),
-  gdb_with_regex=$withval,
-  gdb_with_regex=$gdb_use_included_regex)
-if test "$gdb_with_regex" = yes; then
-  AC_DEFINE(USE_INCLUDED_REGEX, 1,
-    [Define to 1 if the regex included in libiberty should be used.])
 fi
 
 # Check if <sys/proc.h> defines `struct thread' with a td_pcb member.
@@ -1307,21 +1385,40 @@ AC_CHECK_MEMBERS([struct thread.td_pcb], [], [],
 ])
 
 # See if <sys/lwp.h> defines `struct lwp`.
-AC_CACHE_CHECK([for struct lwp], gdb_cv_struct_lwp,
-[AC_TRY_COMPILE([#include <sys/param.h>
-#include <sys/lwp.h>], [struct lwp l;],
-gdb_cv_struct_lwp=yes, gdb_cv_struct_lwp=no)])
-if test $gdb_cv_struct_lwp = yes; then
+AC_CACHE_CHECK(
+  [for struct lwp],
+  [gdb_cv_struct_lwp],
+  [AC_COMPILE_IFELSE(
+     [AC_LANG_PROGRAM(
+	[#include <sys/param.h>
+	 #define _KMEMUSER
+	 #include <sys/lwp.h>],
+	[struct lwp l;]
+      )],
+     [gdb_cv_struct_lwp=yes],
+     [gdb_cv_struct_lwp=no]
+   )]
+)
+if test "$gdb_cv_struct_lwp" = yes; then
   AC_DEFINE(HAVE_STRUCT_LWP, 1,
             [Define to 1 if your system has struct lwp.])
 fi
 
 # See if <machine/reg.h> degines `struct reg'.
-AC_CACHE_CHECK([for struct reg in machine/reg.h], gdb_cv_struct_reg,
-[AC_TRY_COMPILE([#include <sys/types.h>
-#include <machine/reg.h>], [struct reg r;],
-gdb_cv_struct_reg=yes, gdb_cv_struct_reg=no)])
-if test $gdb_cv_struct_reg = yes; then
+AC_CACHE_CHECK(
+  [for struct reg in machine/reg.h],
+  [gdb_cv_struct_reg],
+  [AC_COMPILE_IFELSE(
+     [AC_LANG_PROGRAM(
+	[#include <sys/types.h>
+	 #include <machine/reg.h>],
+	[struct reg r;]
+      )],
+     [gdb_cv_struct_reg=yes],
+     [gdb_cv_struct_reg=no]
+   )]
+)
+if test "$gdb_cv_struct_reg" = yes; then
   AC_DEFINE(HAVE_STRUCT_REG, 1,
             [Define to 1 if your system has struct reg in <machine/reg.h>.])
 fi
@@ -1329,228 +1426,72 @@ fi
 # See if <machine/reg.h> supports the %fs and %gs i386 segment registers.
 # Older i386 BSD's don't have the r_fs and r_gs members of `struct reg'.
 AC_CHECK_MEMBERS([struct reg.r_fs, struct reg.r_gs], [], [],
-                 [#include <machine/reg.h>])
-
-# See if <sys/user.h> supports the %fs_base and %gs_bas amd64 segment registers.
-# Older amd64 Linux's don't have the fs_base and gs_base members of
-# `struct user_regs_struct'.
-AC_CHECK_MEMBERS([struct user_regs_struct.fs_base, struct user_regs_struct.gs_base],
-		 [], [], [#include <sys/user.h>])
+                 [#include <sys/types.h>
+#include <machine/reg.h>])
 
 # See if <sys/ptrace.h> provides the PTRACE_GETREGS request.
 AC_MSG_CHECKING(for PTRACE_GETREGS)
-AC_CACHE_VAL(gdb_cv_have_ptrace_getregs,
-[AC_TRY_COMPILE([#include <sys/ptrace.h>],
-		[PTRACE_GETREGS;],
-		[gdb_cv_have_ptrace_getregs=yes],
-		[gdb_cv_have_ptrace_getregs=no])])
+AC_CACHE_VAL(
+  [gdb_cv_have_ptrace_getregs],
+  [AC_COMPILE_IFELSE(
+    [AC_LANG_PROGRAM([#include <sys/ptrace.h>], [PTRACE_GETREGS;])],
+    [gdb_cv_have_ptrace_getregs=yes],
+    [gdb_cv_have_ptrace_getregs=no]
+   )]
+)
 AC_MSG_RESULT($gdb_cv_have_ptrace_getregs)
-if test $gdb_cv_have_ptrace_getregs = yes; then
-  AC_DEFINE(HAVE_PTRACE_GETREGS, 1, 
+if test "$gdb_cv_have_ptrace_getregs" = yes; then
+  AC_DEFINE(HAVE_PTRACE_GETREGS, 1,
   [Define if sys/ptrace.h defines the PTRACE_GETREGS request.])
 fi
 
 # See if <sys/ptrace.h> provides the PTRACE_GETFPXREGS request.
 AC_MSG_CHECKING(for PTRACE_GETFPXREGS)
-AC_CACHE_VAL(gdb_cv_have_ptrace_getfpxregs,
-[AC_TRY_COMPILE([#include <sys/ptrace.h>],
-		[PTRACE_GETFPXREGS;],
-		[gdb_cv_have_ptrace_getfpxregs=yes],
-		[gdb_cv_have_ptrace_getfpxregs=no])])
+AC_CACHE_VAL(
+  [gdb_cv_have_ptrace_getfpxregs],
+  [AC_COMPILE_IFELSE(
+     [AC_LANG_PROGRAM([#include <sys/ptrace.h>], [PTRACE_GETFPXREGS;])],
+     [gdb_cv_have_ptrace_getfpxregs=yes],
+     [gdb_cv_have_ptrace_getfpxregs=no]
+   )]
+)
 AC_MSG_RESULT($gdb_cv_have_ptrace_getfpxregs)
-if test $gdb_cv_have_ptrace_getfpxregs = yes; then
+if test "$gdb_cv_have_ptrace_getfpxregs" = yes; then
   AC_DEFINE(HAVE_PTRACE_GETFPXREGS, 1,
   [Define if sys/ptrace.h defines the PTRACE_GETFPXREGS request.])
 fi
 
 # See if <sys/ptrace.h> provides the PT_GETDBREGS request.
 AC_MSG_CHECKING(for PT_GETDBREGS)
-AC_CACHE_VAL(gdb_cv_have_pt_getdbregs,
-[AC_TRY_COMPILE([#include <sys/types.h>
-#include <sys/ptrace.h>],
-		[PT_GETDBREGS;],
-		[gdb_cv_have_pt_getdbregs=yes],
-		[gdb_cv_have_pt_getdbregs=no])])
+AC_CACHE_VAL(
+  [gdb_cv_have_pt_getdbregs],
+  [AC_COMPILE_IFELSE(
+     [AC_LANG_PROGRAM(
+	[#include <sys/types.h>
+	 #include <sys/ptrace.h>],
+	[PT_GETDBREGS;]
+      )],
+     [gdb_cv_have_pt_getdbregs=yes],
+     [gdb_cv_have_pt_getdbregs=no]
+   )]
+)
 AC_MSG_RESULT($gdb_cv_have_pt_getdbregs)
-if test $gdb_cv_have_pt_getdbregs = yes; then
+if test "$gdb_cv_have_pt_getdbregs" = yes; then
   AC_DEFINE(HAVE_PT_GETDBREGS, 1,
   [Define if sys/ptrace.h defines the PT_GETDBREGS request.])
 fi
 
-# See if <sys/ptrace.h> provides the PT_GETXMMREGS request.
-AC_MSG_CHECKING(for PT_GETXMMREGS)
-AC_CACHE_VAL(gdb_cv_have_pt_getxmmregs,
-[AC_TRY_COMPILE([#include <sys/types.h>
-#include <sys/ptrace.h>],
-		[PT_GETXMMREGS;],
-		[gdb_cv_have_pt_getxmmregs=yes],
-		[gdb_cv_have_pt_getxmmregs=no])])
-AC_MSG_RESULT($gdb_cv_have_pt_getxmmregs)
-if test $gdb_cv_have_pt_getxmmregs = yes; then
-  AC_DEFINE(HAVE_PT_GETXMMREGS, 1,
-  [Define if sys/ptrace.h defines the PT_GETXMMREGS request.])
-fi
+# See if <sys/ptrace.h> supports LWP names on FreeBSD
+# Older FreeBSD versions don't have the pl_tdname member of
+# `struct ptrace_lwpinfo'.
+AC_CHECK_MEMBERS([struct ptrace_lwpinfo.pl_tdname], [], [],
+                 [#include <sys/ptrace.h>])
 
-# Detect which type of /proc is in use, such as for Solaris.
-
-if test "${target}" = "${host}"; then
-  case "${host}" in
-  *-*-sysv4.2* | *-*-sysv5* )
-      AC_DEFINE(NEW_PROC_API, 1,
-      [Define if you want to use new multi-fd /proc interface
-       (replaces HAVE_MULTIPLE_PROC_FDS as well as other macros).])
-      ;;
-  *-*-solaris2.[[6789]] | *-*-solaris2.1[[0-9]]*)
-      AC_DEFINE(NEW_PROC_API, 1,
-      [Define if you want to use new multi-fd /proc interface
-       (replaces HAVE_MULTIPLE_PROC_FDS as well as other macros).])
-      ;;
-  mips-sgi-irix5*)
-      # Work around <sys/proc.h> needing _KMEMUSER problem on IRIX 5.
-      AC_DEFINE([_KMEMUSER], 1,
-      [Define to 1 so <sys/proc.h> gets a definition of anon_hdl.  Works
-       around a <sys/proc.h> problem on IRIX 5.])
-      ;;
-  esac
-fi
-
-if test "$ac_cv_header_sys_procfs_h" = yes; then
-  BFD_HAVE_SYS_PROCFS_TYPE(pstatus_t)
-  BFD_HAVE_SYS_PROCFS_TYPE(prrun_t)
-  BFD_HAVE_SYS_PROCFS_TYPE(gregset_t)
-  BFD_HAVE_SYS_PROCFS_TYPE(fpregset_t)
-  BFD_HAVE_SYS_PROCFS_TYPE(prgregset_t)
-  BFD_HAVE_SYS_PROCFS_TYPE(prfpregset_t)
-  BFD_HAVE_SYS_PROCFS_TYPE(prgregset32_t)
-  BFD_HAVE_SYS_PROCFS_TYPE(prfpregset32_t)
-  BFD_HAVE_SYS_PROCFS_TYPE(lwpid_t)
-  BFD_HAVE_SYS_PROCFS_TYPE(psaddr_t)
-  BFD_HAVE_SYS_PROCFS_TYPE(prsysent_t)
-  BFD_HAVE_SYS_PROCFS_TYPE(pr_sigset_t)
-  BFD_HAVE_SYS_PROCFS_TYPE(pr_sigaction64_t)
-  BFD_HAVE_SYS_PROCFS_TYPE(pr_siginfo64_t)
-
-
-  dnl Check for broken prfpregset_t type
-
-  dnl For Linux/i386, glibc 2.1.3 was released with a bogus
-  dnl prfpregset_t type (it's a typedef for the pointer to a struct
-  dnl instead of the struct itself).  We detect this here, and work
-  dnl around it in gdb_proc_service.h.
-
-  if test $bfd_cv_have_sys_procfs_type_prfpregset_t = yes; then
-    AC_MSG_CHECKING(whether prfpregset_t type is broken)
-    AC_CACHE_VAL(gdb_cv_prfpregset_t_broken,
-      [AC_TRY_RUN([#include <sys/procfs.h>
-       int main ()
-       {
-         if (sizeof (prfpregset_t) == sizeof (void *))
-           return 1;
-         return 0;
-       }],
-       gdb_cv_prfpregset_t_broken=no,
-       gdb_cv_prfpregset_t_broken=yes,
-       gdb_cv_prfpregset_t_broken=yes)])
-    AC_MSG_RESULT($gdb_cv_prfpregset_t_broken)
-    if test $gdb_cv_prfpregset_t_broken = yes; then
-      AC_DEFINE(PRFPREGSET_T_BROKEN, 1,
-      [Define if the prfpregset_t type is broken.])
-    fi
-  fi
-
-  dnl Check for PIOCSET ioctl entry 
-
-  AC_MSG_CHECKING(for PIOCSET ioctl entry in sys/procfs.h)
-  AC_CACHE_VAL(gdb_cv_have_procfs_piocset,
-  [AC_TRY_COMPILE([#include <unistd.h>
-#include <sys/types.h>
-#include <sys/procfs.h>
-], [
-    int dummy;;
-    dummy = ioctl(0, PIOCSET, &dummy);
-  ],
-  gdb_cv_have_procfs_piocset=yes, gdb_cv_have_procfs_piocset=no)])
-  AC_MSG_RESULT($gdb_cv_have_procfs_piocset)
-  if test $gdb_cv_have_procfs_piocset = yes; then
-    AC_DEFINE(HAVE_PROCFS_PIOCSET, 1,
-    [Define if ioctl argument PIOCSET is available.])
-  fi
-fi
-
-dnl For native ports (host == target), check to see what kind of
-dnl legacy link.h support is needed.  (See solib-legacy.c.)
-if test ${host} = ${target} ; then
-  dnl Check for struct link_map with l_ members which are indicative
-  dnl of SVR4-like shared libraries
-
-  AC_MSG_CHECKING(for member l_addr in struct link_map)
-  AC_CACHE_VAL(gdb_cv_have_struct_link_map_with_l_members,
-    [AC_TRY_COMPILE([#include <link.h>],
-                    [struct link_map lm; (void) lm.l_addr;],
-                    gdb_cv_have_struct_link_map_with_l_members=yes,
-                    gdb_cv_have_struct_link_map_with_l_members=no)])
-  AC_MSG_RESULT($gdb_cv_have_struct_link_map_with_l_members)
-  if test $gdb_cv_have_struct_link_map_with_l_members = yes; then
-    AC_DEFINE(HAVE_STRUCT_LINK_MAP_WITH_L_MEMBERS,1,
-    [Define if <link.h> exists and defines struct link_map which has
-     members with an ``l_'' prefix.  (For Solaris, SVR4, and
-     SVR4-like systems.)])
-  fi
-
-  dnl Check for struct link_map with lm_ members which are indicative
-  dnl of SunOS-like shared libraries
-
-  AC_MSG_CHECKING(for member lm_addr in struct link_map)
-  AC_CACHE_VAL(gdb_cv_have_struct_link_map_with_lm_members,
-    [AC_TRY_COMPILE([#include <sys/types.h>
-#include <link.h>],
-                    [struct link_map lm; (void) lm.lm_addr;],
-                    gdb_cv_have_struct_link_map_with_lm_members=yes,
-                    gdb_cv_have_struct_link_map_with_lm_members=no)])
-  AC_MSG_RESULT($gdb_cv_have_struct_link_map_with_lm_members)
-  if test $gdb_cv_have_struct_link_map_with_lm_members = yes; then
-    AC_DEFINE(HAVE_STRUCT_LINK_MAP_WITH_LM_MEMBERS, 1,
-    [Define if <link.h> exists and defines struct link_map which has
-     members with an ``lm_'' prefix.  (For SunOS.)])
-  fi
-
-  dnl Check for struct so_map with som_ members which are found on 
-  dnl some *BSD systems.
-
-  AC_MSG_CHECKING(for member som_addr in struct so_map)
-  AC_CACHE_VAL(gdb_cv_have_struct_so_map_with_som_members,
-    [AC_TRY_COMPILE([#include <sys/types.h>
-#ifdef HAVE_NLIST_H
-#include <nlist.h>
-#endif
-#include <link.h>],
-                    [struct so_map lm; (void) lm.som_addr;],
-                    gdb_cv_have_struct_so_map_with_som_members=yes,
-                    gdb_cv_have_struct_so_map_with_som_members=no)])
-  AC_MSG_RESULT($gdb_cv_have_struct_so_map_with_som_members)
-  if test $gdb_cv_have_struct_so_map_with_som_members = yes; then
-    AC_DEFINE(HAVE_STRUCT_SO_MAP_WITH_SOM_MEMBERS, 1,
-    [Define if <link.h> exists and defines a struct so_map which has
-     members with an ``som_'' prefix.  (Found on older *BSD systems.)])
-  fi
-
-  dnl Check for struct link_map32 type, which allows a 64-bit Solaris
-  dnl debugger to debug a 32-bit Solaris app with 32-bit shared libraries.
-
-  AC_MSG_CHECKING(for struct link_map32 in sys/link.h)
-  AC_CACHE_VAL(gdb_cv_have_struct_link_map32, 
-    [AC_TRY_COMPILE([#define _SYSCALL32
-#include <sys/link.h>], [struct link_map32 l;],
-     gdb_cv_have_struct_link_map32=yes,
-     gdb_cv_have_struct_link_map32=no)])
-  AC_MSG_RESULT($gdb_cv_have_struct_link_map32)
-  if test $gdb_cv_have_struct_link_map32 = yes; then
-    AC_DEFINE(HAVE_STRUCT_LINK_MAP32, 1,
-    [Define if <sys/link.h> has struct link_map32])
-    AC_DEFINE(_SYSCALL32, 1,
-    [Define if <sys/link.h> has link_map32 (solaris sparc-64 target)])
-  fi
-fi
+# See if <sys/ptrace.h> supports syscall fields on FreeBSD.  The
+# pl_syscall_code member of `struct ptrace_lwpinfo' was added in
+# FreeBSD 10.3.
+AC_CHECK_MEMBERS([struct ptrace_lwpinfo.pl_syscall_code], [], [],
+                 [#include <sys/ptrace.h>])
 
 # Check if the compiler supports the `long long' type.
 
@@ -1560,30 +1501,9 @@ AC_CACHE_CHECK([for long long support in compiler], gdb_cv_c_long_long,
 [[switch (foo & 2) { case 0: return 1; }]])],
                                   gdb_cv_c_long_long=yes,
                                   gdb_cv_c_long_long=no)])
-if test $gdb_cv_c_long_long != yes; then
+if test "$gdb_cv_c_long_long" != yes; then
   # libdecnumber requires long long.
   AC_MSG_ERROR([Compiler must support long long for GDB.])
-fi
-
-# Check if the compiler and runtime support printing long longs.
-
-AC_CACHE_CHECK([for long long support in printf],
-               gdb_cv_printf_has_long_long,
-               [AC_RUN_IFELSE([AC_LANG_PROGRAM([AC_INCLUDES_DEFAULT],
-[[char buf[32];
-  long long l = 0;
-  l = (l << 16) + 0x0123;
-  l = (l << 16) + 0x4567;
-  l = (l << 16) + 0x89ab;
-  l = (l << 16) + 0xcdef;
-  sprintf (buf, "0x%016llx", l);
-  return (strcmp ("0x0123456789abcdef", buf));]])],
-                              gdb_cv_printf_has_long_long=yes,
-                              gdb_cv_printf_has_long_long=no,
-                              gdb_cv_printf_has_long_long=no)])
-if test $gdb_cv_printf_has_long_long = yes; then
-  AC_DEFINE(PRINTF_HAS_LONG_LONG, 1,
-            [Define to 1 if the "%ll" format works to print long longs.])
 fi
 
 # Check if the compiler and runtime support printing decfloats.
@@ -1600,7 +1520,7 @@ AC_CACHE_CHECK([for decfloat support in printf],
                               gdb_cv_printf_has_decfloat=yes,
                               gdb_cv_printf_has_decfloat=no,
                               gdb_cv_printf_has_decfloat=no)])
-if test $gdb_cv_printf_has_decfloat = yes; then
+if test "$gdb_cv_printf_has_decfloat" = yes; then
   AC_DEFINE(PRINTF_HAS_DECFLOAT, 1,
             [Define to 1 if the "%H, %D and %DD" formats work to print decfloats.])
 fi
@@ -1614,7 +1534,7 @@ AC_CACHE_CHECK([for long double support in compiler], gdb_cv_c_long_double,
                [AC_COMPILE_IFELSE([AC_LANG_SOURCE([[long double foo;]])],
                                   gdb_cv_c_long_double=yes,
                                   gdb_cv_c_long_double=no)])
-if test $gdb_cv_c_long_double = yes; then
+if test "$gdb_cv_c_long_double" = yes; then
   AC_DEFINE(HAVE_LONG_DOUBLE, 1,
            [Define to 1 if the compiler supports long double.])
 fi
@@ -1631,14 +1551,14 @@ AC_CACHE_CHECK([for long double support in printf],
                               gdb_cv_printf_has_long_double=yes,
                               gdb_cv_printf_has_long_double=no,
                               gdb_cv_printf_has_long_double=no)])
-if test $gdb_cv_printf_has_long_double = yes; then
+if test "$gdb_cv_printf_has_long_double" = yes; then
   AC_DEFINE(PRINTF_HAS_LONG_DOUBLE, 1,
             [Define to 1 if the "%Lg" format works to print long doubles.])
 fi
 
 # Check if the compiler and runtime support scanning long doubles.
 
-AC_CACHE_CHECK([for long double support in scanf], 
+AC_CACHE_CHECK([for long double support in scanf],
                gdb_cv_scanf_has_long_double,
                [AC_RUN_IFELSE([AC_LANG_PROGRAM(
 [[#include <stdio.h>]],
@@ -1649,25 +1569,30 @@ AC_CACHE_CHECK([for long double support in scanf],
                               gdb_cv_scanf_has_long_double=yes,
                               gdb_cv_scanf_has_long_double=no,
                               gdb_cv_scanf_has_long_double=no)])
-if test $gdb_cv_scanf_has_long_double = yes; then
+if test "$gdb_cv_scanf_has_long_double" = yes; then
   AC_DEFINE(SCANF_HAS_LONG_DOUBLE, 1,
             [Define to 1 if the "%Lg" format works to scan long doubles.])
 fi
 
 case ${host_os} in
 aix*)
-  AC_CACHE_CHECK([for -bbigtoc option], [gdb_cv_bigtoc], [
-    SAVE_LDFLAGS=$LDFLAGS
+  AC_CACHE_CHECK(
+    [for -bbigtoc option], [gdb_cv_bigtoc],
+    [SAVE_LDFLAGS=$LDFLAGS
 
-    case $GCC in
-    yes) gdb_cv_bigtoc=-Wl,-bbigtoc ;;
-    *) gdb_cv_bigtoc=-bbigtoc ;;
-    esac
+     case $GCC in
+       yes) gdb_cv_bigtoc=-Wl,-bbigtoc ;;
+       *) gdb_cv_bigtoc=-bbigtoc ;;
+     esac
 
-    LDFLAGS=$LDFLAGS\ $gdb_cv_bigtoc
-    AC_TRY_LINK([], [int i;], [], [gdb_cv_bigtoc=])
-    LDFLAGS="${SAVE_LDFLAGS}"
-  ])
+     LDFLAGS=$LDFLAGS\ $gdb_cv_bigtoc
+     AC_LINK_IFELSE(
+       [AC_LANG_PROGRAM([], [int i;])],
+       [],
+       [gdb_cv_bigtoc=]
+     )
+     LDFLAGS="${SAVE_LDFLAGS}"]
+  )
   CONFIG_LDFLAGS="${CONFIG_LDFLAGS} ${gdb_cv_bigtoc}"
   ;;
 esac
@@ -1683,27 +1608,40 @@ if test "${gdb_native}" = yes; then
    RDYNAMIC="-Wl,--dynamic-list=${srcdir}/proc-service.list"
    LDFLAGS="$LDFLAGS $RDYNAMIC"
    if test "${have_libpython}" = no; then
-     AC_TRY_LINK([], [], [dynamic_list=true])
+     AC_LINK_IFELSE(
+       [AC_LANG_PROGRAM([], [])],
+       [dynamic_list=true],
+       []
+     )
    else
      # Workaround http://bugs.python.org/issue4434 where static
      # libpythonX.Y.a would get its symbols required for
      # pythonX.Y/lib-dynload/*.so modules hidden by -Wl,--dynamic-list.
      # Problem does not happen for the recommended libpythonX.Y.so linkage.
+
+     # Note the workaround for Python
+     # http://bugs.python.org/issue10112 earlier has removed
+     # -export-dynamic from PYTHON_LIBS.  That's exactly what we want
+     # here too, as otherwise it'd make this -Wl,--dynamic-list test
+     # always pass.
      old_CFLAGS="$CFLAGS"
      CFLAGS="$CFLAGS $PYTHON_CFLAGS"
      old_LIBS="$LIBS"
      LIBS="$LIBS $PYTHON_LIBS"
+     old_CPPFLAGS="$CPPFLAGS"
+     CPPFLAGS="$CPPFLAGS $PYTHON_CPPFLAGS"
      AC_RUN_IFELSE(
-       AC_LANG_PROGRAM(
-         [#include "]${have_libpython}[/Python.h"],
+       [AC_LANG_PROGRAM(
+         [#include "Python.h"],
          [int err;
           Py_Initialize ();
-          err = PyRun_SimpleString ("import itertools\n");
+          err = PyRun_SimpleString ("import ctypes\n");
           Py_Finalize ();
-          return err == 0 ? 0 : 1;]),
+          return err == 0 ? 0 : 1;])],
        [dynamic_list=true], [], [true])
      LIBS="$old_LIBS"
      CFLAGS="$old_CFLAGS"
+     CPPFLAGS="$old_CPPFLAGS"
    fi
    LDFLAGS="$old_LDFLAGS"
 fi
@@ -1717,60 +1655,52 @@ fi
 AC_SUBST(RDYNAMIC)
 AC_MSG_RESULT($found)
 
+AC_CACHE_CHECK(
+  [whether execinfo.h backtrace is available],
+  gdb_cv_execinfo_backtrace,
+  [AC_LINK_IFELSE(
+     [AC_LANG_PROGRAM(
+        [
+         #include <execinfo.h>
+        ],
+        [
+         int f;
+         void *b[[2]];
+         f = backtrace (b, 2);
+         backtrace_symbols_fd (b, f, 2);
+        ])],
+   [gdb_cv_execinfo_backtrace=yes],
+   [gdb_cv_execinfo_backtrace=no])])
+if test "$gdb_cv_execinfo_backtrace" = yes; then
+  AC_DEFINE(HAVE_EXECINFO_BACKTRACE, 1,
+            [Define to 1 if execinfo.h backtrace functions are available.])
+fi
+
 dnl For certain native configurations, we need to check whether thread
 dnl support can be built in or not.
 dnl
 dnl Note that we only want this if we are both native (host == target),
 dnl and not doing a canadian cross build (build == host).
 
-if test ${build} = ${host} -a ${host} = ${target} ; then
+if test "${build}" = "${host}" -a "${host}" = "${target}" ; then
    case ${host_os} in
-   solaris*)
-      # See if thread_db library is around for Solaris thread debugging.
-      # Note that we must explicitly test for version 1 of the library
-      # because version 0 (present on Solaris 2.4 or earlier) doesn't have
-      # the same API.
-      AC_MSG_CHECKING(for Solaris thread debugging library)
-      if test -f /usr/lib/libthread_db.so.1 ; then
-         AC_MSG_RESULT(yes)
-         AC_DEFINE(HAVE_THREAD_DB_LIB, 1,
-         [Define if using Solaris thread debugging.])
-         CONFIG_OBS="${CONFIG_OBS} sol-thread.o"
-         CONFIG_SRCS="${CONFIG_SRCS} sol-thread.c"
-         AC_CHECK_LIB(dl, dlopen)
-	 CONFIG_LDFLAGS="${CONFIG_LDFLAGS} $RDYNAMIC"
-	 # Sun randomly tweaked the prototypes in <proc_service.h>
-	 # at one point.
-	 AC_MSG_CHECKING(if <proc_service.h> is old)
-	 AC_CACHE_VAL(gdb_cv_proc_service_is_old,[
-	    AC_TRY_COMPILE([
-		#include <proc_service.h>
-		ps_err_e ps_pdwrite
-		    (struct ps_prochandle*, psaddr_t, const void*, size_t);
-	    ],, gdb_cv_proc_service_is_old=no,
-	        gdb_cv_proc_service_is_old=yes)
-	 ])
-	 AC_MSG_RESULT($gdb_cv_proc_service_is_old)
-	 if test $gdb_cv_proc_service_is_old = yes; then
-	    AC_DEFINE(PROC_SERVICE_IS_OLD, 1,
-            [Define if <proc_service.h> on solaris uses int instead of
-             size_t, and assorted other type changes.])
-	 fi
-      else
-         AC_MSG_RESULT(no)
-      fi
-      ;;
    aix*)
       AC_MSG_CHECKING(for AiX thread debugging library)
-      AC_CACHE_VAL(gdb_cv_have_aix_thread_debug,
-                   [AC_TRY_COMPILE([#include <sys/pthdebug.h>],
-                                   [#ifndef PTHDB_VERSION_3
-                                    #error
-                                    #endif],
-                                   gdb_cv_have_aix_thread_debug=yes,
-                                   gdb_cv_have_aix_thread_debug=no)])
+      AC_CACHE_VAL(
+	[gdb_cv_have_aix_thread_debug],
+	[AC_COMPILE_IFELSE(
+	   [AC_LANG_PROGRAM(
+	      [#include <sys/pthdebug.h>],
+	      [#ifndef PTHDB_VERSION_3
+	       #error
+	       #endif]
+	    )],
+	   [gdb_cv_have_aix_thread_debug=yes],
+	   [gdb_cv_have_aix_thread_debug=no]
+	 )]
+      )
       AC_MSG_RESULT($gdb_cv_have_aix_thread_debug)
-      if test $gdb_cv_have_aix_thread_debug = yes; then
+      if test "$gdb_cv_have_aix_thread_debug" = yes; then
          CONFIG_SRCS="${CONFIG_SRCS} aix-thread.c"
          CONFIG_OBS="${CONFIG_OBS} aix-thread.o"
          LIBS="$LIBS -lpthdebug"
@@ -1788,33 +1718,44 @@ fi
 dnl See if we have a thread_db header file that has TD_NOTALLOC and
 dnl other error codes.
 if test "x$ac_cv_header_thread_db_h" = "xyes"; then
-   AC_CACHE_CHECK([whether <thread_db.h> has TD_NOTALLOC],
-                  gdb_cv_thread_db_h_has_td_notalloc,
-     AC_TRY_COMPILE(
-       [#include <thread_db.h>],
-       [int i = TD_NOTALLOC;],
-       gdb_cv_thread_db_h_has_td_notalloc=yes,
-       gdb_cv_thread_db_h_has_td_notalloc=no
-     )
-   )
-   AC_CACHE_CHECK([whether <thread_db.h> has TD_VERSION],
-                  gdb_cv_thread_db_h_has_td_version,
-     AC_TRY_COMPILE(
-       [#include <thread_db.h>],
-       [int i = TD_VERSION;],
-       gdb_cv_thread_db_h_has_td_version=yes,
-       gdb_cv_thread_db_h_has_td_version=no
-     )
-   )
-   AC_CACHE_CHECK([whether <thread_db.h> has TD_NOTLS],
-                  gdb_cv_thread_db_h_has_td_notls,
-     AC_TRY_COMPILE(
-       [#include <thread_db.h>],
-       [int i = TD_NOTLS;],
-       gdb_cv_thread_db_h_has_td_notls=yes,
-       gdb_cv_thread_db_h_has_td_notls=no
-     )
-   )
+  AC_CACHE_CHECK(
+    [whether <thread_db.h> has TD_NOTALLOC],
+    [gdb_cv_thread_db_h_has_td_notalloc],
+    [AC_COMPILE_IFELSE(
+       [AC_LANG_PROGRAM(
+	  [#include <thread_db.h>],
+	  [int i = TD_NOTALLOC;]
+	)],
+       [gdb_cv_thread_db_h_has_td_notalloc=yes],
+       [gdb_cv_thread_db_h_has_td_notalloc=no]
+     )]
+  )
+
+  AC_CACHE_CHECK(
+    [whether <thread_db.h> has TD_VERSION],
+    [gdb_cv_thread_db_h_has_td_version],
+    [AC_COMPILE_IFELSE(
+       [AC_LANG_PROGRAM(
+	  [#include <thread_db.h>],
+	  [int i = TD_VERSION;]
+	)],
+       [gdb_cv_thread_db_h_has_td_version=yes],
+       [gdb_cv_thread_db_h_has_td_version=no]
+     )]
+  )
+
+  AC_CACHE_CHECK(
+    [whether <thread_db.h> has TD_NOTLS],
+    [gdb_cv_thread_db_h_has_td_notls],
+    [AC_COMPILE_IFELSE(
+       [AC_LANG_PROGRAM(
+	  [#include <thread_db.h>],
+	  [int i = TD_NOTLS;]
+	)],
+       [gdb_cv_thread_db_h_has_td_notls=yes],
+       [gdb_cv_thread_db_h_has_td_notls=no]
+     )]
+  )
 fi
 if test "x$gdb_cv_thread_db_h_has_td_notalloc" = "xyes"; then
   AC_DEFINE(THREAD_DB_HAS_TD_NOTALLOC, 1,
@@ -1829,46 +1770,6 @@ if test "x$gdb_cv_thread_db_h_has_td_notls" = "xyes"; then
             [Define if <thread_db.h> has the TD_NOTLS error code.])
 fi
 
-dnl See if we have a sys/syscall header file that has __NR_tkill.
-if test "x$ac_cv_header_sys_syscall_h" = "xyes"; then
-   AC_CACHE_CHECK([whether <sys/syscall.h> has __NR_tkill],
-                  gdb_cv_sys_syscall_h_has_tkill,
-     AC_TRY_COMPILE(
-       [#include <sys/syscall.h>],
-       [int i = __NR_tkill;],
-       gdb_cv_sys_syscall_h_has_tkill=yes,
-       gdb_cv_sys_syscall_h_has_tkill=no
-     )
-   )
-fi
-dnl See if we can issue tkill syscall.
-if test "x$gdb_cv_sys_syscall_h_has_tkill" = "xyes" && test "x$ac_cv_func_syscall" = "xyes"; then
-  AC_DEFINE(HAVE_TKILL_SYSCALL, 1, [Define if you support the tkill syscall.])
-fi
-
-dnl Check if we can disable the virtual address space randomization.
-dnl The functionality of setarch -R.
-AC_CHECK_DECLS([ADDR_NO_RANDOMIZE],,, [#include <sys/personality.h>])
-define([PERSONALITY_TEST], [AC_LANG_PROGRAM([#include <sys/personality.h>], [
-#      if !HAVE_DECL_ADDR_NO_RANDOMIZE
-#       define ADDR_NO_RANDOMIZE 0x0040000
-#      endif
-       /* Test the flag could be set and stays set.  */
-       personality (personality (0xffffffff) | ADDR_NO_RANDOMIZE);
-       if (!(personality (personality (0xffffffff)) & ADDR_NO_RANDOMIZE))
-	   return 1])])
-AC_RUN_IFELSE([PERSONALITY_TEST],
-	      [have_personality=true],
-	      [have_personality=false],
-	      [AC_LINK_IFELSE([PERSONALITY_TEST],
-			      [have_personality=true],
-			      [have_personality=false])])
-if $have_personality
-then
-    AC_DEFINE([HAVE_PERSONALITY], 1,
-	      [Define if you support the personality syscall.])
-fi
-
 dnl Set the host's .gdbinit filename.
 case $host_os in
   go32* | *djgpp*)
@@ -1879,6 +1780,9 @@ case $host_os in
     ;;
 esac
 AC_DEFINE_UNQUOTED(GDBINIT,"$gdbinit",[The .gdbinit filename.])
+
+dnl Set the host's .gdbearlyinit filename
+AC_DEFINE_UNQUOTED(GDBEARLYINIT,".gdbearlyinit",[The .gdbearlyinit filename.])
 
 dnl Handle optional features that can be enabled.
 
@@ -1900,91 +1804,17 @@ GDB_AC_DEFINE_RELOCATABLE(TARGET_SYSTEM_ROOT, sysroot, ${ac_define_dir})
 GDB_AC_WITH_DIR(SYSTEM_GDBINIT, system-gdbinit,
     [automatically load a system-wide gdbinit file],
     [])
+GDB_AC_WITH_DIR(SYSTEM_GDBINIT_DIR, system-gdbinit-dir,
+    [automatically load system-wide gdbinit files from this directory],
+    [])
 
-AC_ARG_ENABLE(werror,
-  AS_HELP_STRING([--enable-werror], [treat compile warnings as errors]),
-  [case "${enableval}" in
-     yes | y) ERROR_ON_WARNING="yes" ;;
-     no | n)  ERROR_ON_WARNING="no" ;;
-     *) AC_MSG_ERROR(bad value ${enableval} for --enable-werror) ;;
-   esac])
-
-# Enable -Werror by default when using gcc.  Turn it off for releases.
-if test "${GCC}" = yes -a -z "${ERROR_ON_WARNING}" && $development; then
-    ERROR_ON_WARNING=yes
-fi
-
-WERROR_CFLAGS=""
-if test "${ERROR_ON_WARNING}" = yes ; then
-    WERROR_CFLAGS="-Werror"
-fi
-
-build_warnings="-Wall -Wdeclaration-after-statement -Wpointer-arith \
--Wpointer-sign \
--Wno-unused -Wunused-value -Wunused-function \
--Wno-switch -Wno-char-subscripts -Wmissing-prototypes \
--Wdeclaration-after-statement -Wempty-body -Wmissing-parameter-type \
--Wold-style-declaration -Wold-style-definition"
-
-# Enable -Wno-format by default when using gcc on mingw since many
-# GCC versions complain about %I64.
-case "${host}" in
-  *-*-mingw32*) build_warnings="$build_warnings -Wno-format" ;;
-  *) build_warnings="$build_warnings -Wformat-nonliteral" ;;
-esac
-
-AC_ARG_ENABLE(build-warnings,
-AS_HELP_STRING([--enable-build-warnings], [enable build-time compiler warnings if gcc is used]),
-[case "${enableval}" in
-  yes)	;;
-  no)	build_warnings="-w";;
-  ,*)   t=`echo "${enableval}" | sed -e "s/,/ /g"`
-        build_warnings="${build_warnings} ${t}";;
-  *,)   t=`echo "${enableval}" | sed -e "s/,/ /g"`
-        build_warnings="${t} ${build_warnings}";;
-  *)    build_warnings=`echo "${enableval}" | sed -e "s/,/ /g"`;;
-esac
-if test x"$silent" != x"yes" && test x"$build_warnings" != x""; then
-  echo "Setting compiler warning flags = $build_warnings" 6>&1
-fi])dnl
-AC_ARG_ENABLE(gdb-build-warnings,
-AS_HELP_STRING([--enable-gdb-build-warnings], [enable GDB specific build-time compiler warnings if gcc is used]),
-[case "${enableval}" in
-  yes)	;;
-  no)	build_warnings="-w";;
-  ,*)   t=`echo "${enableval}" | sed -e "s/,/ /g"`
-        build_warnings="${build_warnings} ${t}";;
-  *,)   t=`echo "${enableval}" | sed -e "s/,/ /g"`
-        build_warnings="${t} ${build_warnings}";;
-  *)    build_warnings=`echo "${enableval}" | sed -e "s/,/ /g"`;;
-esac
-if test x"$silent" != x"yes" && test x"$build_warnings" != x""; then
-  echo "Setting GDB specific compiler warning flags = $build_warnings" 6>&1
-fi])dnl
-WARN_CFLAGS=""
-if test "x${build_warnings}" != x -a "x$GCC" = xyes
-then
-    AC_MSG_CHECKING(compiler warning flags)
-    # Separate out the -Werror flag as some files just cannot be
-    # compiled with it enabled.
-    for w in ${build_warnings}; do
-	case $w in
-	-Werr*) WERROR_CFLAGS=-Werror ;;
-	*) # Check that GCC accepts it
-	    saved_CFLAGS="$CFLAGS"
-	    CFLAGS="$CFLAGS $w"
-	    AC_TRY_COMPILE([],[],WARN_CFLAGS="${WARN_CFLAGS} $w",)
-	    CFLAGS="$saved_CFLAGS"
-	esac
-    done
-    AC_MSG_RESULT(${WARN_CFLAGS} ${WERROR_CFLAGS})
-fi
-AC_SUBST(WARN_CFLAGS)
-AC_SUBST(WERROR_CFLAGS)
+AM_GDB_COMPILER_TYPE
+AM_GDB_WARNINGS
+AM_GDB_UBSAN
 
 # In the Cygwin environment, we need some additional flags.
 AC_CACHE_CHECK([for cygwin], gdb_cv_os_cygwin,
-[AC_EGREP_CPP(lose, [
+[AC_EGREP_CPP(^lose$, [
 #if defined (__CYGWIN__) || defined (__CYGWIN32__)
 lose
 #endif],[gdb_cv_os_cygwin=yes],[gdb_cv_os_cygwin=no])])
@@ -1996,12 +1826,13 @@ case ${host} in
   *go32* ) SER_HARDWIRE=ser-go32.o ;;
   *djgpp* ) SER_HARDWIRE=ser-go32.o ;;
   *mingw32*) SER_HARDWIRE="ser-base.o ser-tcp.o ser-mingw.o" ;;
+  *) SER_HARDWIRE="$SER_HARDWIRE ser-uds.o" ;;
 esac
 AC_SUBST(SER_HARDWIRE)
 
 # libreadline needs libuser32.a in a cygwin environment
 WIN32LIBS=
-if test x$gdb_cv_os_cygwin = xyes; then
+if test x"$gdb_cv_os_cygwin" = xyes; then
     WIN32LIBS="-luser32"
     case "${target}" in
 	*cygwin*) WIN32LIBS="$WIN32LIBS -limagehlp"
@@ -2010,23 +1841,15 @@ if test x$gdb_cv_os_cygwin = xyes; then
 fi
 
 # The ser-tcp.c module requires sockets.
-case ${host} in
-  *mingw32*)
-    AC_DEFINE(USE_WIN32API, 1,
-              [Define if we should use the Windows API, instead of the 
-	       POSIX API.  On Windows, we use the Windows API when 
-	       building for MinGW, but the POSIX API when building 
-	       for Cygwin.])
-    WIN32LIBS="$WIN32LIBS -lws2_32"
-    ;;
-esac	    
-AC_SUBST(WIN32LIBS)
+# Note that WIN32APILIBS is set by GDB_AC_COMMON.
+WIN32LIBS="$WIN32LIBS $WIN32APILIBS"
 
 # Add ELF support to GDB, but only if BFD includes ELF support.
 GDB_AC_CHECK_BFD([for ELF support in BFD], gdb_cv_var_elf,
                  [bfd_get_elf_phdr_upper_bound (NULL)], elf-bfd.h)
-if test $gdb_cv_var_elf = yes; then
-  CONFIG_OBS="$CONFIG_OBS elfread.o stap-probe.o"
+if test "$gdb_cv_var_elf" = yes; then
+  CONFIG_OBS="$CONFIG_OBS elfread.o stap-probe.o dtrace-probe.o \
+		gcore-elf.o elf-none-tdep.o"
   AC_DEFINE(HAVE_ELF, 1,
 	    [Define if ELF support should be included.])
   # -ldl is provided by bfd/Makfile.am (LIBDL) <PLUGINS>.
@@ -2038,22 +1861,15 @@ fi
 # Add macho support to GDB, but only if BFD includes it.
 GDB_AC_CHECK_BFD([for Mach-O support in BFD], gdb_cv_var_macho,
                  [bfd_mach_o_lookup_command (NULL, 0, NULL)], mach-o.h)
-if test $gdb_cv_var_macho = yes; then
+if test "$gdb_cv_var_macho" = yes; then
   CONFIG_OBS="$CONFIG_OBS machoread.o"
-fi
-
-# Add SOM support to GDB, but only if BFD includes it.
-GDB_AC_CHECK_BFD([for SOM support in BFD], gdb_cv_var_som,
-                 [bfd_som_attach_aux_hdr (NULL, 0, NULL)], som.h)
-if test $gdb_cv_var_som = yes; then
-  CONFIG_OBS="$CONFIG_OBS somread.o"
 fi
 
 # Add any host-specific objects to GDB.
 CONFIG_OBS="${CONFIG_OBS} ${gdb_host_obs}"
 
 # If building on ELF, look for lzma support for embedded compressed debug info.
-if test $gdb_cv_var_elf = yes; then
+if test "$gdb_cv_var_elf" = yes; then
   AC_ARG_WITH(lzma,
     AS_HELP_STRING([--with-lzma], [support lzma compression (auto/yes/no)]),
     [], [with_lzma=auto])
@@ -2131,7 +1947,7 @@ if test "${enable_gdbtk}" = "yes"; then
           # If building tcl in the same src tree, private headers
           # are not needed, but we need to be sure to use the right
           # headers library
-	  TCL_INCLUDE="-I${TCL_SRC_DIR}/generic"          
+	  TCL_INCLUDE="-I${TCL_SRC_DIR}/generic"
           TCL_LIBRARY="${TCL_BUILD_LIB_SPEC}"
           TCL_DEPS="../tcl/${configdir}${TCL_LIB_FILE}"
         fi
@@ -2144,7 +1960,7 @@ if test "${enable_gdbtk}" = "yes"; then
         # Check for in-tree Tk
         intree="no"
         if test "${TK_SRC_DIR}" = "${topdir}/tk"; then
-          intree="yes" 
+          intree="yes"
         fi
 
         # Find Tk private headers
@@ -2182,7 +1998,7 @@ if test "${enable_gdbtk}" = "yes"; then
 	CONFIG_INSTALL="${CONFIG_INSTALL} install-gdbtk"
 	CONFIG_UNINSTALL="${CONFIG_UNINSTALL} uninstall-gdbtk"
 
-	if test x$gdb_cv_os_cygwin = xyes; then
+	if test x"$gdb_cv_os_cygwin" = xyes; then
 	  WIN32LIBS="${WIN32LIBS} -lshell32 -lgdi32 -lcomdlg32 -ladvapi32"
 	  WIN32LDAPP="-Wl,--subsystem,console"
 	  CONFIG_OBS="${CONFIG_OBS} gdbres.o"
@@ -2201,8 +2017,8 @@ AC_SUBST(GDBTK_SRC_DIR)
 
 AC_PATH_X
 
-# Unlike the sim directory, whether a simulator is linked is controlled by 
-# presence of a gdb_sim definition in the target configure.tgt entry.  
+# Unlike the sim directory, whether a simulator is linked is controlled by
+# presence of a gdb_sim definition in the target configure.tgt entry.
 # This code just checks for a few cases where we'd like to ignore those
 # definitions, even when they're present in the '.mt' file.  These cases
 # are when --disable-sim is specified, or if the simulator directory is
@@ -2229,7 +2045,14 @@ if test "${ignore_sim}" = "false"; then
   if test x"${gdb_sim}" != x ; then
     SIM="${gdb_sim}"
     SIM_OBS="remote-sim.o"
-    AC_DEFINE(WITH_SIM, 1, [Define if the simulator is being linked in.])
+
+    # Some tdep code should only be compiled in when the ppc sim is
+    # built.  PR sim/13418.
+    case $target in
+      powerpc*-*-*)
+	AC_DEFINE(WITH_PPC_SIM, 1, [Define if the PPC simulator is being linked in.])
+	;;
+    esac
   fi
 fi
 AC_SUBST(SIM)
@@ -2258,77 +2081,50 @@ if test "${host}" != "${target}"; then
 fi
 AC_SUBST(target_subdir)
 
-frags=
+# Import nat definitions.
+nat_makefile_frag=/dev/null
 if test "${gdb_native}" = "yes"; then
-  host_makefile_frag=${srcdir}/config/${gdb_host_cpu}/${gdb_host}.mh
-  if test ! -f ${host_makefile_frag}; then
-    AC_MSG_ERROR("*** Gdb does not support native target ${host}")
-  fi
-  frags="$frags $host_makefile_frag"
-else
-  host_makefile_frag=/dev/null
+  . ${srcdir}/configure.nat
+  nativefile=$NAT_FILE
 fi
 
-AC_SUBST_FILE(host_makefile_frag)
-AC_SUBST(frags)
-
-changequote(,)dnl
-if test "${gdb_native}" = "yes"; then
-# We pick this up from the host configuration file (.mh) because we
-# do not have a native configuration Makefile fragment.
-nativefile=`sed -n '
-s/NAT_FILE[ 	]*=[ 	]*\([^ 	]*\)/\1/p
-' ${host_makefile_frag}`
-fi
-changequote([,])
+AC_SUBST(NAT_FILE)
+AC_SUBST(NATDEPFILES)
+AC_SUBST(NAT_CDEPS)
+AC_SUBST(LOADLIBES)
+AC_SUBST(MH_CFLAGS)
+AC_SUBST(XM_CLIBS)
+AC_SUBST(NAT_GENERATED_FILES)
+AC_SUBST(HAVE_NATIVE_GCORE_HOST)
+AC_SUBST_FILE(nat_makefile_frag)
 
 if test x"${gdb_osabi}" != x ; then
     AC_DEFINE_UNQUOTED(GDB_OSABI_DEFAULT, $gdb_osabi,
 		       [Define to the default OS ABI for this configuration.])
 fi
 
-# Enable multi-ice-gdb-server.
-AC_ARG_ENABLE(multi-ice,
-AS_HELP_STRING([--enable-multi-ice], [build the multi-ice-gdb-server]),
-  [case $enableval in
-    yes | no)
-      ;;
-    *) AC_MSG_ERROR([bad value $enableval for --enable-multi-ice]) ;;
-  esac])
-if test "x$enable_multi_ice" = xyes; then
-   AC_CONFIG_SUBDIRS(multi-ice)
+# Setup possible use of libbacktrace.
+AC_ARG_ENABLE([libbacktrace],
+	      [AS_HELP_STRING([--enable-libbacktrace],
+			      [use libbacktrace to write a backtrace after a fatal signal.])],
+	      [GDB_CHECK_YES_NO_VAL([$enableval], [--enable-libbacktrace])],
+	      [enable_libbacktrace=yes])
+
+if test "${enable_libbacktrace}" = "yes"; then
+  LIBBACKTRACE_INC="-I$srcdir/../libbacktrace/ -I../libbacktrace/"
+  LIBBACKTRACE_LIB=../libbacktrace/libbacktrace.la
+  AC_DEFINE(HAVE_LIBBACKTRACE, 1, [Define if libbacktrace is being used.])
+else
+  LIBBACKTRACE_INC=
+  LIBBACKTRACE_LIB=
 fi
 
-AC_ARG_ENABLE(gdbserver,
-AS_HELP_STRING([--enable-gdbserver],
-               [automatically build gdbserver (yes/no/auto, default is auto)]),
-[case "${enableval}" in
-  yes| no|auto) ;;
-  *) AC_MSG_ERROR(bad value ${enableval} for --enable-gdbserver option) ;;
-esac],[enable_gdbserver=auto])
-
-# We only build gdbserver automatically in a native configuration, and
-# only if the user did not explicitly disable its build.
-if test "$gdb_native" = "yes" -a "$enable_gdbserver" != "no"; then
-  AC_MSG_CHECKING(whether gdbserver is supported on this host)
-  if test "x$build_gdbserver" = xyes; then
-    AC_MSG_RESULT(yes)
-    AC_CONFIG_SUBDIRS(gdbserver)
-    gdbserver_build_enabled=yes
-  else
-    AC_MSG_RESULT(no)
-  fi
-fi
-
-# If the user explicitly request the gdbserver to be built, verify that
-# we were in fact able to enable it.
-if test "$enable_gdbserver" = "yes" -a "$gdbserver_build_enabled" != "yes"; then
-  AC_MSG_ERROR(Automatic gdbserver build is not supported for this configuration)
-fi
+AC_SUBST(LIBBACKTRACE_INC)
+AC_SUBST(LIBBACKTRACE_LIB)
 
 # Check for babeltrace and babeltrace-ctf
 AC_ARG_WITH(babeltrace,
-  AC_HELP_STRING([--with-babeltrace], [include babeltrace support (auto/yes/no)]),
+  AS_HELP_STRING([--with-babeltrace], [include babeltrace support (auto/yes/no)]),
   [], [with_babeltrace=auto])
 AC_MSG_CHECKING([whether to use babeltrace])
 AC_MSG_RESULT([$with_babeltrace])
@@ -2352,7 +2148,9 @@ else
 			struct bt_ctf_event *event = NULL;
 			const struct bt_definition *scope;
 
-			scope = bt_ctf_get_top_level_scope (event, 
+			pos->type = BT_SEEK_BEGIN;
+			bt_iter_set_pos (bt_ctf_get_iter (NULL), pos);
+			scope = bt_ctf_get_top_level_scope (event,
 			      				   BT_STREAM_EVENT_HEADER);
 		        bt_ctf_get_uint64 (bt_ctf_get_field (event, scope, "id"));
 			])
@@ -2367,25 +2165,44 @@ else
   fi
 fi
 
-# If nativefile (NAT_FILE) is not set in config/*/*.m[ht] files, we link
-# to an empty version.
+GCC_ENABLE([libctf], [yes], [], [Handle .ctf type-info sections])
+if test "${enable_libctf}" = yes; then
+  AC_DEFINE(ENABLE_LIBCTF, 1, [Handle .ctf type-info sections])
+  LIBCTF="../libctf/libctf.la"
+  CTF_DEPS="../libctf/libctf.la"
+else
+  LIBCTF=
+  CTF_DEPS=
+fi
+AC_SUBST(LIBCTF)
+AC_SUBST(CTF_DEPS)
 
-files=
-links=
+# If nativefile (NAT_FILE) is not set in configure.nat, we link to an
+# empty version.
 
+NM_H=
 rm -f nm.h
 if test "${nativefile}" != ""; then
     case "${nativefile}" in
       nm-*.h ) GDB_NM_FILE="config/${gdb_host_cpu}/${nativefile}" ;;
       * ) GDB_NM_FILE="${nativefile}"
     esac
-    files="${files} ${GDB_NM_FILE}"
-    links="${links} nm.h"
+    AC_CONFIG_LINKS([nm.h:$GDB_NM_FILE], [echo > stamp-nmh],
+                    [GDB_NM_FILE=$GDB_NM_FILE])
     AC_DEFINE_UNQUOTED(GDB_NM_FILE, "${GDB_NM_FILE}", [nativefile])
+    NM_H=nm.h
 fi
 AC_SUBST(GDB_NM_FILE)
+AC_SUBST(NM_H)
 
-AC_LINK_FILES($files, $links)
+dnl Add dependency for xsltproc if building with maintainer-mode enabled.
+AC_PATH_PROGS(XSLTPROC, xsltproc, missing)
+if test "x$USE_MAINTAINER_MODE" = xyes; then
+  if test "${XSLTPROC}" = missing; then
+    AC_MSG_ERROR(unable to find xsltproc.  maintainer-mode requires xsltproc.)
+  fi
+fi
+AC_SUBST(XSLTPROC)
 
 dnl Check for exe extension set on certain hosts (e.g. Win32)
 AC_EXEEXT
@@ -2395,26 +2212,14 @@ dnl  At the moment, we just assume it's UTF-8.
 AC_DEFINE(GDB_DEFAULT_HOST_CHARSET, "UTF-8",
           [Define to be a string naming the default host character set.])
 
-# Undo the $ec_script escaping suitable for Makefile.
-transform=`echo "$program_transform_name" | sed -e 's/[\\$][\\$]/\\$/g'`
-GDB_TRANSFORM_NAME=`echo gdb | sed -e "$transform"`
-if test "x$GDB_TRANSFORM_NAME" = x; then
-  GDB_TRANSFORM_NAME=gdb
-fi
-AC_SUBST(GDB_TRANSFORM_NAME)
-GCORE_TRANSFORM_NAME=`echo gcore | sed -e "$transform"`
-if test "x$GCORE_TRANSFORM_NAME" = x; then
-  GCORE_TRANSFORM_NAME=gcore
-fi
-AC_SUBST(GCORE_TRANSFORM_NAME)
-AC_CONFIG_FILES([gcore], [chmod +x gcore])
-
-AC_OUTPUT(Makefile gdb-gdb.gdb doc/Makefile data-directory/Makefile,
-[
-case x$CONFIG_HEADERS in
-xconfig.h:config.in)
-echo > stamp-h ;;
-esac
+GDB_AC_SELFTEST([
+  CONFIG_OBS="$CONFIG_OBS \$(SELFTESTS_OBS)"
+  CONFIG_SRCS="$CONFIG_SRCS \$(SELFTESTS_SRCS)"
 ])
 
-exit 0
+GDB_AC_TRANSFORM([gdb], [GDB_TRANSFORM_NAME])
+GDB_AC_TRANSFORM([gcore], [GCORE_TRANSFORM_NAME])
+AC_CONFIG_FILES([gcore], [chmod +x gcore])
+AC_CONFIG_FILES([Makefile gdb-gdb.gdb gdb-gdb.py doc/Makefile data-directory/Makefile])
+
+AC_OUTPUT

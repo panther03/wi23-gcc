@@ -1,6 +1,6 @@
 /* Blackfin External Bus Interface Unit (EBIU) SDRAM Controller (SDC) Model.
 
-   Copyright (C) 2010-2013 Free Software Foundation, Inc.
+   Copyright (C) 2010-2023 Free Software Foundation, Inc.
    Contributed by Analog Devices, Inc.
 
    This file is part of simulators.
@@ -18,7 +18,8 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "config.h"
+/* This must come before any other includes.  */
+#include "defs.h"
 
 #include "sim-main.h"
 #include "devices.h"
@@ -56,13 +57,17 @@ bfin_ebiu_sdc_io_write_buffer (struct hw *me, const void *source,
   bu32 *value32p;
   void *valuep;
 
+  /* Invalid access mode is higher priority than missing register.  */
+  if (!dv_bfin_mmr_require_16_32 (me, addr, nr_bytes, true))
+    return 0;
+
   if (nr_bytes == 4)
     value = dv_load_4 (source);
   else
     value = dv_load_2 (source);
 
   mmr_off = addr - sdc->base;
-  valuep = (void *)((unsigned long)sdc + mmr_base() + mmr_off);
+  valuep = (void *)((uintptr_t)sdc + mmr_base() + mmr_off);
   value16p = valuep;
   value32p = valuep;
 
@@ -77,21 +82,25 @@ bfin_ebiu_sdc_io_write_buffer (struct hw *me, const void *source,
     case mmr_offset(sdbctl):
       if (sdc->type == 561)
 	{
-	  dv_bfin_mmr_require_32 (me, addr, nr_bytes, true);
+	  if (!dv_bfin_mmr_require_32 (me, addr, nr_bytes, true))
+	    return 0;
 	  *value32p = value;
 	}
       else
 	{
-	  dv_bfin_mmr_require_16 (me, addr, nr_bytes, true);
+	  if (!dv_bfin_mmr_require_16 (me, addr, nr_bytes, true))
+	    return 0;
 	  *value16p = value;
 	}
       break;
     case mmr_offset(sdrrc):
-      dv_bfin_mmr_require_16 (me, addr, nr_bytes, true);
+      if (!dv_bfin_mmr_require_16 (me, addr, nr_bytes, true))
+	return 0;
       *value16p = value;
       break;
     case mmr_offset(sdstat):
-      dv_bfin_mmr_require_16 (me, addr, nr_bytes, true);
+      if (!dv_bfin_mmr_require_16 (me, addr, nr_bytes, true))
+	return 0;
       /* XXX: Some bits are W1C ...  */
       break;
     }
@@ -109,8 +118,12 @@ bfin_ebiu_sdc_io_read_buffer (struct hw *me, void *dest,
   bu16 *value16p;
   void *valuep;
 
+  /* Invalid access mode is higher priority than missing register.  */
+  if (!dv_bfin_mmr_require_16_32 (me, addr, nr_bytes, false))
+    return 0;
+
   mmr_off = addr - sdc->base;
-  valuep = (void *)((unsigned long)sdc + mmr_base() + mmr_off);
+  valuep = (void *)((uintptr_t)sdc + mmr_base() + mmr_off);
   value16p = valuep;
   value32p = valuep;
 
@@ -124,18 +137,21 @@ bfin_ebiu_sdc_io_read_buffer (struct hw *me, void *dest,
     case mmr_offset(sdbctl):
       if (sdc->type == 561)
 	{
-	  dv_bfin_mmr_require_32 (me, addr, nr_bytes, false);
+	  if (!dv_bfin_mmr_require_32 (me, addr, nr_bytes, false))
+	    return 0;
 	  dv_store_4 (dest, *value32p);
 	}
       else
 	{
-	  dv_bfin_mmr_require_16 (me, addr, nr_bytes, false);
+	  if (!dv_bfin_mmr_require_16 (me, addr, nr_bytes, false))
+	    return 0;
 	  dv_store_2 (dest, *value16p);
 	}
       break;
     case mmr_offset(sdrrc):
     case mmr_offset(sdstat):
-      dv_bfin_mmr_require_16 (me, addr, nr_bytes, false);
+      if (!dv_bfin_mmr_require_16 (me, addr, nr_bytes, false))
+	return 0;
       dv_store_2 (dest, *value16p);
       break;
     }

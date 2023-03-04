@@ -1,5 +1,5 @@
 /* BFD support for the Altera Nios II processor.
-   Copyright (C) 2012, 2013 Free Software Foundation, Inc.
+   Copyright (C) 2012-2023 Free Software Foundation, Inc.
    Contributed by Nigel Gray (ngray@altera.com).
    Contributed by Mentor Graphics, Inc.
 
@@ -24,21 +24,52 @@
 #include "bfd.h"
 #include "libbfd.h"
 
-#define N(BITS_WORD, BITS_ADDR, NUMBER, PRINT, DEFAULT, NEXT)		\
+static const bfd_arch_info_type *
+nios2_compatible (const bfd_arch_info_type *a,
+		  const bfd_arch_info_type *b)
+{
+  if (a->arch != b->arch)
+    return NULL;
+
+  if (a->bits_per_word != b->bits_per_word)
+    return NULL;
+
+  if (a->mach == bfd_mach_nios2)
+    return a;
+  else if (b->mach == bfd_mach_nios2)
+    return b;
+  else if (a->mach != b->mach)
+    return NULL;
+
+  return a;
+}
+
+#define N(NUMBER, PRINT, DEFAULT, NEXT)			\
   {							\
-    BITS_WORD, /*  bits in a word */			\
-    BITS_ADDR, /* bits in an address */			\
-    8,	/* 8 bits in a byte */				\
+    32, /* Bits in a word.  */				\
+    32, /* Bits in an address.  */			\
+    8,	/* Bits in a byte.  */				\
     bfd_arch_nios2,					\
     NUMBER,						\
     "nios2",						\
     PRINT,						\
     3,							\
     DEFAULT,						\
-    bfd_default_compatible,				\
+    nios2_compatible,					\
     bfd_default_scan,					\
-    bfd_arch_default_fill,			       	\
-    NEXT						\
+    bfd_arch_default_fill,				\
+    NEXT,						\
+    0 /* Maximum offset of a reloc from the start of an insn.  */ \
   }
 
-const bfd_arch_info_type bfd_nios2_arch = N (32, 32, 0, "nios2", TRUE, NULL);
+#define NIOS2R1_NEXT &arch_info_struct[0]
+#define NIOS2R2_NEXT &arch_info_struct[1]
+
+static const bfd_arch_info_type arch_info_struct[2] =
+{
+  N (bfd_mach_nios2r1, "nios2:r1", false, NIOS2R2_NEXT),
+  N (bfd_mach_nios2r2, "nios2:r2", false, NULL),
+};
+
+const bfd_arch_info_type bfd_nios2_arch =
+  N (bfd_mach_nios2, "nios2", true, NIOS2R1_NEXT);

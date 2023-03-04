@@ -13,9 +13,8 @@
  * Ignores `locale' stuff.
  */
 __uint64_t
-_DEFUN (_strtoufix64_r, (rptr, nptr, endptr),
-	struct _reent *rptr _AND
-	_CONST char *nptr _AND
+_strtoufix64_r (struct _reent *rptr,
+	const char *nptr,
 	char **endptr)
 {
   union long_double_union ldbl;
@@ -32,10 +31,10 @@ _DEFUN (_strtoufix64_r, (rptr, nptr, endptr),
     {
       if (ld_type == 1)
 	{
-	  rptr->_errno = EDOM;
+	  _REENT_ERRNO(rptr) = EDOM;
 	  return 0;
 	}
-      rptr->_errno = ERANGE;
+      _REENT_ERRNO(rptr) = ERANGE;
       if (word0(ldbl) & Sign_bit)
 	return 0;
       return ULONG_LONG_MAX;
@@ -61,14 +60,14 @@ _DEFUN (_strtoufix64_r, (rptr, nptr, endptr),
   /* check for saturation */
   if (sign)
     {
-      rptr->_errno = ERANGE;
+      _REENT_ERRNO(rptr) = ERANGE;
       return 0;
     }
   else
     {
       if (exp > 0 || (exp == 0 && tmp >= 0x8000000000000000LL))
 	{
-	  rptr->_errno = ERANGE;
+	  _REENT_ERRNO(rptr) = ERANGE;
 	  return ULONG_LONG_MAX;
 	}
     }
@@ -90,7 +89,7 @@ _DEFUN (_strtoufix64_r, (rptr, nptr, endptr),
 	  /* if rounding causes carry, then saturation has occurred */
 	  if (result < tmp)
 	    {
-	      rptr->_errno = ERANGE;
+	      _REENT_ERRNO(rptr) = ERANGE;
 	      return ULONG_LONG_MAX;
 	    }
 	}
@@ -104,8 +103,7 @@ _DEFUN (_strtoufix64_r, (rptr, nptr, endptr),
 #ifndef _REENT_ONLY
 
 __uint64_t
-_DEFUN (strtoufix64, (s, ptr, base),
-	_CONST char *s _AND
+strtoufix64 (const char *s,
 	char **ptr)
 {
   return _strtoufix64_r (_REENT, s, ptr);

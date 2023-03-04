@@ -17,18 +17,10 @@ INDEX
 INDEX
 	gmtime_r
 
-ANSI_SYNOPSIS
+SYNOPSIS
 	#include <time.h>
 	struct tm *gmtime(const time_t *<[clock]>);
 	struct tm *gmtime_r(const time_t *<[clock]>, struct tm *<[res]>);
-
-TRAD_SYNOPSIS
-	#include <time.h>
-	struct tm *gmtime(<[clock]>)
-	const time_t *<[clock]>;
-	struct tm *gmtime_r(<[clock]>, <[res]>)
-	const time_t *<[clock]>;
-	struct tm *<[res]>;
 
 DESCRIPTION
 <<gmtime>> takes the time at <[clock]> representing the number
@@ -55,11 +47,14 @@ ANSI C requires <<gmtime>>.
 
 #define _GMT_OFFSET 0
 
+#ifdef _REENT_THREAD_LOCAL
+_Thread_local struct __tm _tls_localtime_buf;
+#endif
+
 #ifndef _REENT_ONLY
 
 struct tm *
-_DEFUN (gmtime, (tim_p),
-	_CONST time_t * tim_p)
+gmtime (const time_t * tim_p)
 {
   struct _reent *reent = _REENT;
 

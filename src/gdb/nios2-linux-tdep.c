@@ -1,5 +1,5 @@
 /* Target-dependent code for GNU/Linux on Nios II.
-   Copyright (C) 2012-2013 Free Software Foundation, Inc.
+   Copyright (C) 2012-2023 Free Software Foundation, Inc.
    Contributed by Mentor Graphics, Inc.
 
    This file is part of GDB.
@@ -19,8 +19,6 @@
 
 #include "defs.h"
 #include "frame.h"
-#include "gdb_assert.h"
-#include "gdb_string.h"
 #include "osabi.h"
 #include "solib-svr4.h"
 #include "trad-frame.h"
@@ -31,8 +29,7 @@
 #include "linux-tdep.h"
 #include "glibc-tdep.h"
 #include "nios2-tdep.h"
-
-#include "features/nios2-linux.c"
+#include "gdbarch.h"
 
 /* Core file and register set support.  */
 
@@ -51,6 +48,11 @@ static const int reg_offsets[NIOS2_NUM_REGS] =
   -1, -1, -1, -1, -1, -1, -1, -1
 };
 
+/* General register set size.  Should match sizeof (struct pt_regs) +
+   sizeof (struct switch_stack) from the NIOS2 Linux kernel patch.  */
+
+#define NIOS2_GREGS_SIZE (4 * 34)
+
 /* Implement the supply_regset hook for core files.  */
 
 static void
@@ -58,7 +60,7 @@ nios2_supply_gregset (const struct regset *regset,
 		      struct regcache *regcache,
 		      int regnum, const void *gregs_buf, size_t len)
 {
-  const gdb_byte *gregs = gregs_buf;
+  const gdb_byte *gregs = (const gdb_byte *) gregs_buf;
   int regno;
   static const gdb_byte zero_buf[4] = {0, 0, 0, 0};
 
@@ -66,70 +68,78 @@ nios2_supply_gregset (const struct regset *regset,
     if (regnum == -1 || regnum == regno)
       {
 	if (reg_offsets[regno] != -1)
-	  regcache_raw_supply (regcache, regno,
-			       gregs + 4 * reg_offsets[regno]);
+	  regcache->raw_supply (regno, gregs + 4 * reg_offsets[regno]);
 	else
-	  regcache_raw_supply (regcache, regno, zero_buf);
+	  regcache->raw_supply (regno, zero_buf);
       }
 }
 
-static struct regset nios2_core_regset =
+/* Implement the collect_regset hook for core files.  */
+
+static void
+nios2_collect_gregset (const struct regset *regset,
+		       const struct regcache *regcache,
+		       int regnum, void *gregs_buf, size_t len)
+{
+  gdb_byte *gregs = (gdb_byte *) gregs_buf;
+  int regno;
+
+  for (regno = NIOS2_Z_REGNUM; regno <= NIOS2_MPUACC_REGNUM; regno++)
+    if (regnum == -1 || regnum == regno)
+      {
+	if (reg_offsets[regno] != -1)
+	  regcache->raw_collect (regno, gregs + 4 * reg_offsets[regno]);
+      }
+}
+
+static const struct regset nios2_core_regset =
 {
   NULL,
   nios2_supply_gregset,
-  NULL,
-  NULL
+  nios2_collect_gregset
 };
 
-/* Implement the regset_from_core_section gdbarch method.  */
-
-static const struct regset *
-nios2_regset_from_core_section (struct gdbarch *gdbarch,
-                                const char *sect_name, size_t sect_size)
-{
-  if (strcmp (sect_name, ".reg") == 0)
-    return &nios2_core_regset;
-
-  return NULL;
-}
-
-/* Initialize a trad-frame cache corresponding to the tramp-frame.
-   FUNC is the address of the instruction TRAMP[0] in memory.  */
+/* Iterate over core file register note sections.  */
 
 static void
-nios2_linux_sigreturn_init (const struct tramp_frame *self,
-			    struct frame_info *next_frame,
-			    struct trad_frame_cache *this_cache,
-			    CORE_ADDR func)
+nios2_iterate_over_regset_sections (struct gdbarch *gdbarch,
+				    iterate_over_regset_sections_cb *cb,
+				    void *cb_data,
+				    const struct regcache *regcache)
 {
-  CORE_ADDR base = func + 16;
-  int i;
-
-  for (i = 0; i < 8; i++)
-    trad_frame_set_reg_addr (this_cache, i + 8, base + i * 4);
-  for (i = 0; i < 7; i++)
-    trad_frame_set_reg_addr (this_cache, i + 1, base + (i + 8) * 4);
-  trad_frame_set_reg_addr (this_cache, NIOS2_RA_REGNUM, base + 16 * 4);
-  trad_frame_set_reg_addr (this_cache, NIOS2_FP_REGNUM, base + 17 * 4);
-  trad_frame_set_reg_addr (this_cache, NIOS2_SP_REGNUM, base + 18 * 4);
-  trad_frame_set_reg_addr (this_cache, NIOS2_GP_REGNUM, base + 19 * 4);
-  trad_frame_set_reg_addr (this_cache, NIOS2_ESTATUS_REGNUM, base + 20 * 4);
-  trad_frame_set_reg_addr (this_cache, NIOS2_PC_REGNUM, base + 21 * 4);
-
-  /* Save a frame ID.  */
-  trad_frame_set_id (this_cache, frame_id_build (base, func));
+  cb (".reg", NIOS2_GREGS_SIZE, NIOS2_GREGS_SIZE, &nios2_core_regset, NULL,
+      cb_data);
 }
 
 /* Initialize a trad-frame cache corresponding to the tramp-frame.
-   FUNC is the address of the instruction TRAMP[0] in memory.  */
+   FUNC is the address of the instruction TRAMP[0] in memory.
+
+   This ABI is not documented.  It corresponds to rt_setup_ucontext in
+   the kernel arch/nios2/kernel/signal.c file.
+
+   The key points are:
+   - The kernel creates a trampoline at the hard-wired address 0x1044.
+   - The stack pointer points to an object of type struct rt_sigframe.
+     The definition of this structure is not exported from the kernel.
+     The register save area is located at offset 152 bytes (as determined
+     by inspection of the stack contents in the debugger), and the
+     registers are saved as r1-r23, ra, fp, gp, ea, sp.
+
+   This interface was implemented with kernel version 3.19 (the first
+   official mainline kernel).  Older unofficial kernel versions used
+   incompatible conventions; we do not support those here.  */
+
+#define NIOS2_SIGRETURN_TRAMP_ADDR 0x1044
+#define NIOS2_SIGRETURN_REGSAVE_OFFSET 152
 
 static void
 nios2_linux_rt_sigreturn_init (const struct tramp_frame *self,
-			       struct frame_info *next_frame,
+			       frame_info_ptr next_frame,
 			       struct trad_frame_cache *this_cache,
 			       CORE_ADDR func)
 {
-  CORE_ADDR base = func + 41 * 4;
+  CORE_ADDR sp = get_frame_register_unsigned (next_frame, NIOS2_SP_REGNUM);
+  CORE_ADDR base = sp + NIOS2_SIGRETURN_REGSAVE_OFFSET;
   int i;
 
   for (i = 0; i < 23; i++)
@@ -144,25 +154,30 @@ nios2_linux_rt_sigreturn_init (const struct tramp_frame *self,
   trad_frame_set_id (this_cache, frame_id_build (base, func));
 }
 
-static struct tramp_frame nios2_linux_sigreturn_tramp_frame =
+/* Trampoline for sigreturn.  This has the form
+     movi r2, __NR_rt_sigreturn
+     trap 0
+   appropriately encoded for R1 or R2.  */
+
+static struct tramp_frame nios2_r1_linux_rt_sigreturn_tramp_frame =
 {
   SIGTRAMP_FRAME,
   4,
   {
-    { 0x00800004 | (119 << 6), -1 },  /* movi r2,__NR_sigreturn */
-    { 0x003b683a, -1 },               /* trap */
+    { MATCH_R1_MOVI | SET_IW_I_B (2) | SET_IW_I_IMM16 (139), ULONGEST_MAX },
+    { MATCH_R1_TRAP | SET_IW_R_IMM5 (0), ULONGEST_MAX},
     { TRAMP_SENTINEL_INSN }
   },
-  nios2_linux_sigreturn_init
+  nios2_linux_rt_sigreturn_init
 };
 
-static struct tramp_frame nios2_linux_rt_sigreturn_tramp_frame =
+static struct tramp_frame nios2_r2_linux_rt_sigreturn_tramp_frame =
 {
   SIGTRAMP_FRAME,
   4,
   {
-    { 0x00800004 | (173 << 6), -1 },  /* movi r2,__NR_rt_sigreturn */
-    { 0x003b683a, -1 },               /* trap */
+    { MATCH_R2_MOVI | SET_IW_F2I16_B (2) | SET_IW_F2I16_IMM16 (139), ULONGEST_MAX },
+    { MATCH_R2_TRAP | SET_IW_X2L5_IMM5 (0), ULONGEST_MAX},
     { TRAMP_SENTINEL_INSN }
   },
   nios2_linux_rt_sigreturn_init
@@ -172,18 +187,29 @@ static struct tramp_frame nios2_linux_rt_sigreturn_tramp_frame =
    instruction to be executed.  */
 
 static CORE_ADDR
-nios2_linux_syscall_next_pc (struct frame_info *frame)
+nios2_linux_syscall_next_pc (frame_info_ptr frame,
+			     const struct nios2_opcode *op)
 {
   CORE_ADDR pc = get_frame_pc (frame);
   ULONGEST syscall_nr = get_frame_register_unsigned (frame, NIOS2_R2_REGNUM);
 
   /* If we are about to make a sigreturn syscall, use the unwinder to
      decode the signal frame.  */
-  if (syscall_nr == 119 /* sigreturn */
-      || syscall_nr == 173 /* rt_sigreturn */)
+  if (syscall_nr == 139 /* rt_sigreturn */)
     return frame_unwind_caller_pc (frame);
 
-  return pc + NIOS2_OPCODE_SIZE;
+  return pc + op->size;
+}
+
+/* Return true if PC is a kernel helper, a function mapped by the kernel
+   into user space on an unwritable page.  Currently the only such function
+   is __kuser_cmpxchg at 0x1004.  See arch/nios2/kernel/entry.S in the Linux
+   kernel sources and sysdeps/unix/sysv/linux/nios2/atomic-machine.h in
+   GLIBC.  */
+static bool
+nios2_linux_is_kernel_helper (CORE_ADDR pc)
+{
+  return pc == 0x1004;
 }
 
 /* Hook function for gdbarch_register_osabi.  */
@@ -191,43 +217,47 @@ nios2_linux_syscall_next_pc (struct frame_info *frame)
 static void
 nios2_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
 {
-  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  nios2_gdbarch_tdep *tdep = gdbarch_tdep<nios2_gdbarch_tdep> (gdbarch);
 
-  linux_init_abi (info, gdbarch);
+  linux_init_abi (info, gdbarch, 0);
 
   /* Shared library handling.  */
   set_gdbarch_skip_trampoline_code (gdbarch, find_solib_trampoline_target);
   set_gdbarch_skip_solib_resolver (gdbarch, glibc_skip_solib_resolver);
 
   set_solib_svr4_fetch_link_map_offsets (gdbarch,
-					 svr4_ilp32_fetch_link_map_offsets);
+					 linux_ilp32_fetch_link_map_offsets);
   /* Enable TLS support.  */
   set_gdbarch_fetch_tls_load_module_address (gdbarch,
-                                             svr4_fetch_objfile_link_map);
+					     svr4_fetch_objfile_link_map);
   /* Core file support.  */
-  set_gdbarch_regset_from_core_section (gdbarch,
-                                        nios2_regset_from_core_section);
+  set_gdbarch_iterate_over_regset_sections
+    (gdbarch, nios2_iterate_over_regset_sections);
   /* Linux signal frame unwinders.  */
-  tramp_frame_prepend_unwinder (gdbarch,
-                                &nios2_linux_sigreturn_tramp_frame);
-  tramp_frame_prepend_unwinder (gdbarch,
-                                &nios2_linux_rt_sigreturn_tramp_frame);
+  if (gdbarch_bfd_arch_info (gdbarch)->mach == bfd_mach_nios2r2)
+    tramp_frame_prepend_unwinder (gdbarch,
+				  &nios2_r2_linux_rt_sigreturn_tramp_frame);
+  else
+    tramp_frame_prepend_unwinder (gdbarch,
+				  &nios2_r1_linux_rt_sigreturn_tramp_frame);
 
   tdep->syscall_next_pc = nios2_linux_syscall_next_pc;
+  tdep->is_kernel_helper = nios2_linux_is_kernel_helper;
 
   /* Index of target address word in glibc jmp_buf.  */
   tdep->jb_pc = 10;
 }
 
-/* Provide a prototype to silence -Wmissing-prototypes.  */
-
-extern initialize_file_ftype _initialize_nios2_linux_tdep;
-
+void _initialize_nios2_linux_tdep ();
 void
-_initialize_nios2_linux_tdep (void)
+_initialize_nios2_linux_tdep ()
 {
-  gdbarch_register_osabi (bfd_arch_nios2, 0, GDB_OSABI_LINUX,
-                          nios2_linux_init_abi);
 
-  initialize_tdesc_nios2_linux ();
+  const struct bfd_arch_info *arch_info;
+
+  for (arch_info = bfd_lookup_arch (bfd_arch_nios2, 0);
+       arch_info != NULL;
+       arch_info = arch_info->next)
+    gdbarch_register_osabi (bfd_arch_nios2, arch_info->mach,
+			    GDB_OSABI_LINUX, nios2_linux_init_abi);
 }

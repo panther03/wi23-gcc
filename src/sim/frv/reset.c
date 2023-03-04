@@ -1,5 +1,5 @@
 /* frv simulator support code
-   Copyright (C) 1999-2013 Free Software Foundation, Inc.
+   Copyright (C) 1999-2023 Free Software Foundation, Inc.
    Contributed by Red Hat.
 
 This file is part of the GNU simulators.
@@ -17,11 +17,15 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
+/* This must come before any other includes.  */
+#include "defs.h"
+
 #define WANT_CPU
 #define WANT_CPU_FRVBF
 
 #include "sim-main.h"
 #include "bfd.h"
+#include "cgen-mem.h"
 
 /* Initialize the frv simulator.  */
 void
@@ -105,7 +109,7 @@ frv_term (SIM_DESC sd)
      then turn it off again.  This is the only place we can currently gain
      control to do this.  */
   if (frv_interrupt_state.timer.enabled && ! frv_save_profile_model_p)
-    sim_profile_set_option (current_state, "-model", PROFILE_MODEL_IDX, "0");
+    sim_profile_set_option (sd, "-model", PROFILE_MODEL_IDX, "0");
 }
 
 /* Perform a power on reset.  */

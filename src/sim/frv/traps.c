@@ -1,5 +1,5 @@
 /* frv trap support
-   Copyright (C) 1999-2013 Free Software Foundation, Inc.
+   Copyright (C) 1999-2023 Free Software Foundation, Inc.
    Contributed by Red Hat.
 
 This file is part of the GNU simulators.
@@ -17,17 +17,23 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
+/* This must come before any other includes.  */
+#include "defs.h"
+
 #define WANT_CPU frvbf
 #define WANT_CPU_FRVBF
 
 #include "sim-main.h"
-#include "targ-vals.h"
 #include "cgen-engine.h"
 #include "cgen-par.h"
 #include "sim-fpu.h"
+#include "sim-signal.h"
+#include "sim/callback.h"
 
 #include "bfd.h"
 #include "libiberty.h"
+
+#include <stdlib.h>
 
 CGEN_ATTR_VALUE_ENUM_TYPE frv_current_fm_slot;
 
@@ -65,7 +71,7 @@ frv_sim_engine_halt_hook (SIM_DESC sd, SIM_CPU *current_cpu, sim_cia cia)
 {
   int i;
   if (current_cpu != NULL)
-    CIA_SET (current_cpu, cia);
+    CPU_PC_SET (current_cpu, cia);
 
   /* Invalidate the insn and data caches of all cpus.  */
   for (i = 0; i < MAX_NR_PROCESSORS; ++i)
@@ -110,18 +116,6 @@ frv_itrap (SIM_CPU *current_cpu, PCADDR pc, USI base, SI offset)
   host_callback *cb = STATE_CALLBACK (sd);
   USI num = ((base + offset) & 0x7f) + 0x80;
 
-#ifdef SIM_HAVE_BREAKPOINTS
-  /* Check for breakpoints "owned" by the simulator first, regardless
-     of --environment.  */
-  if (num == TRAP_BREAKPOINT)
-    {
-      /* First try sim-break.c.  If it's a breakpoint the simulator "owns"
-	 it doesn't return.  Otherwise it returns and let's us try.  */
-      sim_handle_breakpoint (sd, current_cpu, pc);
-      /* Fall through.  */
-    }
-#endif
-
   if (STATE_ENVIRONMENT (sd) == OPERATING_ENVIRONMENT)
     {
       frv_queue_software_interrupt (current_cpu, num);
@@ -139,13 +133,13 @@ frv_itrap (SIM_CPU *current_cpu, PCADDR pc, USI base, SI offset)
 	s.arg2 = GET_H_GR (9);
 	s.arg3 = GET_H_GR (10);
 
-	if (s.func == TARGET_SYS_exit)
+	if (cb_target_to_host_syscall (cb, s.func) == CB_SYS_exit)
 	  {
 	    sim_engine_halt (sd, current_cpu, NULL, pc, sim_exited, s.arg1);
 	  }
 
-	s.p1 = (PTR) sd;
-	s.p2 = (PTR) current_cpu;
+	s.p1 = sd;
+	s.p2 = current_cpu;
 	s.read_mem = syscall_read_mem;
 	s.write_mem = syscall_write_mem;
 	cb_syscall (cb, &s);
@@ -282,7 +276,8 @@ frv_mtrap (SIM_CPU *current_cpu)
 
   /* Check the status of media exceptions in MSR0.  */
   SI msr = GET_MSR (0);
-  if (GET_MSR_AOVF (msr) || GET_MSR_MTT (msr) && STATE_ARCHITECTURE (sd)->mach != bfd_mach_fr550)
+  if (GET_MSR_AOVF (msr)
+      || (GET_MSR_MTT (msr) && STATE_ARCHITECTURE (sd)->mach != bfd_mach_fr550))
     frv_queue_program_interrupt (current_cpu, FRV_MP_EXCEPTION);
 }
 
@@ -290,25 +285,14 @@ frv_mtrap (SIM_CPU *current_cpu)
 void
 frv_break (SIM_CPU *current_cpu)
 {
-  IADDR pc;
   SIM_DESC sd = CPU_STATE (current_cpu);
-
-#ifdef SIM_HAVE_BREAKPOINTS
-  /* First try sim-break.c.  If it's a breakpoint the simulator "owns"
-     it doesn't return.  Otherwise it returns and let's us try.  */
-  pc = GET_H_PC ();
-  sim_handle_breakpoint (sd, current_cpu, pc);
-  /* Fall through.  */
-#endif
 
   if (STATE_ENVIRONMENT (sd) != OPERATING_ENVIRONMENT)
     {
       /* Invalidate the insn cache because the debugger will presumably
 	 replace the breakpoint insn with the real one.  */
-#ifndef SIM_HAVE_BREAKPOINTS
-      pc = GET_H_PC ();
-#endif
-      sim_engine_halt (sd, current_cpu, NULL, pc, sim_stopped, SIM_SIGTRAP);
+      sim_engine_halt (sd, current_cpu, NULL, NULL_CIA, sim_stopped,
+		       SIM_SIGTRAP);
     }
 
   frv_queue_break_interrupt (current_cpu);
@@ -763,7 +747,7 @@ frvbf_check_acc_range (SIM_CPU *current_cpu, SI regno)
   /* Only applicable to fr550 */
   SIM_DESC sd = CPU_STATE (current_cpu);
   if (STATE_ARCHITECTURE (sd)->mach != bfd_mach_fr550)
-    return;
+    return 0;
 
   /* On the fr550, media insns in slots 0 and 2 can only access
      accumulators acc0-acc3. Insns in slots 1 and 3 can only access
@@ -940,8 +924,8 @@ frvbf_commit (SIM_CPU *current_cpu, SI target_index, BI is_float)
     NE_flag = GET_NE_FLAG (NE_flags, target_index);
   else
     {
-      NE_flag =
-	hi_available && NE_flags[0] != 0 || lo_available && NE_flags[1] != 0;
+      NE_flag = (hi_available && NE_flags[0] != 0)
+		|| (lo_available && NE_flags[1] != 0);
     }
 
   /* Always clear the appropriate NE flags.  */

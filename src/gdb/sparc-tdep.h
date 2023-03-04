@@ -1,6 +1,6 @@
 /* Target-dependent code for SPARC.
 
-   Copyright (C) 2003-2013 Free Software Foundation, Inc.
+   Copyright (C) 2003-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -20,7 +20,15 @@
 #ifndef SPARC_TDEP_H
 #define SPARC_TDEP_H 1
 
-struct frame_info;
+#include "gdbarch.h"
+
+#define SPARC_CORE_REGISTERS                      \
+  "g0", "g1", "g2", "g3", "g4", "g5", "g6", "g7", \
+  "o0", "o1", "o2", "o3", "o4", "o5", "sp", "o7", \
+  "l0", "l1", "l2", "l3", "l4", "l5", "l6", "l7", \
+  "i0", "i1", "i2", "i3", "i4", "i5", "fp", "i7"
+
+class frame_info_ptr;
 struct gdbarch;
 struct regcache;
 struct regset;
@@ -28,7 +36,7 @@ struct trad_frame_saved_reg;
 
 /* Register offsets for the general-purpose register set.  */
 
-struct sparc_gregset
+struct sparc_gregmap
 {
   int r_psr_offset;
   int r_pc_offset;
@@ -41,7 +49,7 @@ struct sparc_gregset
   int r_y_size;
 };
 
-struct sparc_fpregset
+struct sparc_fpregmap
 {
   int r_f0_offset;
   int r_fsr_offset;
@@ -49,43 +57,51 @@ struct sparc_fpregset
 
 /* SPARC architecture-specific information.  */
 
-struct gdbarch_tdep
+struct sparc_gdbarch_tdep : gdbarch_tdep_base
 {
   /* Register numbers for the PN and nPC registers.  The definitions
      for (64-bit) UltraSPARC differ from the (32-bit) SPARC
      definitions.  */
-  int pc_regnum;
-  int npc_regnum;
+  int pc_regnum = 0;
+  int npc_regnum = 0;
+
+  /* Register names specific for architecture (sparc32 vs. sparc64) */
+  const char * const *fpu_register_names = nullptr;
+  size_t fpu_registers_num = 0;
+  const char * const *cp0_register_names = nullptr;
+  size_t cp0_registers_num = 0;
 
   /* Register sets.  */
-  struct regset *gregset;
-  size_t sizeof_gregset;
-  struct regset *fpregset;
-  size_t sizeof_fpregset;
+  const struct regset *gregset = nullptr;
+  size_t sizeof_gregset = 0;
+  const struct regset *fpregset = nullptr;
+  size_t sizeof_fpregset = 0;
 
   /* Offset of saved PC in jmp_buf.  */
-  int jb_pc_offset;
+  int jb_pc_offset = 0;
 
   /* Size of an Procedure Linkage Table (PLT) entry, 0 if we shouldn't
      treat the PLT special when doing prologue analysis.  */
-  size_t plt_entry_size;
+  size_t plt_entry_size = 0;
 
   /* Alternative location for trap return.  Used for single-stepping.  */
-  CORE_ADDR (*step_trap) (struct frame_info *frame, unsigned long insn);
+  CORE_ADDR (*step_trap) (frame_info_ptr frame, unsigned long insn)
+    = nullptr;
 
   /* ISA-specific data types.  */
-  struct type *sparc_psr_type;
-  struct type *sparc_fsr_type;
-  struct type *sparc64_pstate_type;
-  struct type *sparc64_fsr_type;
-  struct type *sparc64_fprs_type;
+  struct type *sparc_psr_type = nullptr;
+  struct type *sparc_fsr_type = nullptr;
+  struct type *sparc64_ccr_type = nullptr;
+  struct type *sparc64_pstate_type = nullptr;
+  struct type *sparc64_fsr_type = nullptr;
+  struct type *sparc64_fprs_type = nullptr;
 };
 
 /* Register numbers of various important registers.  */
 
 enum sparc_regnum
 {
-  SPARC_G0_REGNUM,		/* %g0 */
+  SPARC_G0_REGNUM = 0,		/* %g0 */
   SPARC_G1_REGNUM,
   SPARC_G2_REGNUM,
   SPARC_G3_REGNUM,
@@ -140,9 +156,12 @@ enum sparc32_regnum
   SPARC32_NPC_REGNUM,		/* %npc */
   SPARC32_FSR_REGNUM,		/* %fsr */
   SPARC32_CSR_REGNUM,		/* %csr */
+};
 
-  /* Pseudo registers.  */
-  SPARC32_D0_REGNUM,		/* %d0 */
+/* Pseudo registers.  */
+enum sparc32_pseudo_regnum
+{
+  SPARC32_D0_REGNUM = 0,	/* %d0 */
   SPARC32_D30_REGNUM		/* %d30 */
   = SPARC32_D0_REGNUM + 15
 };
@@ -188,14 +207,15 @@ extern CORE_ADDR sparc_analyze_prologue (struct gdbarch *gdbarch,
 					 struct sparc_frame_cache *cache);
 
 extern struct sparc_frame_cache *
-  sparc_frame_cache (struct frame_info *this_frame, void **this_cache);
+  sparc_frame_cache (frame_info_ptr this_frame, void **this_cache);
 
 extern struct sparc_frame_cache *
-  sparc32_frame_cache (struct frame_info *this_frame, void **this_cache);
+  sparc32_frame_cache (frame_info_ptr this_frame, void **this_cache);
+
+extern int
+  sparc_stack_frame_destroyed_p (struct gdbarch *gdbarch, CORE_ADDR pc);
 
 
-
-extern int sparc_software_single_step (struct frame_info *frame);
 
 extern void sparc_supply_rwindow (struct regcache *regcache,
 				  CORE_ADDR sp, int regnum);
@@ -203,50 +223,45 @@ extern void sparc_collect_rwindow (const struct regcache *regcache,
 				   CORE_ADDR sp, int regnum);
 
 /* Register offsets for SunOS 4.  */
-extern const struct sparc_gregset sparc32_sunos4_gregset;
-extern const struct sparc_fpregset sparc32_sunos4_fpregset;
-extern const struct sparc_fpregset sparc32_bsd_fpregset;
+extern const struct sparc_gregmap sparc32_sunos4_gregmap;
+extern const struct sparc_fpregmap sparc32_sunos4_fpregmap;
+extern const struct sparc_fpregmap sparc32_bsd_fpregmap;
 
-extern void sparc32_supply_gregset (const struct sparc_gregset *gregset,
+extern void sparc32_supply_gregset (const struct sparc_gregmap *gregmap,
 				    struct regcache *regcache,
 				    int regnum, const void *gregs);
-extern void sparc32_collect_gregset (const struct sparc_gregset *gregset,
+extern void sparc32_collect_gregset (const struct sparc_gregmap *gregmap,
 				     const struct regcache *regcache,
 				     int regnum, void *gregs);
-extern void sparc32_supply_fpregset (const struct sparc_fpregset *fpregset,
+extern void sparc32_supply_fpregset (const struct sparc_fpregmap *fpregmap,
 				     struct regcache *regcache,
 				     int regnum, const void *fpregs);
-extern void sparc32_collect_fpregset (const struct sparc_fpregset *fpregset,
+extern void sparc32_collect_fpregset (const struct sparc_fpregmap *fpregmap,
 				      const struct regcache *regcache,
 				      int regnum, void *fpregs);
+
+extern int sparc_is_annulled_branch_insn (CORE_ADDR pc);
 
 /* Functions and variables exported from sparc-sol2-tdep.c.  */
 
 /* Register offsets for Solaris 2.  */
-extern const struct sparc_gregset sparc32_sol2_gregset;
-extern const struct sparc_fpregset sparc32_sol2_fpregset;
+extern const struct sparc_gregmap sparc32_sol2_gregmap;
+extern const struct sparc_fpregmap sparc32_sol2_fpregmap;
 
-extern int sparc_sol2_pc_in_sigtramp (CORE_ADDR pc, const char *name);
-
-extern const char *sparc_sol2_static_transform_name (const char *name);
-
-extern void sparc32_sol2_init_abi (struct gdbarch_info info,
-				   struct gdbarch *gdbarch);
-
-/* Functions and variables exported from sparcnbsd-tdep.c.  */
+/* Functions and variables exported from sparc-netbsd-tdep.c.  */
 
 /* Register offsets for NetBSD.  */
-extern const struct sparc_gregset sparc32nbsd_gregset;
+extern const struct sparc_gregmap sparc32nbsd_gregmap;
 
 /* Return the address of a system call's alternative return
    address.  */
-extern CORE_ADDR sparcnbsd_step_trap (struct frame_info *frame,
+extern CORE_ADDR sparcnbsd_step_trap (frame_info_ptr frame,
 				      unsigned long insn);
 
-extern void sparc32nbsd_elf_init_abi (struct gdbarch_info info,
-				      struct gdbarch *gdbarch);
+extern void sparc32nbsd_init_abi (struct gdbarch_info info,
+				  struct gdbarch *gdbarch);
 
 extern struct trad_frame_saved_reg *
-  sparc32nbsd_sigcontext_saved_regs (struct frame_info *next_frame);
+  sparc32nbsd_sigcontext_saved_regs (frame_info_ptr next_frame);
 
 #endif /* sparc-tdep.h */

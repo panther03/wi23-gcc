@@ -1,4 +1,4 @@
-# Copyright 2008-2013 Free Software Foundation, Inc.
+# Copyright 2008-2023 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -19,31 +19,55 @@
 # the functions entry would be ignored.  Make sure the bug doesn't
 # reappear.
 
-if ![supports_reverse] {
-    return
-}
+# The test sets a breakpoint with the command break *void_func to set a
+# breakpoint on the first instruction of the function.  The issue is on
+# PowerPC it uses Global Entry Points (GEP) and Local Entry Points (LEP).
+# The GEP is the first instruction in the function.  It sets up register
+# r2 and then reaches the LEP.
+#
+#   <void_func>:
+#  	lis     r2,4098        <- GEP
+#   	addi    r2,r2,32512
+#   	mflr    r0             <- LEP
+#   	std     r0,16(r1)
+#        ....
 
-standard_testfile finish-reverse.c
+#
+# The command break *void_func sets the breakpoint on the GEP.  Calling
+# the function with void_func() will enter the function via the LEP.  So,
+# this test needs to use a function pointer to call void_func() so the
+# function will be entered via the GEP to work as designed on PowerPC in
+# addition to non-PowerPC systems.  On non-PowerPC systems, the GEP and LEP
+# are the same.
 
-if { [prepare_for_testing $testfile.exp "$testfile" $srcfile] } {
+require supports_reverse
+
+standard_testfile
+
+if { [prepare_for_testing "failed to prepare" "$testfile" $srcfile] } {
     return -1
 }
 
-if ![runto_main] then {
-    fail "Can't run to main"
+if {![runto_main]} {
     return 0
 }
 
 if [supports_process_record] {
     # Activate process record/replay
-    gdb_test_no_output "record" "Turn on process record"
+    gdb_test_no_output "record" "turn on process record"
 }
 
+# Start the test.
 set breakloc [gdb_get_line_number "VOID FUNC" "$srcfile"]
-gdb_test "break void_func" \
-    "Breakpoint $decimal at .*/$srcfile, line $breakloc\." \
+gdb_test "tbreak void_func" \
+    "Temporary breakpoint $decimal at .*$srcfile, line $breakloc\." \
     "set breakpoint on void_func"
-gdb_continue_to_breakpoint "void_func" ".*/$srcfile:$breakloc.*"
+gdb_continue_to_breakpoint "void_func" ".*$srcfile:$breakloc.*"
+
+# We stop at the brekapoint on void_func, but breakpoint on
+# *void_func will be set at the same place if function void_func doesn't
+# have prologue.  One step forward to avoid this.
+gdb_test "si"
 
 gdb_test "break \*void_func" \
     "Breakpoint $decimal at .*" \

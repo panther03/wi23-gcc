@@ -1,4 +1,4 @@
-# Copyright 2006-2013 Free Software Foundation, Inc.
+# Copyright 2006-2023 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -17,14 +17,11 @@
 
 # Do not run on AIX (where we won't be able to build the tests without
 # some surgery) or on PowerPC64 (ditto, dot symbols).
-if {[istarget *-*-aix*] || ![istarget "powerpc-*-*"]} then {
-    verbose "Skipping PowerPC prologue tests."
-    return
-}
+require {!istarget *-*-aix*} {istarget "powerpc-*-*"}
 
 set testfile "powerpc-prologue"
 set srcfile ${testfile}.c
-set binfile ${objdir}/${subdir}/${testfile}
+set binfile [standard_output_file ${testfile}]
 
 # Don't use "debug", so that we don't have line information for the assembly
 # fragments.
@@ -34,17 +31,14 @@ if { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable {}] !
 }
 
 
-gdb_exit
-gdb_start
-gdb_reinitialize_dir $srcdir/$subdir
-gdb_load ${binfile}
+clean_restart $binfile
 
 #
 # Run to `main' where we begin our tests.
 #
 
-if ![runto_main] then {
-    gdb_suppress_tests
+if {![runto_main]} {
+    return 0
 }
 
 # Testcase for PIC prologue.

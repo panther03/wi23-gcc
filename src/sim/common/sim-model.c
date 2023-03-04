@@ -1,5 +1,5 @@
 /* Model support.
-   Copyright (C) 1996-2013 Free Software Foundation, Inc.
+   Copyright (C) 1996-2023 Free Software Foundation, Inc.
    Contributed by Cygnus Support.
 
 This file is part of GDB, the GNU debugger.
@@ -17,15 +17,19 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
+/* This must come before any other includes.  */
+#include "defs.h"
+
+#include "bfd.h"
+#include "libiberty.h"
+
 #include "sim-main.h"
 #include "sim-model.h"
-#include "libiberty.h"
 #include "sim-options.h"
 #include "sim-io.h"
 #include "sim-assert.h"
-#include "bfd.h"
 
-static void model_set (sim_cpu *, const MODEL *);
+static void model_set (sim_cpu *, const SIM_MODEL *);
 
 static DECLARE_OPTION_HANDLER (model_option_handler);
 
@@ -59,21 +63,29 @@ model_option_handler (SIM_DESC sd, sim_cpu *cpu, int opt,
     {
     case OPTION_MODEL :
       {
-	const MODEL *model = sim_model_lookup (arg);
+	const SIM_MODEL *model = sim_model_lookup (sd, arg);
 	if (! model)
 	  {
 	    sim_io_eprintf (sd, "unknown model `%s'\n", arg);
 	    return SIM_RC_FAIL;
 	  }
+	STATE_MODEL_NAME (sd) = arg;
 	sim_model_set (sd, cpu, model);
 	break;
       }
 
     case OPTION_MODEL_INFO :
       {
-	const MACH **machp;
-	const MODEL *model;
-	for (machp = & sim_machs[0]; *machp != NULL; ++machp)
+	const SIM_MACH * const *machp;
+	const SIM_MODEL *model;
+
+	if (STATE_MACHS (sd) == NULL)
+	  {
+	    sim_io_printf (sd, "This target does not support any models\n");
+	    return SIM_RC_FAIL;
+	  }
+
+	for (machp = STATE_MACHS(sd); *machp != NULL; ++machp)
 	  {
 	    sim_io_printf (sd, "Models for architecture `%s':\n",
 			   MACH_NAME (*machp));
@@ -103,7 +115,7 @@ sim_model_install (SIM_DESC sd)
 /* Subroutine of sim_model_set to set the model for one cpu.  */
 
 static void
-model_set (sim_cpu *cpu, const MODEL *model)
+model_set (sim_cpu *cpu, const SIM_MODEL *model)
 {
   CPU_MACH (cpu) = MODEL_MACH (model);
   CPU_MODEL (cpu) = model;
@@ -115,7 +127,7 @@ model_set (sim_cpu *cpu, const MODEL *model)
    If CPU is NULL, all cpus are set to MODEL.  */
 
 void
-sim_model_set (SIM_DESC sd, sim_cpu *cpu, const MODEL *model)
+sim_model_set (SIM_DESC sd, sim_cpu *cpu, const SIM_MODEL *model)
 {
   if (! cpu)
     {
@@ -134,13 +146,16 @@ sim_model_set (SIM_DESC sd, sim_cpu *cpu, const MODEL *model)
 /* Look up model named NAME.
    Result is pointer to MODEL entry or NULL if not found.  */
 
-const MODEL *
-sim_model_lookup (const char *name)
+const SIM_MODEL *
+sim_model_lookup (SIM_DESC sd, const char *name)
 {
-  const MACH **machp;
-  const MODEL *model;
+  const SIM_MACH * const *machp;
+  const SIM_MODEL *model;
 
-  for (machp = & sim_machs[0]; *machp != NULL; ++machp)
+  if (STATE_MACHS (sd) == NULL)
+    return NULL;
+
+  for (machp = STATE_MACHS (sd); *machp != NULL; ++machp)
     {
       for (model = MACH_MODELS (*machp); MODEL_NAME (model) != NULL; ++model)
 	{
@@ -154,12 +169,15 @@ sim_model_lookup (const char *name)
 /* Look up machine named NAME.
    Result is pointer to MACH entry or NULL if not found.  */
 
-const MACH *
-sim_mach_lookup (const char *name)
+const SIM_MACH *
+sim_mach_lookup (SIM_DESC sd, const char *name)
 {
-  const MACH **machp;
+  const SIM_MACH * const *machp;
 
-  for (machp = & sim_machs[0]; *machp != NULL; ++machp)
+  if (STATE_MACHS (sd) == NULL)
+    return NULL;
+
+  for (machp = STATE_MACHS (sd); *machp != NULL; ++machp)
     {
       if (strcmp (MACH_NAME (*machp), name) == 0)
 	return *machp;
@@ -170,12 +188,15 @@ sim_mach_lookup (const char *name)
 /* Look up a machine via its bfd name.
    Result is pointer to MACH entry or NULL if not found.  */
 
-const MACH *
-sim_mach_lookup_bfd_name (const char *name)
+const SIM_MACH *
+sim_mach_lookup_bfd_name (SIM_DESC sd, const char *name)
 {
-  const MACH **machp;
+  const SIM_MACH * const *machp;
 
-  for (machp = & sim_machs[0]; *machp != NULL; ++machp)
+  if (STATE_MACHS (sd) == NULL)
+    return NULL;
+
+  for (machp = STATE_MACHS (sd); *machp != NULL; ++machp)
     {
       if (strcmp (MACH_BFD_NAME (*machp), name) == 0)
 	return *machp;
@@ -200,10 +221,12 @@ sim_model_init (SIM_DESC sd)
   cpu = STATE_CPU (sd, 0);
 
   if (! STATE_ARCHITECTURE (sd)
-      && ! CPU_MACH (cpu))
+      && ! CPU_MACH (cpu)
+      && STATE_MODEL_NAME (sd))
     {
       /* Set the default model.  */
-      const MODEL *model = sim_model_lookup (WITH_DEFAULT_MODEL);
+      const SIM_MODEL *model = sim_model_lookup (sd, STATE_MODEL_NAME (sd));
+      SIM_ASSERT (model != NULL);
       sim_model_set (sd, NULL, model);
     }
 
@@ -219,11 +242,12 @@ sim_model_init (SIM_DESC sd)
 	  return SIM_RC_FAIL;
 	}
     }
-  else if (STATE_ARCHITECTURE (sd))
+  else if (STATE_ARCHITECTURE (sd) && STATE_MACHS (sd))
     {
       /* Use the default model for the selected machine.
 	 The default model is the first one in the list.  */
-      const MACH *mach = sim_mach_lookup_bfd_name (STATE_ARCHITECTURE (sd)->printable_name);
+      const SIM_MACH *mach =
+	sim_mach_lookup_bfd_name (sd, STATE_ARCHITECTURE (sd)->printable_name);
 
       if (mach == NULL)
 	{
@@ -233,7 +257,7 @@ sim_model_init (SIM_DESC sd)
 	}
       sim_model_set (sd, NULL, MACH_MODELS (mach));
     }
-  else
+  else if (CPU_MACH (cpu))
     {
       STATE_ARCHITECTURE (sd) = bfd_scan_arch (MACH_BFD_NAME (CPU_MACH (cpu)));
     }

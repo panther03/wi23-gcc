@@ -1,5 +1,5 @@
 /* TILE-Gx ELF specific backend routines.
-   Copyright 2011 Free Software Foundation, Inc.
+   Copyright (C) 2011-2023 Free Software Foundation, Inc.
 
    This file is part of BFD, the Binary File Descriptor library.
 
@@ -40,26 +40,26 @@ tilegx_elf_copy_indirect_symbol (struct bfd_link_info *,
 				 struct elf_link_hash_entry *,
 				 struct elf_link_hash_entry *);
 
-extern bfd_boolean
+extern bool
 tilegx_elf_create_dynamic_sections (bfd *, struct bfd_link_info *);
 
-extern bfd_boolean
+extern bool
 tilegx_elf_check_relocs (bfd *, struct bfd_link_info *,
 			 asection *, const Elf_Internal_Rela *);
 
-extern bfd_boolean
+extern bool
 tilegx_elf_adjust_dynamic_symbol (struct bfd_link_info *,
 				  struct elf_link_hash_entry *);
 
-extern bfd_boolean
+extern bool
 tilegx_elf_omit_section_dynsym (bfd *,
 				struct bfd_link_info *,
 				asection *);
 
-extern bfd_boolean
+extern bool
 tilegx_elf_size_dynamic_sections (bfd *, struct bfd_link_info *);
 
-extern bfd_boolean
+extern int
 tilegx_elf_relocate_section (bfd *, struct bfd_link_info *,
 			     bfd *, asection *,
 			     bfd_byte *, Elf_Internal_Rela *,
@@ -73,27 +73,23 @@ tilegx_elf_gc_mark_hook (asection *,
 			 struct elf_link_hash_entry *,
 			 Elf_Internal_Sym *);
 
-extern bfd_boolean
-tilegx_elf_gc_sweep_hook (bfd *, struct bfd_link_info *,
-			  asection *, const Elf_Internal_Rela *);
-
 extern bfd_vma
 tilegx_elf_plt_sym_val (bfd_vma, const asection *, const arelent *);
 
-extern void
+extern bool
 tilegx_info_to_howto_rela (bfd *, arelent *, Elf_Internal_Rela *);
 
 extern int
 tilegx_additional_program_headers (bfd *, struct bfd_link_info *);
 
-extern bfd_boolean
+extern bool
 tilegx_elf_finish_dynamic_symbol (bfd *,
 				  struct bfd_link_info *,
 				  struct elf_link_hash_entry *,
 				  Elf_Internal_Sym *);
 
-extern bfd_boolean
+extern bool
 tilegx_elf_finish_dynamic_sections (bfd *, struct bfd_link_info *);
 
-extern bfd_boolean
-_bfd_tilegx_elf_merge_private_bfd_data (bfd *, bfd *);
+extern bool
+_bfd_tilegx_elf_merge_private_bfd_data (bfd *, struct bfd_link_info *);

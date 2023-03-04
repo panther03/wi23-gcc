@@ -72,10 +72,14 @@ foo:
 	bpr	%r9
 	br	%r9
 	bras	%r9,.
+	jas	%r6,.
 	brc	6,.
 	brct	6,.
+	jct	%r6,.
 	brxh	%r6,%r9,.
+	jxh	%r6,%r9,.
 	brxle	%r6,%r9,.
+	jxle	%r6,%r9,.
 	bsa	%r6,%r9
 	bsg	%r6,%r9
 	bsm	%r6,%r9
@@ -151,6 +155,7 @@ foo:
 	ed	4095(256,%r5),4095(%r10)
 	edmk	4095(256,%r5),4095(%r10)
 	efpc	%r6,%r9
+	efpc	%r6
 	epar	%r6
 	ereg	%r6,%r9
 	esar	%r6
@@ -194,6 +199,28 @@ foo:
 	jo	.
 	jp	.
 	jz	.
+	jnop	.
+	bro	.
+	brh	.
+	brp	.
+	brnle	.
+	brl	.
+	brm	.
+	brnhe	.
+	brlh	.
+	brne	.
+	brnz	.
+	bre	.
+	brz	.
+	brnlh	.
+	brhe	.
+	brnl	.
+	brnm	.
+	brle	.
+	brnh	.
+	brnp	.
+	brno	.
+	bru	.
 	kdb	%f6,4095(%r5,%r10)
 	kdbr	%f6,%f9
 	keb	%f6,4095(%r5,%r10)
@@ -366,6 +393,7 @@ foo:
 	sebr	%f6,%f9
 	ser	%f6,%f9
 	sfpc	%r6,%r9
+	sfpc	%r6
 	sh	%r6,4095(%r5,%r10)
 	sie	4095(%r5)
 	siga	4095(%r5)
@@ -435,7 +463,7 @@ foo:
 	sxbr	%f5,%f8
 	sxr	%f5,%f8
 	tar	%a6,%r9
-	tb	%r6
+	tb	%r6,%r9
 	tbdr	%r6,5,%r9
 	tbedr	%r6,5,%r9
 	tcdb	%f6,4095(%r5,%r10)
@@ -456,11 +484,11 @@ foo:
 	trap2
 	trap4	4095(%r5)
 	tre	%r6,%r9
-	troo	%r6,%r8
-	trot	%r6,%r8
+	troo	%r6,%r9
+	trot	%r6,%r9
 	trt	4095(256,%r5),4095(%r10)
-	trto	%r6,%r8
-	trtt	%r6,%r8
+	trto	%r6,%r9
+	trtt	%r6,%r9
 	ts	4095(%r5)
 	tsch	4095(%r5)
 	unpk	4095(6,%r5),4095(9,%r10)
@@ -473,3 +501,5 @@ foo:
 	xr	%r6,%r9
 	xsch
 	zap	4095(6,%r5),4095(9,%r10)
+	ipte	%r6,%r9,%r11
+	ipte	%r6,%r9,%r11,13

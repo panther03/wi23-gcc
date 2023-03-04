@@ -1,7 +1,7 @@
 /* Blackfin Parallel Port Interface (PPI) model
    For "old style" PPIs on BF53x/etc... parts.
 
-   Copyright (C) 2010-2013 Free Software Foundation, Inc.
+   Copyright (C) 2010-2023 Free Software Foundation, Inc.
    Contributed by Analog Devices, Inc.
 
    This file is part of simulators.
@@ -19,7 +19,8 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "config.h"
+/* This must come before any other includes.  */
+#include "defs.h"
 
 #include "sim-main.h"
 #include "devices.h"
@@ -85,13 +86,15 @@ bfin_ppi_io_write_buffer (struct hw *me, const void *source, int space,
   bu32 value;
   bu16 *valuep;
 
+  /* Invalid access mode is higher priority than missing register.  */
+  if (!dv_bfin_mmr_require_16 (me, addr, nr_bytes, true))
+    return 0;
+
   value = dv_load_2 (source);
   mmr_off = addr - ppi->base;
-  valuep = (void *)((unsigned long)ppi + mmr_base() + mmr_off);
+  valuep = (void *)((uintptr_t)ppi + mmr_base() + mmr_off);
 
   HW_TRACE_WRITE ();
-
-  dv_bfin_mmr_require_16 (me, addr, nr_bytes, true);
 
   switch (mmr_off)
     {
@@ -109,7 +112,7 @@ bfin_ppi_io_write_buffer (struct hw *me, const void *source, int space,
       break;
     default:
       dv_bfin_mmr_invalid (me, addr, nr_bytes, true);
-      break;
+      return 0;
     }
 
   return nr_bytes;
@@ -123,12 +126,14 @@ bfin_ppi_io_read_buffer (struct hw *me, void *dest, int space,
   bu32 mmr_off;
   bu16 *valuep;
 
+  /* Invalid access mode is higher priority than missing register.  */
+  if (!dv_bfin_mmr_require_16 (me, addr, nr_bytes, false))
+    return 0;
+
   mmr_off = addr - ppi->base;
-  valuep = (void *)((unsigned long)ppi + mmr_base() + mmr_off);
+  valuep = (void *)((uintptr_t)ppi + mmr_base() + mmr_off);
 
   HW_TRACE_READ ();
-
-  dv_bfin_mmr_require_16 (me, addr, nr_bytes, false);
 
   switch (mmr_off)
     {
@@ -141,7 +146,7 @@ bfin_ppi_io_read_buffer (struct hw *me, void *dest, int space,
       break;
     default:
       dv_bfin_mmr_invalid (me, addr, nr_bytes, false);
-      break;
+      return 0;
     }
 
   return nr_bytes;

@@ -1,5 +1,5 @@
 /* This file is tc-msp430.h
-   Copyright (C) 2002-2013 Free Software Foundation, Inc.
+   Copyright (C) 2002-2023 Free Software Foundation, Inc.
 
    Contributed by Dmitry Diky <diwil@mail.ru>
 
@@ -91,8 +91,6 @@
      of a PC relative instruction is the next instruction, so this
      macro would return the length of an instruction.  */
 
-extern long md_pcrel_from_section (struct fix *, segT);
-
 #define LISTING_WORD_SIZE 2
 /*   The number of bytes to put into a word in a listing.  This affects
      the way the bytes are clumped together in the listing.  For
@@ -116,24 +114,29 @@ extern long md_pcrel_from_section (struct fix *, segT);
    msp430_relax_frag (SEG, FRAGP, STRETCH)
 extern long msp430_relax_frag (segT, fragS *, long);
 
-#define TC_FORCE_RELOCATION_LOCAL(FIX)	\
-   msp430_force_relocation_local (FIX)
+#define TC_FORCE_RELOCATION_LOCAL(FIX)		\
+  (GENERIC_FORCE_RELOCATION_LOCAL (FIX)		\
+   || msp430_force_relocation_local (FIX))
 extern int msp430_force_relocation_local (struct fix *);
+
+/* We need to add reference symbols for .data/.bss.  */
+#define tc_frob_section(sec) msp430_frob_section (sec)
+extern void msp430_frob_section (asection *);
 
 extern int msp430_enable_relax;
 extern int msp430_enable_polys;
 
 #define tc_fix_adjustable(FIX) msp430_fix_adjustable (FIX)
-extern bfd_boolean             msp430_fix_adjustable (struct fix *);
+extern bool msp430_fix_adjustable (struct fix *);
 
-/* Allow hexadeciaml numbers with 'h' suffix.  Note that if the number
+/* Allow hexadecimal numbers with 'h' suffix.  Note that if the number
    starts with a letter it will be interpreted as a symbol name not a
    constant.  Thus "beach" is a symbol not the hex value 0xbeac.  So
    is A5A5h...  */
 #define NUMBERS_WITH_SUFFIX 1
 
-#define md_end msp430_md_end
-extern void    msp430_md_end (void);
+#define md_finish msp430_md_finish
+extern void    msp430_md_finish (void);
 
 /* Do not allow call frame debug info optimization as otherwise we could
    generate the DWARF directives without the relocs necessary to patch
@@ -143,7 +146,7 @@ extern void    msp430_md_end (void);
 /* The difference between same-section symbols may be affected by linker
    relaxation, so do not resolve such expressions in the assembler.  */
 #define md_allow_local_subtract(l,r,s) msp430_allow_local_subtract (l, r, s)
-extern bfd_boolean msp430_allow_local_subtract (expressionS *, expressionS *, segT);
+extern bool msp430_allow_local_subtract (expressionS *, expressionS *, segT);
 
 #define RELOC_EXPANSION_POSSIBLE
 #define MAX_RELOC_EXPANSION 2
@@ -155,8 +158,9 @@ extern bfd_boolean msp430_allow_local_subtract (expressionS *, expressionS *, se
    linker, but this fix is simpler, and it pretty much only affects
    object size a little bit.  */
 #define TC_FORCE_RELOCATION_SUB_SAME(FIX, SEC)	\
-  (((SEC)->flags & SEC_CODE) != 0		\
-   || ! SEG_NORMAL (SEC)			\
+  (GENERIC_FORCE_RELOCATION_SUB_SAME (FIX, SEC)	\
+   || ((SEC)->flags & SEC_CODE) != 0		\
+   || ((SEC)->flags & SEC_DEBUGGING) != 0	\
    || TC_FORCE_RELOCATION (FIX))
 
 /* We validate subtract arguments within tc_gen_reloc(),
@@ -165,4 +169,6 @@ extern bfd_boolean msp430_allow_local_subtract (expressionS *, expressionS *, se
 
 #define DWARF2_USE_FIXED_ADVANCE_PC 1
 
-#define TC_LINKRELAX_FIXUP(seg) (seg->flags & SEC_CODE)
+#define TC_LINKRELAX_FIXUP(seg) ((seg->flags & SEC_CODE) || (seg->flags & SEC_DEBUGGING))
+
+#define DWARF2_ADDR_SIZE(bfd) 4

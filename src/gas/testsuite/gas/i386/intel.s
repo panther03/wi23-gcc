@@ -205,8 +205,8 @@ foo:
  rcl    dword ptr 0x90909090[eax]
  rcl    byte ptr 0x90909090[eax], cl
  rcl    dword ptr 0x90909090[eax], cl
- aam    0xffffff90
- aad    0xffffff90
+ aam    0x90
+ aad    0x90
  xlat   byte ptr ds:[ebx]
  fcom   dword ptr 0x90909090[eax]
  fst    dword ptr 0x90909090[eax]
@@ -252,9 +252,9 @@ foo:
  wbinvd
  ud2a
  mov    eax, cr2
- mov    eax, db2
+ mov    eax, dr2
  mov    cr2, eax
- mov    db2, eax
+ mov    dr2, eax
  mov    eax, tr2
  mov    tr2, eax
  wrmsr
@@ -353,7 +353,7 @@ foo:
  lgs    edx, 0x90909090[eax]
  movzx  edx, byte ptr 0x90909090[eax]
  movzx  edx, word ptr 0x90909090[eax]
- ud2b
+ ud2
  btc    0x90909090[eax], edx
  bsf    edx, 0x90909090[eax]
  bsr    edx, 0x90909090[eax]
@@ -650,7 +650,7 @@ fdiv   QWORD PTR [ebx]
 fdivp
 fdivp  st(3)
 fdivp  st(3),st
-fdivp  st,st(3)
+fdiv  st,st(3)
 fdivr
 fdivr  st(3)
 fdivr  st,st(3)
@@ -660,7 +660,7 @@ fdivr  QWORD PTR [ebx]
 fdivrp
 fdivrp st(3)
 fdivrp st(3),st
-fdivrp st,st(3)
+fdivr st,st(3)
 fmul
 fmul	st(3)
 fmul	st,st(3)
@@ -679,7 +679,7 @@ fsub   DWORD PTR [ebx]
 fsub   QWORD PTR [ebx]
 fsubp
 fsubp  st(3)
-fsubp  st,st(3)
+fsub  st,st(3)
 fsubp  st(3),st
 fsubr  st(3)
 fsubr  st,st(3)
@@ -689,7 +689,7 @@ fsubr  QWORD PTR [ebx]
 fsubrp
 fsubrp st(3)
 fsubrp st(3),st
-fsubrp st,st(3)
+fsubr st,st(3)
 
 fidivr  word ptr [ebx]
 fidivr  dword ptr [ebx]
@@ -698,3 +698,30 @@ fidivr  dword ptr [ebx]
  cmovpo edx, 0x90909090[eax]
  cmovpe  dx, 0x90909090[eax]
  cmovpo dx, 0x90909090[eax]
+
+	lar	eax, eax
+	lar	ax, ax
+	lar	eax, word ptr [eax]
+	lar	ax, word ptr [eax]
+
+	lsl	eax, eax
+	lsl	ax, ax
+	lsl	eax, word ptr [eax]
+	lsl	ax, word ptr [eax]
+
+ # Check base/index swapping
+	.allow_index_reg
+ mov    eax, [eax+esp]
+ mov    eax, [eiz+eax]
+ vgatherdps xmm0, [xmm1+eax], xmm2
+
+	# Test that disassembly of a partial instruction shows the partial byte:
+	# https://www.sourceware.org/ml/binutils/2015-08/msg00226.html
+	.byte 0x24
+	.byte 0x2f
+	.byte 0x0f
+barn:
+        .byte 0x0f
+        .byte 0xba
+        .byte 0xe2
+        .byte 0x03

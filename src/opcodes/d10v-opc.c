@@ -1,6 +1,5 @@
 /* d10v-opc.c -- D10V opcode list
-   Copyright 1996, 1997, 1998, 1999, 2000, 2001, 2002, 2005, 2007, 2012
-   Free Software Foundation, Inc.
+   Copyright (C) 1996-2023 Free Software Foundation, Inc.
    Written by Martin Hunt, Cygnus Support
 
    This file is part of the GNU opcodes library.
@@ -20,8 +19,7 @@
    Software Foundation, 51 Franklin Street - Fifth Floor, Boston,
    MA 02110-1301, USA.  */
 
-#include "sysdep.h"
-#include <stdio.h>
+#include <stddef.h>
 #include "opcode/d10v.h"
 
 
@@ -90,8 +88,8 @@ const struct pd_reg d10v_predefined_registers[] =
   { "sp", NULL, OPERAND_SP|(OPERAND_GPR+15) },
 };
 
-int 
-d10v_reg_name_cnt()
+int
+d10v_reg_name_cnt (void)
 {
   return (sizeof(d10v_predefined_registers) / sizeof(struct pd_reg));
 }

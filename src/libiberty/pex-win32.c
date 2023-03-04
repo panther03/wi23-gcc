@@ -1,7 +1,6 @@
 /* Utilities to execute a program in a subprocess (possibly linked by pipes
    with other subprocesses), and wait for it.  Generic Win32 specialization.
-   Copyright (C) 1996, 1997, 1998, 1999, 2000, 2001, 2003, 2004, 2005, 2006
-   Free Software Foundation, Inc.
+   Copyright (C) 1996-2023 Free Software Foundation, Inc.
 
 This file is part of the libiberty library.
 Libiberty is free software; you can redistribute it and/or
@@ -370,6 +369,8 @@ argv_to_cmdline (char *const *argv)
 	      cmdline_len++;
 	    }
 	}
+      if (j == 0)
+	needs_quotes = 1;
       /* Trailing backslashes also need to be escaped because they will be
          followed by the terminating quote.  */
       if (needs_quotes)
@@ -394,6 +395,8 @@ argv_to_cmdline (char *const *argv)
               break;
             }
         }
+      if (j == 0)
+	needs_quotes = 1;
 
       if (needs_quotes)
         {
@@ -768,7 +771,7 @@ pex_win32_exec_child (struct pex_obj *obj ATTRIBUTE_UNUSED, int flags,
   OSVERSIONINFO version_info;
   STARTUPINFO si;
   PROCESS_INFORMATION pi;
-  int orig_out, orig_in, orig_err;
+  int orig_out, orig_in, orig_err = 0;
   BOOL separate_stderr = !(flags & PEX_STDERR_TO_STDOUT);
 
   /* Ensure we have inheritable descriptors to pass to the child.  */

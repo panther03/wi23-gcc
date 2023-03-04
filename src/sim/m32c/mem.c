@@ -1,6 +1,6 @@
 /* mem.c --- memory for M32C simulator.
 
-Copyright (C) 2005-2013 Free Software Foundation, Inc.
+Copyright (C) 2005-2023 Free Software Foundation, Inc.
 Contributed by Red Hat, Inc.
 
 This file is part of the GNU simulators.
@@ -18,8 +18,10 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
+/* This must come before any other includes.  */
+#include "defs.h"
 
-#include "config.h"
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,9 +29,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 #include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
-#ifdef HAVE_SYS_SELECT_H
 #include <sys/select.h>
-#endif
 #ifdef HAVE_TERMIOS_H
 #include <termios.h>
 #endif
@@ -89,7 +89,7 @@ init_mem (void)
 }
 
 static unsigned char *
-mem_ptr (address)
+mem_ptr (int address)
 {
   static int recursing = 0;
   int pt1 = (address >> (L2_BITS + OFF_BITS)) & ((1 << L1_BITS) - 1);
@@ -139,7 +139,7 @@ mcs (int isput, int bytes)
 }
 
 void
-mem_usage_stats ()
+mem_usage_stats (void)
 {
   int i, j;
   int rstart = 0;
@@ -192,7 +192,7 @@ s (int address, char *dir)
 
 #define S(d) if (trace) s(address, d)
 static void
-e ()
+e (void)
 {
   if (!trace)
     return;
@@ -205,7 +205,7 @@ e ()
 
 extern int m32c_disassemble;
 
-void
+static void
 mem_put_byte (int address, unsigned char value)
 {
   unsigned char *m;
@@ -294,7 +294,8 @@ mem_put_byte (int address, unsigned char value)
 	  }
 	else
 	  {
-	    write (m32c_console_ofd, &value, 1);
+	    if (write (m32c_console_ofd, &value, 1) != 1)
+	      printf ("write console failed: %s\n", strerror (errno));
 	  }
       }
       break;
@@ -367,16 +368,18 @@ mem_put_si (int address, unsigned long value)
 void
 mem_put_blk (int address, const void *bufptr, int nbytes)
 {
+  const unsigned char *buf = bufptr;
+
   S ("<=");
   if (enable_counting)
     mem_counters[1][1] += nbytes;
   while (nbytes--)
-    mem_put_byte (address++, *(const unsigned char *) bufptr++);
+    mem_put_byte (address++, *buf++);
   E ();
 }
 
 unsigned char
-mem_get_pc ()
+mem_get_pc (void)
 {
   unsigned char *m = mem_ptr (regs.r_pc & membus_mask);
   COUNT (0, 0);
@@ -388,7 +391,7 @@ static int console_raw = 0;
 static struct termios oattr;
 
 static int
-stdin_ready ()
+stdin_ready (void)
 {
   fd_set ifd;
   int n;
@@ -403,7 +406,7 @@ stdin_ready ()
 }
 
 void
-m32c_sim_restore_console ()
+m32c_sim_restore_console (void)
 {
   if (console_raw)
     tcsetattr (m32c_console_ifd, TCSANOW, &oattr);
@@ -443,7 +446,8 @@ mem_get_byte (int address)
     case 0x2ee:		/* m32c uart1 rx */
       {
 	char c;
-	read (m32c_console_ifd, &c, 1);
+	if (read (m32c_console_ifd, &c, 1) != 1)
+	  return 0;
 	if (m32c_console_ifd == 0 && c == 3)	/* Ctrl-C */
 	  {
 	    printf ("Ctrl-C!\n");
@@ -535,11 +539,13 @@ mem_get_si (int address)
 void
 mem_get_blk (int address, void *bufptr, int nbytes)
 {
+  char *buf = bufptr;
+
   S ("=>");
   if (enable_counting)
     mem_counters[0][1] += nbytes;
   while (nbytes--)
-    *(char *) bufptr++ = mem_get_byte (address++);
+    *buf++ = mem_get_byte (address++);
   E ();
 }
 
@@ -557,7 +563,7 @@ sign_ext (int v, int bits)
 
 #if TIMER_A
 void
-update_timer_a ()
+update_timer_a (void)
 {
   if (timer_a.bsr & 1)
     {

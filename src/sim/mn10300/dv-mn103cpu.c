@@ -1,6 +1,6 @@
 /*  This file is part of the program GDB, the GNU debugger.
     
-    Copyright (C) 1998-2013 Free Software Foundation, Inc.
+    Copyright (C) 1998-2023 Free Software Foundation, Inc.
     Contributed by Cygnus Solutions.
     
     This program is free software; you can redistribute it and/or modify
@@ -18,9 +18,15 @@
     
     */
 
+/* This must come before any other includes.  */
+#include "defs.h"
 
 #include "sim-main.h"
+#include "sim-fpu.h"
+#include "sim-signal.h"
 #include "hw-main.h"
+
+#include "mn10300-sim.h"
 
 /* DEVICE
 
@@ -111,9 +117,9 @@ struct mn103cpu {
   int pending_nmi;
   int pending_reset;
   /* the visible registers */
-  unsigned16 interrupt_vector[NR_VECTORS];
-  unsigned16 internal_memory_control;
-  unsigned16 cpu_mode;
+  uint16_t interrupt_vector[NR_VECTORS];
+  uint16_t internal_memory_control;
+  uint16_t cpu_mode;
 };
 
 
@@ -227,31 +233,31 @@ deliver_mn103cpu_interrupt (struct hw *me,
   else if (controller->pending_nmi)
     {
       controller->pending_nmi = 0;
-      store_word (SP - 4, CIA_GET (cpu));
+      store_word (SP - 4, CPU_PC_GET (cpu));
       store_half (SP - 8, PSW);
       PSW &= ~PSW_IE;
       SP = SP - 8;
-      CIA_SET (cpu, 0x40000008);
+      CPU_PC_SET (cpu, 0x40000008);
       HW_TRACE ((me, "nmi pc=0x%08lx psw=0x%04x sp=0x%08lx",
-		 (long) CIA_GET (cpu), (unsigned) PSW, (long) SP));
+		 (long) CPU_PC_GET (cpu), (unsigned) PSW, (long) SP));
     }
   else if ((controller->pending_level < EXTRACT_PSW_LM)
 	   && (PSW & PSW_IE))
     {
       /* Don't clear pending level.  Request continues to be pending
          until the interrupt controller clears/changes it */
-      store_word (SP - 4, CIA_GET (cpu));
+      store_word (SP - 4, CPU_PC_GET (cpu));
       store_half (SP - 8, PSW);
       PSW &= ~PSW_IE;
       PSW &= ~PSW_LM;
       PSW |= INSERT_PSW_LM (controller->pending_level);
       SP = SP - 8;
-      CIA_SET (cpu, 0x40000000 + controller->interrupt_vector[controller->pending_level]);
+      CPU_PC_SET (cpu, 0x40000000 + controller->interrupt_vector[controller->pending_level]);
       HW_TRACE ((me, "port-out ack %d", controller->pending_level));
       hw_port_event (me, ACK_PORT, controller->pending_level);
       HW_TRACE ((me, "int level=%d pc=0x%08lx psw=0x%04x sp=0x%08lx",
 		 controller->pending_level,
-		 (long) CIA_GET (cpu), (unsigned) PSW, (long) SP));
+		 (long) CPU_PC_GET (cpu), (unsigned) PSW, (long) SP));
     }
 
   if (controller->pending_level < 7) /* FIXME */
@@ -355,7 +361,7 @@ mn103cpu_io_read_buffer (struct hw *me,
 			 unsigned nr_bytes)
 {
   struct mn103cpu *controller = hw_data (me);
-  unsigned16 val = 0;
+  uint16_t val = 0;
   enum mn103cpu_regs reg = decode_mn103cpu_addr (me, controller, base);
 
   switch (reg)
@@ -381,7 +387,7 @@ mn103cpu_io_read_buffer (struct hw *me,
     }
 
   if (nr_bytes == 2)
-    *(unsigned16*) dest = H2LE_2 (val);
+    *(uint16_t*) dest = H2LE_2 (val);
 
   return nr_bytes;
 }     
@@ -394,14 +400,14 @@ mn103cpu_io_write_buffer (struct hw *me,
 			  unsigned nr_bytes)
 {
   struct mn103cpu *controller = hw_data (me);
-  unsigned16 val;
+  uint16_t val;
   enum mn103cpu_regs reg;
 
   if (nr_bytes != 2)
     hw_abort (me, "must be two byte write");
 
   reg = decode_mn103cpu_addr (me, controller, base);
-  val = LE2H_2 (* (unsigned16 *) source);
+  val = LE2H_2 (* (uint16_t *) source);
 
   switch (reg)
     {

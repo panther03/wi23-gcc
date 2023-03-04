@@ -13,9 +13,16 @@
 
 #include "rand48.h"
 
-_VOID
-_DEFUN (_lcong48_r, (r, p),
-       struct _reent *r _AND
+#ifdef _REENT_THREAD_LOCAL
+_Thread_local unsigned short _tls_rand48_seed[3] = {_RAND48_SEED_0, _RAND48_SEED_1,
+    _RAND48_SEED_2};
+_Thread_local unsigned short _tls_rand48_mult[3] = {_RAND48_MULT_0, _RAND48_MULT_1,
+    _RAND48_MULT_2};
+_Thread_local unsigned short _tls_rand48_add = _RAND48_ADD;
+#endif
+
+void
+_lcong48_r (struct _reent *r,
        unsigned short p[7])
 {
   _REENT_CHECK_RAND48(r);
@@ -29,9 +36,8 @@ _DEFUN (_lcong48_r, (r, p),
 }
 
 #ifndef _REENT_ONLY
-_VOID
-_DEFUN (lcong48, (p),
-       unsigned short p[7])
+void
+lcong48 (unsigned short p[7])
 {
   _lcong48_r (_REENT, p);
 }

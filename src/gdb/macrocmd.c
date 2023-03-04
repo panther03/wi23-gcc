@@ -1,5 +1,5 @@
 /* C preprocessor macro expansion commands for GDB.
-   Copyright (C) 2002-2013 Free Software Foundation, Inc.
+   Copyright (C) 2002-2023 Free Software Foundation, Inc.
    Contributed by Red Hat, Inc.
 
    This file is part of GDB.
@@ -22,25 +22,16 @@
 #include "macrotab.h"
 #include "macroexp.h"
 #include "macroscope.h"
+#include "cli/cli-style.h"
 #include "cli/cli-utils.h"
 #include "command.h"
 #include "gdbcmd.h"
-#include "gdb_string.h"
 #include "linespec.h"
 
 
 /* The `macro' prefix command.  */
 
 static struct cmd_list_element *macrolist;
-
-static void
-macro_command (char *arg, int from_tty)
-{
-  printf_unfiltered
-    ("\"macro\" must be followed by the name of a macro command.\n");
-  help_list (macrolist, "macro ", -1, gdb_stdout);
-}
-
 
 
 /* Macro expansion commands.  */
@@ -50,18 +41,12 @@ macro_command (char *arg, int from_tty)
 static void
 macro_inform_no_debuginfo (void)
 {
-  puts_filtered ("GDB has no preprocessor macro information for that code.\n");
+  gdb_puts ("GDB has no preprocessor macro information for that code.\n");
 }
 
 static void
-macro_expand_command (char *exp, int from_tty)
+macro_expand_command (const char *exp, int from_tty)
 {
-  struct macro_scope *ms = NULL;
-  char *expanded = NULL;
-  struct cleanup *cleanup_chain = make_cleanup (free_current_contents, &ms);
-
-  make_cleanup (free_current_contents, &expanded);
-
   /* You know, when the user doesn't specify any expression, it would be
      really cool if this defaulted to the last expression evaluated.
      Then it would be easy to ask, "Hey, what did I just evaluate?"  But
@@ -69,33 +54,27 @@ macro_expand_command (char *exp, int from_tty)
      evaluated, just its value.  */
   if (! exp || ! *exp)
     error (_("You must follow the `macro expand' command with the"
-           " expression you\n"
-           "want to expand."));
+	   " expression you\n"
+	   "want to expand."));
 
-  ms = default_macro_scope ();
-  if (ms)
+  gdb::unique_xmalloc_ptr<macro_scope> ms = default_macro_scope ();
+
+  if (ms != nullptr)
     {
-      expanded = macro_expand (exp, standard_macro_lookup, ms);
-      fputs_filtered ("expands to: ", gdb_stdout);
-      fputs_filtered (expanded, gdb_stdout);
-      fputs_filtered ("\n", gdb_stdout);
+      gdb::unique_xmalloc_ptr<char> expanded = macro_expand (exp, *ms);
+
+      gdb_puts ("expands to: ");
+      gdb_puts (expanded.get ());
+      gdb_puts ("\n");
     }
   else
     macro_inform_no_debuginfo ();
-
-  do_cleanups (cleanup_chain);
-  return;
 }
 
 
 static void
-macro_expand_once_command (char *exp, int from_tty)
+macro_expand_once_command (const char *exp, int from_tty)
 {
-  struct macro_scope *ms = NULL;
-  char *expanded = NULL;
-  struct cleanup *cleanup_chain = make_cleanup (free_current_contents, &ms);
-  make_cleanup (free_current_contents, &expanded);
-
   /* You know, when the user doesn't specify any expression, it would be
      really cool if this defaulted to the last expression evaluated.
      And it should set the once-expanded text as the new `last
@@ -103,22 +82,21 @@ macro_expand_once_command (char *exp, int from_tty)
      see the expression expanded one level at a time.  */
   if (! exp || ! *exp)
     error (_("You must follow the `macro expand-once' command with"
-           " the expression\n"
-           "you want to expand."));
+	   " the expression\n"
+	   "you want to expand."));
 
-  ms = default_macro_scope ();
-  if (ms)
+  gdb::unique_xmalloc_ptr<macro_scope> ms = default_macro_scope ();
+
+  if (ms != nullptr)
     {
-      expanded = macro_expand_once (exp, standard_macro_lookup, ms);
-      fputs_filtered ("expands to: ", gdb_stdout);
-      fputs_filtered (expanded, gdb_stdout);
-      fputs_filtered ("\n", gdb_stdout);
+      gdb::unique_xmalloc_ptr<char> expanded = macro_expand_once (exp, *ms);
+
+      gdb_puts ("expands to: ");
+      gdb_puts (expanded.get ());
+      gdb_puts ("\n");
     }
   else
     macro_inform_no_debuginfo ();
-
-  do_cleanups (cleanup_chain);
-  return;
 }
 
 /*  Outputs the include path of a macro starting at FILE and LINE to STREAM.
@@ -127,21 +105,21 @@ macro_expand_once_command (char *exp, int from_tty)
     the splay tree so that it can be safely used while iterating.  */
 static void
 show_pp_source_pos (struct ui_file *stream,
-                    struct macro_source_file *file,
-                    int line)
+		    struct macro_source_file *file,
+		    int line)
 {
-  char *fullname;
-
-  fullname = macro_source_fullname (file);
-  fprintf_filtered (stream, "%s:%d\n", fullname, line);
-  xfree (fullname);
+  std::string fullname = macro_source_fullname (file);
+  gdb_printf (stream, "%ps:%d\n",
+	      styled_string (file_name_style.style (),
+			     fullname.c_str ()),
+	      line);
 
   while (file->included_by)
     {
       fullname = macro_source_fullname (file->included_by);
-      fprintf_filtered (gdb_stdout, "  included at %s:%d\n", fullname,
-                        file->included_at_line);
-      xfree (fullname);
+      gdb_puts (_("  included at "), stream);
+      fputs_styled (fullname.c_str (), file_name_style.style (), stream);
+      gdb_printf (stream, ":%d\n", file->included_at_line);
       file = file->included_by;
     }
 }
@@ -159,81 +137,61 @@ print_macro_definition (const char *name,
 			struct macro_source_file *file,
 			int line)
 {
-      fprintf_filtered (gdb_stdout, "Defined at ");
-      show_pp_source_pos (gdb_stdout, file, line);
+  gdb_printf ("Defined at ");
+  show_pp_source_pos (gdb_stdout, file, line);
 
-      if (line != 0)
-	fprintf_filtered (gdb_stdout, "#define %s", name);
-      else
-	fprintf_filtered (gdb_stdout, "-D%s", name);
+  if (line != 0)
+    gdb_printf ("#define %s", name);
+  else
+    gdb_printf ("-D%s", name);
 
-      if (d->kind == macro_function_like)
-        {
-          int i;
+  if (d->kind == macro_function_like)
+    {
+      int i;
 
-          fputs_filtered ("(", gdb_stdout);
-          for (i = 0; i < d->argc; i++)
-            {
-              fputs_filtered (d->argv[i], gdb_stdout);
-              if (i + 1 < d->argc)
-                fputs_filtered (", ", gdb_stdout);
-            }
-          fputs_filtered (")", gdb_stdout);
-        }
+      gdb_puts ("(");
+      for (i = 0; i < d->argc; i++)
+	{
+	  gdb_puts (d->argv[i]);
+	  if (i + 1 < d->argc)
+	    gdb_puts (", ");
+	}
+      gdb_puts (")");
+    }
 
-      if (line != 0)
-	fprintf_filtered (gdb_stdout, " %s\n", d->replacement);
-      else
-	fprintf_filtered (gdb_stdout, "=%s\n", d->replacement);
-}
-
-/* A callback function for usage with macro_for_each and friends.
-   If USER_DATA is null all macros will be printed.
-   Otherwise USER_DATA is considered to be a string, printing
-   only macros who's NAME matches USER_DATA.  Other arguments are
-   routed to print_macro_definition.  */
-static void
-print_macro_callback (const char *name, const struct macro_definition *macro,
-		   struct macro_source_file *source, int line,
-		   void *user_data)
-{
-  if (! user_data || strcmp (user_data, name) == 0)
-    print_macro_definition (name, macro, source, line);
+  if (line != 0)
+    gdb_printf (" %s\n", d->replacement);
+  else
+    gdb_printf ("=%s\n", d->replacement);
 }
 
 /* The implementation of the `info macro' command.  */
 static void
-info_macro_command (char *args, int from_tty)
+info_macro_command (const char *args, int from_tty)
 {
-  struct macro_scope *ms = NULL;
-  struct cleanup *cleanup_chain;
-  char *name;
+  gdb::unique_xmalloc_ptr<struct macro_scope> ms;
+  const char *name;
   int show_all_macros_named = 0;
-  char *arg_start = args;
+  const char *arg_start = args;
   int processing_args = 1;
 
   while (processing_args
 	 && arg_start && *arg_start == '-' && *arg_start != '\0')
     {
-      char *p = skip_to_space (arg_start);
+      const char *p = skip_to_space (arg_start);
 
       if (strncmp (arg_start, "-a", p - arg_start) == 0
 	  || strncmp (arg_start, "-all", p - arg_start) == 0)
 	show_all_macros_named = 1;
       else if (strncmp (arg_start, "--", p - arg_start) == 0)
-          /* Our macro support seems rather C specific but this would
-             seem necessary for languages allowing - in macro names.
+	  /* Our macro support seems rather C specific but this would
+	     seem necessary for languages allowing - in macro names.
 	     e.g. Scheme's (defmacro ->foo () "bar\n")  */
 	processing_args = 0;
       else
-	{
-	  /* Relies on modified 'args' not making it in to history */
-	  *p = '\0';
-	  error (_("Unrecognized option '%s' to info macro command.  "
-		   "Try \"help info macro\"."), arg_start);
-	}
+	report_unrecognized_option_error ("info macro", arg_start);
 
-        arg_start = skip_spaces (p);
+      arg_start = skip_spaces (p);
     }
 
   name = arg_start;
@@ -244,12 +202,18 @@ info_macro_command (char *args, int from_tty)
 	     "whose definition you want to see."));
 
   ms = default_macro_scope ();
-  cleanup_chain = make_cleanup (free_current_contents, &ms);
 
   if (! ms)
     macro_inform_no_debuginfo ();
   else if (show_all_macros_named)
-    macro_for_each (ms->file->table, print_macro_callback, name);
+    macro_for_each (ms->file->table, [&] (const char *macro_name,
+					  const macro_definition *macro,
+					  macro_source_file *source,
+					  int line)
+      {
+	if (strcmp (name, macro_name) == 0)
+	  print_macro_definition (name, macro, source, line);
+      });
   else
     {
       struct macro_definition *d;
@@ -264,49 +228,43 @@ info_macro_command (char *args, int from_tty)
 	  print_macro_definition (name, d, file, line);
 	}
       else
-        {
-          fprintf_filtered (gdb_stdout,
-                            "The symbol `%s' has no definition as a C/C++"
-                            " preprocessor macro\n"
-                            "at ", name);
-          show_pp_source_pos (gdb_stdout, ms->file, ms->line);
+	{
+	  gdb_printf ("The symbol `%s' has no definition as a C/C++"
+		      " preprocessor macro\n"
+		      "at ", name);
+	  show_pp_source_pos (gdb_stdout, ms->file, ms->line);
 	}
     }
-
-  do_cleanups (cleanup_chain);
 }
 
 /* Implementation of the "info macros" command. */
 static void
-info_macros_command (char *args, int from_tty)
+info_macros_command (const char *args, int from_tty)
 {
-  struct macro_scope *ms = NULL;
-  struct cleanup *cleanup_chain = make_cleanup (free_current_contents, &ms);
+  gdb::unique_xmalloc_ptr<struct macro_scope> ms;
 
   if (args == NULL)
     ms = default_macro_scope ();
   else
     {
-      struct symtabs_and_lines sals =
-	decode_line_with_current_source (args, 0);
+      std::vector<symtab_and_line> sals
+	= decode_line_with_current_source (args, 0);
 
-      if (sals.nelts)
-        ms = sal_macro_scope (sals.sals[0]);
+      if (!sals.empty ())
+	ms = sal_macro_scope (sals[0]);
     }
 
   if (! ms || ! ms->file || ! ms->file->table)
     macro_inform_no_debuginfo ();
   else
-    macro_for_each_in_scope (ms->file, ms->line, print_macro_callback, NULL);
-
-  do_cleanups (cleanup_chain);
+    macro_for_each_in_scope (ms->file, ms->line, print_macro_definition);
 }
 
 
 /* User-defined macros.  */
 
 static void
-skip_ws (char **expp)
+skip_ws (const char **expp)
 {
   while (macro_is_whitespace (**expp))
     ++*expp;
@@ -319,14 +277,14 @@ skip_ws (char **expp)
    function will also allow "..." forms as used in varargs macro
    parameters.  */
 
-static char *
-extract_identifier (char **expp, int is_parameter)
+static gdb::unique_xmalloc_ptr<char>
+extract_identifier (const char **expp, int is_parameter)
 {
   char *result;
-  char *p = *expp;
+  const char *p = *expp;
   unsigned int len;
 
-  if (is_parameter && !strncmp (p, "...", 3))
+  if (is_parameter && startswith (p, "..."))
     {
       /* Ok.  */
     }
@@ -340,7 +298,7 @@ extract_identifier (char **expp, int is_parameter)
 	;
     }
 
-  if (is_parameter && !strncmp (p, "...", 3))      
+  if (is_parameter && startswith (p, "..."))      
     p += 3;
 
   len = p - *expp;
@@ -348,47 +306,48 @@ extract_identifier (char **expp, int is_parameter)
   memcpy (result, *expp, len);
   result[len] = '\0';
   *expp += len;
-  return result;
+  return gdb::unique_xmalloc_ptr<char> (result);
 }
 
-/* Helper function to clean up a temporarily-constructed macro object.
-   This assumes that the contents were all allocated with xmalloc.  */
-static void
-free_macro_definition_ptr (void *ptr)
+struct temporary_macro_definition : public macro_definition
 {
-  int i;
-  struct macro_definition *loc = (struct macro_definition *) ptr;
+  temporary_macro_definition ()
+  {
+    table = nullptr;
+    kind = macro_object_like;
+    argc = 0;
+    argv = nullptr;
+    replacement = nullptr;
+  }
 
-  for (i = 0; i < loc->argc; ++i)
-    xfree ((char *) loc->argv[i]);
-  xfree ((char *) loc->argv);
-  /* Note that the 'replacement' field is not allocated.  */
-}
+  ~temporary_macro_definition ()
+  {
+    int i;
+
+    for (i = 0; i < argc; ++i)
+      xfree ((char *) argv[i]);
+    xfree ((char *) argv);
+    /* Note that the 'replacement' field is not allocated.  */
+  }
+};
 
 static void
-macro_define_command (char *exp, int from_tty)
+macro_define_command (const char *exp, int from_tty)
 {
-  struct macro_definition new_macro;
-  char *name = NULL;
-  struct cleanup *cleanup_chain;
+  temporary_macro_definition new_macro;
 
   if (!exp)
     error (_("usage: macro define NAME[(ARGUMENT-LIST)] [REPLACEMENT-LIST]"));
 
-  cleanup_chain = make_cleanup (free_macro_definition_ptr, &new_macro);
-  make_cleanup (free_current_contents, &name);
-
-  memset (&new_macro, 0, sizeof (struct macro_definition));
-
   skip_ws (&exp);
-  name = extract_identifier (&exp, 0);
-  if (! name)
+  gdb::unique_xmalloc_ptr<char> name = extract_identifier (&exp, 0);
+  if (name == NULL)
     error (_("Invalid macro name."));
   if (*exp == '(')
     {
       /* Function-like macro.  */
       int alloced = 5;
-      char **argv = (char **) xmalloc (alloced * sizeof (char *));
+      char **argv = XNEWVEC (char *, alloced);
 
       new_macro.kind = macro_function_like;
       new_macro.argc = 0;
@@ -409,7 +368,7 @@ macro_define_command (char *exp, int from_tty)
 	      /* Must update new_macro as well...  */
 	      new_macro.argv = (const char * const *) argv;
 	    }
-	  argv[new_macro.argc] = extract_identifier (&exp, 1);
+	  argv[new_macro.argc] = extract_identifier (&exp, 1).release ();
 	  if (! argv[new_macro.argc])
 	    error (_("Macro is missing an argument."));
 	  ++new_macro.argc;
@@ -433,83 +392,79 @@ macro_define_command (char *exp, int from_tty)
       ++exp;
       skip_ws (&exp);
 
-      macro_define_function (macro_main (macro_user_macros), -1, name,
+      macro_define_function (macro_main (macro_user_macros), -1, name.get (),
 			     new_macro.argc, (const char **) new_macro.argv,
 			     exp);
     }
   else
     {
       skip_ws (&exp);
-      macro_define_object (macro_main (macro_user_macros), -1, name, exp);
+      macro_define_object (macro_main (macro_user_macros), -1, name.get (),
+			   exp);
     }
-
-  do_cleanups (cleanup_chain);
 }
 
 
 static void
-macro_undef_command (char *exp, int from_tty)
+macro_undef_command (const char *exp, int from_tty)
 {
-  char *name;
-
   if (!exp)
     error (_("usage: macro undef NAME"));
 
   skip_ws (&exp);
-  name = extract_identifier (&exp, 0);
-  if (! name)
+  gdb::unique_xmalloc_ptr<char> name = extract_identifier (&exp, 0);
+  if (name == nullptr)
     error (_("Invalid macro name."));
-  macro_undef (macro_main (macro_user_macros), -1, name);
-  xfree (name);
+  macro_undef (macro_main (macro_user_macros), -1, name.get ());
 }
 
 
 static void
 print_one_macro (const char *name, const struct macro_definition *macro,
-		 struct macro_source_file *source, int line,
-		 void *ignore)
+		 struct macro_source_file *source, int line)
 {
-  fprintf_filtered (gdb_stdout, "macro define %s", name);
+  gdb_printf ("macro define %s", name);
   if (macro->kind == macro_function_like)
     {
       int i;
 
-      fprintf_filtered (gdb_stdout, "(");
+      gdb_printf ("(");
       for (i = 0; i < macro->argc; ++i)
-	fprintf_filtered (gdb_stdout, "%s%s", (i > 0) ? ", " : "",
-			  macro->argv[i]);
-      fprintf_filtered (gdb_stdout, ")");
+	gdb_printf ("%s%s", (i > 0) ? ", " : "",
+			 macro->argv[i]);
+      gdb_printf (")");
     }
-  fprintf_filtered (gdb_stdout, " %s\n", macro->replacement);
+  gdb_printf (" %s\n", macro->replacement);
 }
 
 
 static void
-macro_list_command (char *exp, int from_tty)
+macro_list_command (const char *exp, int from_tty)
 {
-  macro_for_each (macro_user_macros, print_one_macro, NULL);
+  macro_for_each (macro_user_macros, print_one_macro);
 }
 
-
 /* Initializing the `macrocmd' module.  */
 
-extern initialize_file_ftype _initialize_macrocmd; /* -Wmissing-prototypes */
-
+void _initialize_macrocmd ();
 void
-_initialize_macrocmd (void)
+_initialize_macrocmd ()
 {
   /* We introduce a new command prefix, `macro', under which we'll put
      the various commands for working with preprocessor macros.  */
-  add_prefix_cmd ("macro", class_info, macro_command,
-		  _("Prefix for commands dealing with C preprocessor macros."),
-		  &macrolist, "macro ", 0, &cmdlist);
+  add_basic_prefix_cmd ("macro", class_info,
+			_("Prefix for commands dealing with C preprocessor macros."),
+			&macrolist, 0, &cmdlist);
 
-  add_cmd ("expand", no_class, macro_expand_command, _("\
+  cmd_list_element *macro_expand_cmd
+    = add_cmd ("expand", no_class, macro_expand_command, _("\
 Fully expand any C/C++ preprocessor macro invocations in EXPRESSION.\n\
 Show the expanded expression."),
-	   &macrolist);
-  add_alias_cmd ("exp", "expand", no_class, 1, &macrolist);
-  add_cmd ("expand-once", no_class, macro_expand_once_command, _("\
+	       &macrolist);
+  add_alias_cmd ("exp", macro_expand_cmd, no_class, 1, &macrolist);
+
+  cmd_list_element *macro_expand_once_cmd
+    = add_cmd ("expand-once", no_class, macro_expand_once_command, _("\
 Expand C/C++ preprocessor macro invocations appearing directly in EXPRESSION.\n\
 Show the expanded expression.\n\
 \n\
@@ -520,24 +475,21 @@ introduces further macro invocations, those are left unexpanded.\n\
 `macro expand-once' helps you see how a particular macro expands,\n\
 whereas `macro expand' shows you how all the macros involved in an\n\
 expression work together to yield a pre-processed expression."),
-	   &macrolist);
-  add_alias_cmd ("exp1", "expand-once", no_class, 1, &macrolist);
+	       &macrolist);
+  add_alias_cmd ("exp1", macro_expand_once_cmd, no_class, 1, &macrolist);
 
-  add_cmd ("macro", no_class, info_macro_command,
-	   _("Show the definition of MACRO, and it's source location.\n\
+  add_info ("macro", info_macro_command,
+	    _("Show the definition of MACRO, and it's source location.\n\
 Usage: info macro [-a|-all] [--] MACRO\n\
 Options: \n\
   -a, --all    Output all definitions of MACRO in the current compilation\
  unit.\n\
-  --           Specify the end of arguments and the beginning of the MACRO."),
+  --           Specify the end of arguments and the beginning of the MACRO."));
 
-	   &infolist);
-
-  add_cmd ("macros", no_class, info_macros_command,
-	   _("Show the definitions of all macros at LINESPEC, or the current \
+  add_info ("macros", info_macros_command,
+	    _("Show the definitions of all macros at LINESPEC, or the current \
 source location.\n\
-Usage: info macros [LINESPEC]"),
-	   &infolist);
+Usage: info macros [LINESPEC]"));
 
   add_cmd ("define", no_class, macro_define_command, _("\
 Define a new C/C++ preprocessor macro.\n\

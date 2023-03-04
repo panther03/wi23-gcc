@@ -1,4 +1,4 @@
-#   Copyright 1998-2013 Free Software Foundation, Inc.
+#   Copyright 1998-2023 Free Software Foundation, Inc.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -22,41 +22,23 @@ load_lib trace-support.exp
 
 standard_testfile
 
-if {[prepare_for_testing $testfile.exp $testfile $srcfile debug]} {
+if {[prepare_for_testing "failed to prepare" $testfile $srcfile {debug nopie}]} {
     return -1
 }
-clean_restart $testfile
 
 if ![runto_main] {
-    fail "Can't run to main to check for trace support"
     return -1
 }
 
 # Check whether we're testing with the remote or extended-remote
 # targets, and whether the target supports tracepoints.
 
-proc gdb_is_target_remote { } {
-    global gdb_prompt
-
-    set test "probe for target remote"
-    gdb_test_multiple "maint print target-stack" $test {
-	-re ".*emote serial target in gdb-specific protocol.*$gdb_prompt $" {
-	    pass $test
-	    return 1
-	}
-	-re "$gdb_prompt $" {
-	    pass $test
-	}
-    }
-    return 0
-}
-
 if ![gdb_is_target_remote] {
     return -1
 }
 
 if ![gdb_target_supports_trace] {
-    unsupported "Current target does not support trace"
+    unsupported "current target does not support trace"
     return -1
 }
 
@@ -64,7 +46,7 @@ if ![gdb_target_supports_trace] {
 # frame (IOW, returns while tfind mode is active).
 proc prepare_for_trace_disassembly { } {
     global gdb_prompt
-    gdb_breakpoint "end"
+    gdb_breakpoint "end" qualified
 
     gdb_test "trace subr" "Tracepoint .*" \
 	"tracepoint at subr"
@@ -97,7 +79,7 @@ prepare_for_trace_disassembly
 set traceframe_info_supported -1
 set test "probe for traceframe-info support"
 gdb_test_multiple "show remote traceframe-info-packet" $test {
-    -re ".*Support for .* is auto-detected, currently (\[a-z\]*).*$gdb_prompt $" {
+    -re ".*Support for .* is \"auto\", currently (\[a-z\]*).*$gdb_prompt $" {
 	set status $expect_out(1,string)
 
 	if { $status == "enabled" } {
@@ -114,18 +96,7 @@ if { $traceframe_info_supported == -1 } {
 }
 
 # Check whether we're testing with our own GDBserver.
-set is_gdbserver -1
-set test "probe for GDBserver"
-gdb_test_multiple "monitor help" $test {
-    -re "The following monitor commands are supported.*debug-hw-points.*remote-debug.*GDBserver.*$gdb_prompt $" {
-	set is_gdbserver 1
-	pass $test
-    }
-    -re "$gdb_prompt $" {
-	set is_gdbserver 0
-	pass $test
-    }
-}
+set is_gdbserver [target_is_gdbserver]
 if { $is_gdbserver == -1 } {
     return -1
 }
@@ -139,7 +110,9 @@ foreach tfinfo { auto off } {
 
 	clean_restart $testfile
 	runto_main
-	gdb_test_no_output "set remote traceframe-info-packet $tfinfo"
+	gdb_test \
+	    "set remote traceframe-info-packet $tfinfo" \
+	    "Support for the 'qXfer:traceframe-info:read' packet on the current remote target is set to *.*$tfinfo*.*"
 
 	prepare_for_trace_disassembly
 

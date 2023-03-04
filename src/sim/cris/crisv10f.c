@@ -1,5 +1,5 @@
 /* CRIS v10 simulator support code
-   Copyright (C) 2004-2013 Free Software Foundation, Inc.
+   Copyright (C) 2004-2023 Free Software Foundation, Inc.
    Contributed by Axis Communications.
 
 This file is part of the GNU simulators.
@@ -18,6 +18,9 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 /* The infrastructure is based on that of i960.c.  */
+
+/* This must come before any other includes.  */
+#include "defs.h"
 
 #define WANT_CPU_CRISV10F
 
@@ -57,7 +60,7 @@ MY (deliver_interrupt) (SIM_CPU *current_cpu,
   unsigned char entryaddr_le[4];
   int was_user;
   SIM_DESC sd = CPU_STATE (current_cpu);
-  unsigned32 entryaddr;
+  uint32_t entryaddr;
 
   /* We haven't implemented other interrupt-types yet.  */
   if (type != CRIS_INT_INT)
@@ -86,7 +89,7 @@ MY (deliver_interrupt) (SIM_CPU *current_cpu,
 			    GET_H_SR (H_SR_PRE_V32_IBR) + vec * 4, 4) == 0)
     {
       /* Nothing to do actually; either abort or send a signal.  */
-      sim_core_signal (sd, current_cpu, CIA_GET (current_cpu), 0, 4,
+      sim_core_signal (sd, current_cpu, CPU_PC_GET (current_cpu), 0, 4,
 		       GET_H_SR (H_SR_PRE_V32_IBR) + vec * 4,
 		       read_transfer, sim_core_unmapped_signal);
       return 0;

@@ -1,4 +1,4 @@
-# Copyright 2012-2013 Free Software Foundation, Inc.
+# Copyright 2012-2023 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -15,12 +15,12 @@
 
 if [target_info exists gdb,nosignals] {
     verbose "Skipping catch-signal.exp because of nosignals."
-    continue
+    return
 }
 
 standard_testfile
 
-if {[prepare_for_testing $testfile.exp $testfile $srcfile debug]} {
+if {[prepare_for_testing "failed to prepare" $testfile $srcfile debug]} {
     return -1
 }
 
@@ -39,7 +39,7 @@ proc test_catch_signal {signame} {
 	gdb_test "handle SIGHUP nostop noprint pass" \
 	    "SIGHUP.*No.*No.*Yes.*"
 	gdb_test "catch signal" "Catchpoint .*"
-	gdb_test "continue" "Catchpoint .*"
+	gdb_test "continue" "Catchpoint .*" "continue to first HUP"
 
 	# Now ensure that the "pass" setting worked, and also that we did not
 	# see gdb's SIGTRAP.
@@ -52,7 +52,7 @@ proc test_catch_signal {signame} {
 	gdb_breakpoint ${srcfile}:[gdb_get_line_number "second HUP"]
 	gdb_continue_to_breakpoint "second HUP"
 	gdb_test "catch signal $signame" "Catchpoint .*"
-	gdb_test "continue" "Catchpoint .*"
+	gdb_test "continue" "Catchpoint .*" "continue to catch signal $signame"
 	delete_breakpoints
 
 	# Catch just SIGUSR1 -- but it isn't sent.
@@ -83,7 +83,6 @@ proc test_catch_signal {signame} {
 	    y
 	gdb_test "catch signal SIGINT" "Catchpoint .*"
 	gdb_test "continue" "Catchpoint .* SIGINT.*"
-        
     }
 }
 
@@ -117,6 +116,7 @@ foreach {arg desc} {"" "standard signals" \
 	"set catchpoint '$arg' for printing"
     gdb_test "info break" "$decimal.*catchpoint.*signal.*$desc.*" \
 	"info break for '$arg'"
+    gdb_breakpoint "main"
     gdb_test "save breakpoints [standard_output_file bps.$i]" \
 	"Saved to file .*bps.$i.*" \
 	"save breakpoints for '$arg'"
@@ -124,7 +124,8 @@ foreach {arg desc} {"" "standard signals" \
     set filename [remote_upload host [standard_output_file bps.$i] \
 		      [standard_output_file bps-local.$i]]
     set fd [open $filename]
-    set contents [read -nonewline $fd]
+    set file_data [read $fd]
+    set data [split $file_data "\n"]
     close $fd
 
     if {$arg == ""} {
@@ -132,11 +133,17 @@ foreach {arg desc} {"" "standard signals" \
     } else {
 	set pattern "catch signal $arg"
     }
-    if {[string match $pattern $contents]} {
-	pass "results of save breakpoints for '$arg'"
-    } else {
-	fail "results of save breakpoints for '$arg'"
-    }
+    gdb_assert {[expr [llength $data] == 3]} \
+	"Number of lines of save breakpoints for '$arg'"
+    # Check the first line.
+    gdb_assert {[string match $pattern [lindex $data 0]]} \
+	"1st line of save breakpoints for '$arg'"
+    # Check the second line.
+    gdb_assert {[string match "break main" [lindex $data 1]]} \
+        "2nd line of save breakpoints for '$arg'"
+    # Check the trailing newline.
+    gdb_assert {[string match "" [lindex $data 2]]} \
+        "Trailing newline of save breakpoints for '$arg'"
 
     incr i
 }

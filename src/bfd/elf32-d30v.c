@@ -1,6 +1,5 @@
 /* D30V-specific support for 32-bit ELF
-   Copyright 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2007
-   Free Software Foundation, Inc.
+   Copyright (C) 1997-2023 Free Software Foundation, Inc.
    Contributed by Martin Hunt (hunt@cygnus.com).
 
    This file is part of BFD, the Binary File Descriptor library.
@@ -57,7 +56,7 @@ bfd_elf_d30v_reloc (bfd *abfd,
     }
 
   r = bfd_elf_generic_reloc (abfd, reloc_entry, symbol, data,
-                             input_section, output_bfd, error_message);
+			     input_section, output_bfd, error_message);
   if (r != bfd_reloc_continue)
     return r;
 
@@ -124,7 +123,7 @@ bfd_elf_d30v_reloc (bfd *abfd,
     }
 
   in1 |= (relocation >> 26) & 0x3F;		/* Top 6 bits.  */
-  in2 |= ((relocation & 0x03FC0000) << 2);  	/* Next 8 bits.  */
+  in2 |= ((relocation & 0x03FC0000) << 2);	/* Next 8 bits.  */
   in2 |= relocation & 0x0003FFFF;		/* Bottom 18 bits.  */
 
   /* Change a PC-relative instruction to its
@@ -165,7 +164,7 @@ bfd_elf_d30v_reloc_21 (bfd *abfd,
     }
 
   r = bfd_elf_generic_reloc (abfd, reloc_entry, symbol, data,
-                             input_section, output_bfd, error_message);
+			     input_section, output_bfd, error_message);
   if (r != bfd_reloc_continue)
     return r;
 
@@ -255,197 +254,197 @@ static reloc_howto_type elf_d30v_howto_table[] =
   /* This reloc does nothing.  */
   HOWTO (R_D30V_NONE,		/* Type.  */
 	 0,			/* Rightshift.  */
-	 2,			/* Size (0 = byte, 1 = short, 2 = long).  */
-	 32,			/* Bitsize.  */
-	 FALSE,			/* PC_relative.  */
+	 0,			/* Size.  */
+	 0,			/* Bitsize.  */
+	 false,			/* PC_relative.  */
 	 0,			/* Bitpos.  */
-	 complain_overflow_bitfield, /* Complain_on_overflow.  */
+	 complain_overflow_dont, /* Complain_on_overflow.  */
 	 bfd_elf_generic_reloc,	/* Special_function.  */
 	 "R_D30V_NONE",		/* Name.  */
-	 FALSE,			/* Partial_inplace.  */
+	 false,			/* Partial_inplace.  */
 	 0,			/* Src_mask.  */
 	 0,			/* Dst_mask.  */
-	 FALSE),		/* PCrel_offset.  */
+	 false),		/* PCrel_offset.  */
 
   /* A 6 bit absolute relocation.  */
   HOWTO (R_D30V_6,		/* Type.  */
 	 0,			/* Rightshift.  */
-	 2,			/* Size (0 = byte, 1 = short, 2 = long).  */
+	 4,			/* Size.  */
 	 6,			/* Bitsize.  */
-	 FALSE,			/* PC_relative.  */
+	 false,			/* PC_relative.  */
 	 0,			/* Bitpos.  */
 	 complain_overflow_bitfield, /* Complain_on_overflow.  */
 	 bfd_elf_generic_reloc,	/* Special_function.  */
 	 "R_D30V_6",		/* Name.  */
-	 FALSE,			/* Partial_inplace.  */
+	 false,			/* Partial_inplace.  */
 	 0x3f,			/* Src_mask.  */
 	 0x3f,			/* Dst_mask.  */
-	 FALSE),		/* PCrel_offset.  */
+	 false),		/* PCrel_offset.  */
 
   /* A relative 9 bit relocation, right shifted by 3.  */
   HOWTO (R_D30V_9_PCREL,	/* Type.  */
 	 3,			/* Rightshift.  */
-	 2,			/* Size (0 = byte, 1 = short, 2 = long).  */
+	 4,			/* Size.  */
 	 6,			/* Bitsize.  */
-	 TRUE,			/* PC_relative.  */
+	 true,			/* PC_relative.  */
 	 0,			/* Bitpos.  */
 	 complain_overflow_signed, /* Complain_on_overflow.  */
 	 bfd_elf_d30v_reloc_21,	/* Special_function.  */
 	 "R_D30V_9_PCREL",	/* Name.  */
-	 FALSE,			/* Partial_inplace.  */
+	 false,			/* Partial_inplace.  */
 	 0x3f,			/* Src_mask.  */
 	 0x3f,			/* Dst_mask.  */
-	 TRUE),			/* PCrel_offset.  */
+	 true),			/* PCrel_offset.  */
 
   /* A relative 9 bit relocation, right shifted by 3.  */
   HOWTO (R_D30V_9_PCREL_R,	/* Type.  */
 	 3,			/* Rightshift.  */
-	 2,			/* Size (0 = byte, 1 = short, 2 = long).  */
+	 4,			/* Size.  */
 	 6,			/* Bitsize.  */
-	 TRUE,			/* PC_relative.  */
+	 true,			/* PC_relative.  */
 	 0,			/* Bitpos.  */
 	 complain_overflow_signed, /* Complain_on_overflow.  */
 	 bfd_elf_d30v_reloc_21,	/* Special_function.  */
 	 "R_D30V_9_PCREL_R",	/* Name.  */
-	 FALSE,			/* Partial_inplace.  */
+	 false,			/* Partial_inplace.  */
 	 0x3f,			/* Src_mask.  */
 	 0x3f,			/* Dst_mask.  */
-	 TRUE),			/* PCrel_offset.  */
+	 true),			/* PCrel_offset.  */
 
   /* An absolute 15 bit relocation, right shifted by 3.  */
   HOWTO (R_D30V_15,		/* Type.  */
 	 3,			/* Rightshift.  */
-	 2,			/* Size (0 = byte, 1 = short, 2 = long).  */
+	 4,			/* Size.  */
 	 12,			/* Bitsize.  */
-	 FALSE,			/* PC_relative.  */
+	 false,			/* PC_relative.  */
 	 0,			/* Bitpos.  */
 	 complain_overflow_signed, /* Complain_on_overflow.  */
 	 bfd_elf_generic_reloc,	/* Special_function.  */
 	 "R_D30V_15",		/* Name.  */
-	 FALSE,			/* Partial_inplace.  */
+	 false,			/* Partial_inplace.  */
 	 0xfff,			/* Src_mask.  */
 	 0xfff,			/* Dst_mask.  */
-	 FALSE),		/* PCrel_offset.  */
+	 false),		/* PCrel_offset.  */
 
   /* A relative 15 bit relocation, right shifted by 3.  */
   HOWTO (R_D30V_15_PCREL,	/* Type.  */
 	 3,			/* Rightshift.  */
-	 2,			/* Size (0 = byte, 1 = short, 2 = long).  */
+	 4,			/* Size.  */
 	 12,			/* Bitsize.  */
-	 TRUE,			/* PC_relative.  */
+	 true,			/* PC_relative.  */
 	 0,			/* Bitpos.  */
 	 complain_overflow_signed, /* Complain_on_overflow.  */
 	 bfd_elf_d30v_reloc_21,	/* Special_function.  */
 	 "R_D30V_15_PCREL",	/* Name.  */
-	 FALSE,			/* Partial_inplace.  */
+	 false,			/* Partial_inplace.  */
 	 0xfff,			/* Src_mask.  */
 	 0xfff,			/* Dst_mask.  */
-	 TRUE),			/* PCrel_offset.  */
+	 true),			/* PCrel_offset.  */
 
   /* A relative 15 bit relocation, right shifted by 3.  */
   HOWTO (R_D30V_15_PCREL_R,	/* Type.  */
 	 3,			/* Rightshift.  */
-	 2,			/* Size (0 = byte, 1 = short, 2 = long).  */
+	 4,			/* Size.  */
 	 12,			/* Bitsize.  */
-	 TRUE,			/* PC_relative.  */
+	 true,			/* PC_relative.  */
 	 0,			/* Bitpos.  */
 	 complain_overflow_signed, /* Complain_on_overflow.  */
 	 bfd_elf_d30v_reloc_21,	/* Special_function.  */
 	 "R_D30V_15_PCREL_R",	/* Name.  */
-	 FALSE,			/* Partial_inplace.  */
+	 false,			/* Partial_inplace.  */
 	 0xfff,			/* Src_mask.  */
 	 0xfff,			/* Dst_mask.  */
-	 TRUE),			/* PCrel_offset.  */
+	 true),			/* PCrel_offset.  */
 
   /* An absolute 21 bit relocation, right shifted by 3.  */
   HOWTO (R_D30V_21,		/* Type.  */
 	 3,			/* Rightshift.  */
-	 2,			/* Size (0 = byte, 1 = short, 2 = long).  */
+	 4,			/* Size.  */
 	 18,			/* Bitsize.  */
-	 FALSE,			/* PC_relative.  */
+	 false,			/* PC_relative.  */
 	 0,			/* Bitpos.  */
 	 complain_overflow_signed, /* Complain_on_overflow.  */
 	 bfd_elf_generic_reloc,	/* Special_function.  */
 	 "R_D30V_21",		/* Name.  */
-	 FALSE,			/* Partial_inplace.  */
+	 false,			/* Partial_inplace.  */
 	 0x3ffff,		/* Src_mask.  */
 	 0x3ffff,		/* Dst_mask.  */
-	 FALSE),		/* PCrel_offset.  */
+	 false),		/* PCrel_offset.  */
 
   /* A relative 21 bit relocation, right shifted by 3.  */
   HOWTO (R_D30V_21_PCREL,	/* Type.  */
 	 3,			/* Rightshift.  */
-	 2,			/* Size (0 = byte, 1 = short, 2 = long).  */
+	 4,			/* Size.  */
 	 18,			/* Bitsize.  */
-	 TRUE,			/* PC_relative.  */
+	 true,			/* PC_relative.  */
 	 0,			/* Bitpos.  */
 	 complain_overflow_signed, /* Complain_on_overflow.  */
 	 bfd_elf_d30v_reloc_21,	/* Special_function.  */
 	 "R_D30V_21_PCREL",	/* Name.  */
-	 FALSE,			/* Partial_inplace.  */
+	 false,			/* Partial_inplace.  */
 	 0x3ffff,		/* Src_mask.  */
 	 0x3ffff,		/* Dst_mask.  */
-	 TRUE),			/* PCrel_offset.  */
+	 true),			/* PCrel_offset.  */
 
   /* A relative 21 bit relocation, right shifted by 3, in the Right container.  */
   HOWTO (R_D30V_21_PCREL_R,	/* Type.  */
 	 3,			/* Rightshift.  */
-	 2,			/* Size (0 = byte, 1 = short, 2 = long).  */
+	 4,			/* Size.  */
 	 18,			/* Bitsize.  */
-	 TRUE,			/* PC_relative.  */
+	 true,			/* PC_relative.  */
 	 0,			/* Bitpos.  */
 	 complain_overflow_signed, /* Complain_on_overflow.  */
 	 bfd_elf_d30v_reloc_21,	/* Special_function.  */
 	 "R_D30V_21_PCREL_R",	/* Name.  */
-	 FALSE,			/* Partial_inplace.  */
+	 false,			/* Partial_inplace.  */
 	 0x3ffff,		/* Src_mask.  */
 	 0x3ffff,		/* Dst_mask.  */
-	 TRUE),			/* PCrel_offset.  */
+	 true),			/* PCrel_offset.  */
 
   /* A D30V 32 bit absolute relocation.  */
   HOWTO (R_D30V_32,		/* Type.  */
 	 0,			/* Rightshift.  */
-	 4,			/* Size (0 = byte, 1 = short, 2 = long).  */
+	 8,			/* Size.  */
 	 32,			/* Bitsize.  */
-	 FALSE,			/* PC_relative.  */
+	 false,			/* PC_relative.  */
 	 0,			/* Bitpos.  */
 	 complain_overflow_bitfield, /* Complain_on_overflow.  */
 	 bfd_elf_d30v_reloc,	/* Special_function.  */
 	 "R_D30V_32",		/* Name.  */
-	 FALSE,			/* Partial_inplace.  */
+	 false,			/* Partial_inplace.  */
 	 0xffffffff,		/* Src_mask.  */
 	 0xffffffff,		/* Dst_mask.  */
-	 FALSE),		/* PCrel_offset.  */
+	 false),		/* PCrel_offset.  */
 
   /* A relative 32 bit relocation.  */
   HOWTO (R_D30V_32_PCREL,	/* Type.  */
 	 0,			/* Rightshift.  */
-	 4,			/* Size (0 = byte, 1 = short, 2 = long).  */
+	 8,			/* Size.  */
 	 32,			/* Bitsize.  */
-	 TRUE,			/* PC_relative.  */
+	 true,			/* PC_relative.  */
 	 0,			/* Bitpos.  */
 	 complain_overflow_signed, /* Complain_on_overflow.  */
 	 bfd_elf_d30v_reloc,	/* Special_function.  */
 	 "R_D30V_32_PCREL",	/* Name.  */
-	 FALSE,			/* Partial_inplace.  */
+	 false,			/* Partial_inplace.  */
 	 0xffffffff,		/* Src_mask.  */
 	 0xffffffff,		/* Dst_mask.  */
-	 TRUE),			/* PCrel_offset.  */
+	 true),			/* PCrel_offset.  */
 
   /* A regular 32 bit absolute relocation.  */
   HOWTO (R_D30V_32_NORMAL,	/* Type.  */
 	 0,			/* Rightshift.  */
-	 2,			/* Size (0 = byte, 1 = short, 2 = long).  */
+	 4,			/* Size.  */
 	 32,			/* Bitsize.  */
-	 FALSE,			/* PC_relative.  */
+	 false,			/* PC_relative.  */
 	 0,			/* Bitpos.  */
 	 complain_overflow_bitfield, /* Complain_on_overflow.  */
 	 bfd_elf_generic_reloc,	/* Special_function.  */
 	 "R_D30V_32_NORMAL",	/* Name.  */
-	 FALSE,			/* Partial_inplace.  */
+	 false,			/* Partial_inplace.  */
 	 0xffffffff,		/* Src_mask.  */
 	 0xffffffff,		/* Dst_mask.  */
-	 FALSE),		/* PCrel_offset.  */
+	 false),		/* PCrel_offset.  */
 
 };
 
@@ -509,30 +508,46 @@ bfd_elf32_bfd_reloc_name_lookup (bfd *abfd ATTRIBUTE_UNUSED,
 
 /* Set the howto pointer for an D30V ELF reloc (type REL).  */
 
-static void
-d30v_info_to_howto_rel (bfd *abfd ATTRIBUTE_UNUSED,
+static bool
+d30v_info_to_howto_rel (bfd *abfd,
 			arelent *cache_ptr,
 			Elf_Internal_Rela *dst)
 {
   unsigned int r_type;
 
   r_type = ELF32_R_TYPE (dst->r_info);
-  BFD_ASSERT (r_type < (unsigned int) R_D30V_max);
+  if (r_type >= (unsigned int) R_D30V_max)
+    {
+      /* xgettext:c-format */
+      _bfd_error_handler (_("%pB: unsupported relocation type %#x"),
+			  abfd, r_type);
+      bfd_set_error (bfd_error_bad_value);
+      return false;
+    }
   cache_ptr->howto = &elf_d30v_howto_table[r_type];
+  return true;
 }
 
 /* Set the howto pointer for an D30V ELF reloc (type RELA).  */
 
-static void
-d30v_info_to_howto_rela (bfd *abfd ATTRIBUTE_UNUSED,
+static bool
+d30v_info_to_howto_rela (bfd *abfd,
 			 arelent *cache_ptr,
 			 Elf_Internal_Rela *dst)
 {
   unsigned int r_type;
 
   r_type = ELF32_R_TYPE (dst->r_info);
-  BFD_ASSERT (r_type < (unsigned int) R_D30V_max);
+  if (r_type >= (unsigned int) R_D30V_max)
+    {
+      /* xgettext:c-format */
+      _bfd_error_handler (_("%pB: unsupported relocation type %#x"),
+			  abfd, r_type);
+      bfd_set_error (bfd_error_bad_value);
+      return false;
+    }
   cache_ptr->howto = &elf_d30v_howto_table[r_type];
+  return true;
 }
 
 #define ELF_ARCH		bfd_arch_d30v
@@ -540,12 +555,11 @@ d30v_info_to_howto_rela (bfd *abfd ATTRIBUTE_UNUSED,
 #define ELF_MACHINE_ALT1	EM_CYGNUS_D30V
 #define ELF_MAXPAGESIZE		0x1000
 
-#define TARGET_BIG_SYM          bfd_elf32_d30v_vec
+#define TARGET_BIG_SYM		d30v_elf32_vec
 #define TARGET_BIG_NAME		"elf32-d30v"
 
 #define elf_info_to_howto	d30v_info_to_howto_rela
 #define elf_info_to_howto_rel	d30v_info_to_howto_rel
 #define elf_backend_object_p	0
-#define elf_backend_final_write_processing	0
 
 #include "elf32-target.h"

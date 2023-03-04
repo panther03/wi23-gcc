@@ -1,6 +1,6 @@
 /* The IGEN simulator generator for GDB, the GNU Debugger.
 
-   Copyright 2002-2013 Free Software Foundation, Inc.
+   Copyright 2002-2023 Free Software Foundation, Inc.
 
    Contributed by Andrew Cagney.
 
@@ -63,7 +63,7 @@ print_engine_issue_postfix_hook (lf *file)
 
 
 static void
-print_run_body (lf *file, gen_entry *table)
+print_run_body (lf *file, const gen_entry *table)
 {
   /* Output the function to execute real code:
 
@@ -116,7 +116,7 @@ cache. */\n\
       lf_putstr (file, "/* prime the main loop */\n");
       lf_putstr (file, "SIM_ASSERT (current_cpu == 0);\n");
       lf_putstr (file, "SIM_ASSERT (nr_cpus == 1);\n");
-      lf_putstr (file, "cia = CIA_GET (CPU);\n");
+      lf_putstr (file, "cia = CPU_PC_GET (CPU);\n");
 
       lf_putstr (file, "\n");
       lf_putstr (file, "while (1)\n");
@@ -202,9 +202,9 @@ cache. */\n\
       lf_putstr (file, "/* process any events */\n");
       lf_putstr (file, "if (sim_events_tick (sd))\n");
       lf_putstr (file, "  {\n");
-      lf_putstr (file, "    CIA_SET (CPU, cia);\n");
+      lf_putstr (file, "    CPU_PC_SET (CPU, cia);\n");
       lf_putstr (file, "    sim_events_process (sd);\n");
-      lf_putstr (file, "    cia = CIA_GET (CPU);\n");
+      lf_putstr (file, "    cia = CPU_PC_GET (CPU);\n");
       lf_putstr (file, "  }\n");
 
       lf_indent (file, -4);
@@ -236,7 +236,7 @@ after all the other CPU's and the event queue have been processed */\n\
       lf_putstr (file, "  {\n");
       lf_indent (file, +4);
       lf_putstr (file, "sim_cpu *cpu = STATE_CPU (sd, current_cpu);\n");
-      lf_putstr (file, "instruction_address cia = CIA_GET (cpu);\n");
+      lf_putstr (file, "instruction_address cia = CPU_PC_GET (cpu);\n");
       lf_putstr (file, "\n");
 
       if (!options.gen.icache)
@@ -245,7 +245,7 @@ after all the other CPU's and the event queue have been processed */\n\
 		     options.insn_bit_size);
 	  print_engine_issue_prefix_hook (file);
 	  print_idecode_body (file, table, "cia =");
-	  lf_putstr (file, "CIA_SET (cpu, cia);\n");
+	  lf_putstr (file, "CPU_PC_SET (cpu, cia);\n");
 	  print_engine_issue_postfix_hook (file);
 	}
 
@@ -335,7 +335,7 @@ after all the other CPU's and the event queue have been processed */\n\
 
 void
 print_engine_run_function_header (lf *file,
-				  char *processor,
+				  const char *processor,
 				  function_decl_type decl_type)
 {
   int indent;
@@ -390,7 +390,9 @@ print_engine_run_function_header (lf *file,
 
 void
 gen_engine_h (lf *file,
-	      gen_table *gen, insn_table *isa, cache_entry *cache_rules)
+	      const gen_table *gen,
+	      const insn_table *isa,
+	      cache_entry *cache_rules)
 {
   gen_list *entry;
   for (entry = gen->tables; entry != NULL; entry = entry->next)
@@ -405,9 +407,11 @@ gen_engine_h (lf *file,
 
 void
 gen_engine_c (lf *file,
-	      gen_table *gen, insn_table *isa, cache_entry *cache_rules)
+	      const gen_table *gen,
+	      const insn_table *isa,
+	      cache_entry *cache_rules)
 {
-  gen_list *entry;
+  const gen_list *entry;
   /* the intro */
   print_includes (file);
   print_include_inline (file, options.module.semantics);

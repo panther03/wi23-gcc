@@ -1,6 +1,6 @@
 /* Host support routines for MinGW, for GDB, the GNU debugger.
 
-   Copyright (C) 2006-2013 Free Software Foundation, Inc.
+   Copyright (C) 2006-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -18,31 +18,10 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 #include "defs.h"
-#include "event-loop.h"
-
-#include "gdb_string.h"
-
-#include "gdb_select.h"
-
-/* The strerror() function can return NULL for errno values that are
-   out of range.  Provide a "safe" version that always returns a
-   printable string.  */
-
-char *
-safe_strerror (int errnum)
-{
-  char *msg;
-
-  msg = strerror (errnum);
-  if (msg == NULL)
-    {
-      static char buf[32];
-
-      xsnprintf (buf, sizeof buf, "(undocumented errno %d)", errnum);
-      msg = buf;
-    }
-  return (msg);
-}
+#include "gdbsupport/event-loop.h"
+#include "gdbsupport/gdb_select.h"
+#include "inferior.h"
+#include <signal.h>
 
 /* Wrapper for select.  Nothing special needed on POSIX platforms.  */
 
@@ -53,15 +32,51 @@ gdb_select (int n, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
   return select (n, readfds, writefds, exceptfds, timeout);
 }
 
-/* Wrapper for the body of signal handlers.  Nothing special needed on
-   POSIX platforms.  */
-
-void
-gdb_call_async_signal_handler (struct async_signal_handler *handler,
-			       int immediate_p)
+/* Host-dependent console fputs method.  POSIX platforms always return
+   zero, to use the default C 'fputs'.  */
+int
+gdb_console_fputs (const char *buf, FILE *f)
 {
-  if (immediate_p)
-    call_async_signal_handler (handler);
-  else
-    mark_async_signal_handler (handler);
+  return 0;
+}
+
+/* See inferior.h.  */
+
+tribool
+sharing_input_terminal (int pid)
+{
+  /* Using host-dependent code here is fine, because the
+     child_terminal_foo functions are meant to be used by child/native
+     targets.  */
+#if defined (__linux__) || defined (__sun__)
+  char buf[100];
+
+  xsnprintf (buf, sizeof (buf), "/proc/%d/fd/0", pid);
+  return is_gdb_terminal (buf);
+#else
+  return TRIBOOL_UNKNOWN;
+#endif
+}
+
+/* Current C-c handler.  */
+static c_c_handler_ftype *current_handler;
+
+/* A wrapper that reinstalls the current signal handler.  */
+static void
+handler_wrapper (int num)
+{
+  signal (num, handler_wrapper);
+  if (current_handler != SIG_IGN)
+    current_handler (num);
+}
+
+/* See inferior.h.  */
+
+c_c_handler_ftype *
+install_sigint_handler (c_c_handler_ftype *fn)
+{
+  signal (SIGINT, handler_wrapper);
+  c_c_handler_ftype *result = current_handler;
+  current_handler = fn;
+  return result;
 }

@@ -1,6 +1,5 @@
 /* Generic support for 32-bit ELF
-   Copyright 1993, 1995, 1998, 1999, 2001, 2002, 2004, 2005, 2007
-   Free Software Foundation, Inc.
+   Copyright (C) 1993-2023 Free Software Foundation, Inc.
 
    This file is part of BFD, the Binary File Descriptor library.
 
@@ -30,32 +29,34 @@
 static reloc_howto_type dummy =
   HOWTO (0,			/* type */
 	 0,			/* rightshift */
-	 0,			/* size (0 = byte, 1 = short, 2 = long) */
+	 0,			/* size */
 	 0,			/* bitsize */
-	 FALSE,			/* pc_relative */
+	 false,			/* pc_relative */
 	 0,			/* bitpos */
 	 complain_overflow_dont, /* complain_on_overflow */
 	 NULL,			/* special_function */
 	 "UNKNOWN",		/* name */
-	 FALSE,			/* partial_inplace */
+	 false,			/* partial_inplace */
 	 0,			/* src_mask */
 	 0,			/* dst_mask */
-	 FALSE);		/* pcrel_offset */
+	 false);		/* pcrel_offset */
 
-static void
+static bool
 elf_generic_info_to_howto (bfd *abfd ATTRIBUTE_UNUSED,
 			   arelent *bfd_reloc,
 			   Elf_Internal_Rela *elf_reloc ATTRIBUTE_UNUSED)
 {
   bfd_reloc->howto = &dummy;
+  return true;
 }
 
-static void
+static bool
 elf_generic_info_to_howto_rel (bfd *abfd ATTRIBUTE_UNUSED,
 			       arelent *bfd_reloc,
 			       Elf_Internal_Rela *elf_reloc ATTRIBUTE_UNUSED)
 {
   bfd_reloc->howto = &dummy;
+  return true;
 }
 
 static void
@@ -66,30 +67,31 @@ check_for_relocs (bfd * abfd, asection * o, void * failed)
       Elf_Internal_Ehdr *ehdrp;
 
       ehdrp = elf_elfheader (abfd);
-      _bfd_error_handler (_("%B: Relocations in generic ELF (EM: %d)"),
+      /* xgettext:c-format */
+      _bfd_error_handler (_("%pB: relocations in generic ELF (EM: %d)"),
 			  abfd, ehdrp->e_machine);
 
       bfd_set_error (bfd_error_wrong_format);
-      * (bfd_boolean *) failed = TRUE;
+      * (bool *) failed = true;
     }
 }
 
-static bfd_boolean
+static bool
 elf32_generic_link_add_symbols (bfd *abfd, struct bfd_link_info *info)
 {
-  bfd_boolean failed = FALSE;
+  bool failed = false;
 
   /* Check if there are any relocations.  */
   bfd_map_over_sections (abfd, check_for_relocs, & failed);
 
   if (failed)
-    return FALSE;
+    return false;
   return bfd_elf_link_add_symbols (abfd, info);
 }
 
-#define TARGET_LITTLE_SYM		bfd_elf32_little_generic_vec
+#define TARGET_LITTLE_SYM		elf32_le_vec
 #define TARGET_LITTLE_NAME		"elf32-little"
-#define TARGET_BIG_SYM			bfd_elf32_big_generic_vec
+#define TARGET_BIG_SYM			elf32_be_vec
 #define TARGET_BIG_NAME			"elf32-big"
 #define ELF_ARCH			bfd_arch_unknown
 #define ELF_MACHINE_CODE		EM_NONE

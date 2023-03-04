@@ -1,6 +1,5 @@
 /* subsegs.h -> subsegs.c
-   Copyright 1987, 1992, 1993, 1994, 1995, 1996, 1998, 2000, 2003, 2005,
-   2006, 2007, 2009 Free Software Foundation, Inc.
+   Copyright (C) 1987-2023 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -91,6 +90,9 @@ typedef struct segment_info_struct {
      this section.  sym->bsym and bfd_section->symbol should be the same.  */
   symbolS *sym;
 
+  /* Used by dwarf2dbg.c for this section's line table entries.  */
+  void *dwarf2_line_seg;
+
   union {
     /* Current size of section holding stabs strings.  */
     unsigned long stab_string_size;
@@ -110,7 +112,7 @@ typedef struct segment_info_struct {
 
 
 #define seg_info(sec) \
-  ((segment_info_type *) bfd_get_section_userdata (stdoutput, sec))
+  ((segment_info_type *) bfd_section_userdata (sec))
 
 extern symbolS *section_symbol (segT);
 

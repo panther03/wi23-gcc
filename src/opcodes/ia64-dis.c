@@ -1,6 +1,5 @@
 /* ia64-dis.c -- Disassemble ia64 instructions
-   Copyright 1998, 1999, 2000, 2002, 2005, 2007, 2008, 2009, 2012
-   Free Software Foundation, Inc.
+   Copyright (C) 1998-2023 Free Software Foundation, Inc.
    Contributed by David Mosberger-Tang <davidm@hpl.hp.com>
 
    This file is part of the GNU opcodes library.
@@ -23,7 +22,7 @@
 #include "sysdep.h"
 #include <assert.h>
 
-#include "dis-asm.h"
+#include "disassemble.h"
 #include "opcode/ia64.h"
 
 #define NELEMS(a)	((int) (sizeof (a) / sizeof (a[0])))
@@ -74,7 +73,7 @@ print_insn_ia64 (bfd_vma memaddr, struct disassemble_info *info)
   const struct ia64_operand *odesc;
   const struct ia64_opcode *idesc;
   const char *err, *str, *tname;
-  BFD_HOST_U_64_BIT value;
+  uint64_t value;
   bfd_byte bundle[16];
   enum ia64_unit unit;
   char regname[16];
@@ -304,7 +303,7 @@ print_insn_ia64 (bfd_vma memaddr, struct disassemble_info *info)
 	  need_comma = 0;
 	}
     }
-  if (slotnum + 1 == ia64_templ_desc[template_val].group_boundary 
+  if (slotnum + 1 == ia64_templ_desc[template_val].group_boundary
       || ((slotnum == 2) && s_bit))
     (*info->fprintf_func) (info->stream, ";;");
 

@@ -1,7 +1,6 @@
 /* gmon_io.c - Input and output from/to gmon.out files.
 
-   Copyright 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2007, 2008
-   Free Software Foundation, Inc.
+   Copyright (C) 1999-2023 Free Software Foundation, Inc.
 
    This file is part of GNU Binutils.
 
@@ -49,10 +48,8 @@ enum gmon_ptr_signedness {
 static enum gmon_ptr_size gmon_get_ptr_size (void);
 static enum gmon_ptr_signedness gmon_get_ptr_signedness (void);
 
-#ifdef BFD_HOST_U_64_BIT
-static int gmon_io_read_64 (FILE *, BFD_HOST_U_64_BIT *);
-static int gmon_io_write_64 (FILE *, BFD_HOST_U_64_BIT);
-#endif
+static int gmon_io_read_64 (FILE *, uint64_t *);
+static int gmon_io_write_64 (FILE *, uint64_t);
 static int gmon_read_raw_arc
   (FILE *, bfd_vma *, bfd_vma *, unsigned long *);
 static int gmon_write_raw_arc
@@ -62,7 +59,7 @@ int gmon_input = 0;
 int gmon_file_version = 0;	/* 0 == old (non-versioned) file format.  */
 
 static enum gmon_ptr_size
-gmon_get_ptr_size ()
+gmon_get_ptr_size (void)
 {
   int size;
 
@@ -88,7 +85,7 @@ gmon_get_ptr_size ()
 }
 
 static enum gmon_ptr_signedness
-gmon_get_ptr_signedness ()
+gmon_get_ptr_signedness (void)
 {
   int sext;
 
@@ -110,9 +107,8 @@ gmon_io_read_32 (FILE *ifp, unsigned int *valp)
   return 0;
 }
 
-#ifdef BFD_HOST_U_64_BIT
 static int
-gmon_io_read_64 (FILE *ifp, BFD_HOST_U_64_BIT *valp)
+gmon_io_read_64 (FILE *ifp, uint64_t *valp)
 {
   char buf[8];
 
@@ -121,15 +117,12 @@ gmon_io_read_64 (FILE *ifp, BFD_HOST_U_64_BIT *valp)
   *valp = bfd_get_64 (core_bfd, buf);
   return 0;
 }
-#endif
 
 int
 gmon_io_read_vma (FILE *ifp, bfd_vma *valp)
 {
   unsigned int val32;
-#ifdef BFD_HOST_U_64_BIT
-  BFD_HOST_U_64_BIT val64;
-#endif
+  uint64_t val64;
 
   switch (gmon_get_ptr_size ())
     {
@@ -137,23 +130,19 @@ gmon_io_read_vma (FILE *ifp, bfd_vma *valp)
       if (gmon_io_read_32 (ifp, &val32))
 	return 1;
       if (gmon_get_ptr_signedness () == ptr_signed)
-        *valp = (int) val32;
+	*valp = (int) val32;
       else
-        *valp = val32;
+	*valp = val32;
       break;
 
-#ifdef BFD_HOST_U_64_BIT
     case ptr_64bit:
       if (gmon_io_read_64 (ifp, &val64))
 	return 1;
-#ifdef BFD_HOST_64_BIT
       if (gmon_get_ptr_signedness () == ptr_signed)
-        *valp = (BFD_HOST_64_BIT) val64;
+	*valp = (int64_t) val64;
       else
-#endif
-        *valp = val64;
+	*valp = val64;
       break;
-#endif
     }
   return 0;
 }
@@ -177,9 +166,8 @@ gmon_io_write_32 (FILE *ofp, unsigned int val)
   return 0;
 }
 
-#ifdef BFD_HOST_U_64_BIT
 static int
-gmon_io_write_64 (FILE *ofp, BFD_HOST_U_64_BIT val)
+gmon_io_write_64 (FILE *ofp, uint64_t val)
 {
   char buf[8];
 
@@ -188,7 +176,6 @@ gmon_io_write_64 (FILE *ofp, BFD_HOST_U_64_BIT val)
     return 1;
   return 0;
 }
-#endif
 
 int
 gmon_io_write_vma (FILE *ofp, bfd_vma val)
@@ -201,12 +188,10 @@ gmon_io_write_vma (FILE *ofp, bfd_vma val)
 	return 1;
       break;
 
-#ifdef BFD_HOST_U_64_BIT
     case ptr_64bit:
-      if (gmon_io_write_64 (ofp, (BFD_HOST_U_64_BIT) val))
+      if (gmon_io_write_64 (ofp, (uint64_t) val))
 	return 1;
       break;
-#endif
     }
   return 0;
 }
@@ -233,9 +218,7 @@ gmon_io_write (FILE *ofp, char *buf, size_t n)
 static int
 gmon_read_raw_arc (FILE *ifp, bfd_vma *fpc, bfd_vma *spc, unsigned long *cnt)
 {
-#ifdef BFD_HOST_U_64_BIT
-  BFD_HOST_U_64_BIT cnt64;
-#endif
+  uint64_t cnt64;
   unsigned int cnt32;
 
   if (gmon_io_read_vma (ifp, fpc)
@@ -250,13 +233,11 @@ gmon_read_raw_arc (FILE *ifp, bfd_vma *fpc, bfd_vma *spc, unsigned long *cnt)
       *cnt = cnt32;
       break;
 
-#ifdef BFD_HOST_U_64_BIT
     case ptr_64bit:
       if (gmon_io_read_64 (ifp, &cnt64))
 	return 1;
       *cnt = cnt64;
       break;
-#endif
 
     default:
       return 1;
@@ -279,12 +260,10 @@ gmon_write_raw_arc (FILE *ofp, bfd_vma fpc, bfd_vma spc, unsigned long cnt)
 	return 1;
       break;
 
-#ifdef BFD_HOST_U_64_BIT
     case ptr_64bit:
-      if (gmon_io_write_64 (ofp, (BFD_HOST_U_64_BIT) cnt))
+      if (gmon_io_write_64 (ofp, (uint64_t) cnt))
 	return 1;
       break;
-#endif
     }
   return 0;
 }
@@ -500,7 +479,7 @@ gmon_out_read (const char *filename)
 	  hist_scale = (double)((tmp.high_pc - tmp.low_pc) / sizeof (UNIT))
 	    / hist_num_bins;
 	  histograms->sample = (int *) xmalloc (hist_num_bins * sizeof (int));
-	  memset (histograms->sample, 0, 
+	  memset (histograms->sample, 0,
 		  hist_num_bins * sizeof (int));
 	}
 
@@ -533,7 +512,7 @@ gmon_out_read (const char *filename)
 	      done (1);
 	    }
 
-	  histograms->sample[i] 
+	  histograms->sample[i]
 	    += bfd_get_16 (core_bfd, (bfd_byte *) raw_bin_count);
 	}
 
@@ -587,7 +566,7 @@ gmon_out_read (const char *filename)
       printf (nbbs == 1 ?
 	      _("\t%d basic-block count record\n") :
 	      _("\t%d basic-block count records\n"), nbbs);
-      first_output = FALSE;
+      first_output = false;
     }
 }
 
@@ -672,7 +651,7 @@ gmon_out_write (const char *filename)
 	    case ptr_64bit:
 	      hdrsize = GMON_HDRSIZE_OLDBSD_64;
 	      /* FIXME: Checking host compiler defines here means that we can't
-		 use a cross gprof alpha OSF.  */ 
+		 use a cross gprof alpha OSF.  */
 #if defined(__alpha__) && defined (__osf__)
 	      padsize = 4;
 #endif
@@ -684,7 +663,7 @@ gmon_out_write (const char *filename)
 	 old BSD and 4.4BSD formats.  */
       if (gmon_io_write_vma (ofp, histograms->lowpc)
           || gmon_io_write_vma (ofp, histograms->highpc)
-          || gmon_io_write_32 (ofp, histograms->num_bins 
+          || gmon_io_write_32 (ofp, histograms->num_bins
 			       * sizeof (UNIT) + hdrsize))
 	{
 	  perror (filename);

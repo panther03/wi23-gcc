@@ -1,7 +1,6 @@
 // options.c -- handle command line options for gold
 
-// Copyright 2006, 2007, 2008, 2009, 2010, 2011, 2013
-// Free Software Foundation, Inc.
+// Copyright (C) 2006-2023 Free Software Foundation, Inc.
 // Written by Ian Lance Taylor <iant@google.com>.
 
 // This file is part of gold.
@@ -147,8 +146,10 @@ One_option::print() const
   for (; len < 30; ++len)
     std::putchar(' ');
 
-  // TODO: if we're boolean, add " (default)" when appropriate.
-  printf("%s\n", gettext(this->helpstring));
+  printf("%s", gettext(this->helpstring));
+  if (this->is_default)
+    printf(" (%s)", _("default"));
+  printf("\n");
 }
 
 void
@@ -340,10 +341,52 @@ General_options::parse_V(const char*, const char*, Command_line*)
 }
 
 void
+General_options::parse_Bno_symbolic(const char*, const char*,
+				    Command_line*)
+{
+  this->bsymbolic_ = BSYMBOLIC_NONE;
+}
+
+void
+General_options::parse_Bsymbolic_functions(const char*, const char*,
+					   Command_line*)
+{
+  this->bsymbolic_ = BSYMBOLIC_FUNCTIONS;
+}
+
+void
+General_options::parse_Bsymbolic(const char*, const char*,
+				 Command_line*)
+{
+  this->bsymbolic_ = BSYMBOLIC_ALL;
+}
+
+void
 General_options::parse_defsym(const char*, const char* arg,
 			      Command_line* cmdline)
 {
   cmdline->script_options().define_symbol(arg);
+}
+
+void
+General_options::parse_discard_all(const char*, const char*,
+				   Command_line*)
+{
+  this->discard_locals_ = DISCARD_ALL;
+}
+
+void
+General_options::parse_discard_locals(const char*, const char*,
+				      Command_line*)
+{
+  this->discard_locals_ = DISCARD_LOCALS;
+}
+
+void
+General_options::parse_discard_none(const char*, const char*,
+				    Command_line*)
+{
+  this->discard_locals_ = DISCARD_NONE;
 }
 
 void
@@ -426,7 +469,6 @@ General_options::parse_library(const char*, const char* arg,
   cmdline->inputs().add_file(file);
 }
 
-#ifdef ENABLE_PLUGINS
 void
 General_options::parse_plugin(const char*, const char* arg,
 			      Command_line*)
@@ -442,7 +484,14 @@ General_options::parse_plugin_opt(const char*, const char* arg,
 {
   this->add_plugin_option(arg);
 }
-#endif // ENABLE_PLUGINS
+
+void
+General_options::parse_no_power10_stubs(const char*, const char*,
+					Command_line*)
+{
+  this->set_power10_stubs("no");
+  this->set_user_set_power10_stubs();
+}
 
 void
 General_options::parse_R(const char* option, const char* arg,
@@ -549,6 +598,7 @@ General_options::parse_dynamic_list(const char*, const char* arg,
 {
   if (!read_dynamic_list(arg, cmdline, &this->dynamic_list_))
     gold::gold_fatal(_("unable to parse dynamic-list script file %s"), arg);
+  this->have_dynamic_list_ = true;
 }
 
 void
@@ -666,6 +716,20 @@ General_options::string_to_object_format(const char* arg)
     }
 }
 
+const char*
+General_options::object_format_to_string(General_options::Object_format fmt)
+{
+  switch (fmt)
+    {
+    case General_options::OBJECT_FORMAT_ELF:
+      return "elf";
+    case General_options::OBJECT_FORMAT_BINARY:
+      return "binary";
+    default:
+      gold_unreachable();
+    }
+}
+
 void
 General_options::parse_fix_v4bx(const char*, const char*,
 				Command_line*)
@@ -690,6 +754,39 @@ void
 General_options::parse_EL(const char*, const char*, Command_line*)
 {
   this->endianness_ = ENDIANNESS_LITTLE;
+}
+
+void
+General_options::copy_from_posdep_options(
+    const Position_dependent_options& posdep)
+{
+  this->set_as_needed(posdep.as_needed());
+  this->set_Bdynamic(posdep.Bdynamic());
+  this->set_format(
+      General_options::object_format_to_string(posdep.format_enum()));
+  this->set_whole_archive(posdep.whole_archive());
+  this->set_incremental_disposition(posdep.incremental_disposition());
+}
+
+void
+General_options::parse_push_state(const char*, const char*, Command_line*)
+{
+  Position_dependent_options* posdep = new Position_dependent_options(*this);
+  this->options_stack_.push_back(posdep);
+}
+
+void
+General_options::parse_pop_state(const char*, const char*, Command_line*)
+{
+  if (this->options_stack_.empty())
+    {
+      gold::gold_error(_("unbalanced --push-state/--pop-state"));
+      return;
+    }
+  Position_dependent_options* posdep = this->options_stack_.back();
+  this->options_stack_.pop_back();
+  this->copy_from_posdep_options(*posdep);
+  delete posdep;
 }
 
 } // End namespace gold.
@@ -855,7 +952,7 @@ parse_short_option(int argc, const char** argv, int pos_in_argv_i,
   // We handle -z as a special case.
   static gold::options::One_option dash_z("", gold::options::DASH_Z,
 					  'z', "", NULL, "Z-OPTION", false,
-					  NULL);
+					  NULL, false);
   gold::options::One_option* retval = NULL;
   if (this_argv[pos_in_argv_i] == 'z')
     retval = &dash_z;
@@ -911,13 +1008,15 @@ namespace gold
 {
 
 General_options::General_options()
-  : printed_version_(false),
+  : bsymbolic_(BSYMBOLIC_NONE),
+    printed_version_(false),
     execstack_status_(EXECSTACK_FROM_INPUT),
     icf_status_(ICF_NONE),
     static_(false),
     do_demangle_(false),
     plugins_(NULL),
     dynamic_list_(),
+    have_dynamic_list_(false),
     incremental_mode_(INCREMENTAL_OFF),
     incremental_disposition_(INCREMENTAL_STARTUP),
     incremental_startup_disposition_(INCREMENTAL_CHECK),
@@ -926,7 +1025,10 @@ General_options::General_options()
     symbols_to_retain_(),
     section_starts_(),
     fix_v4bx_(FIX_V4BX_NONE),
-    endianness_(ENDIANNESS_NOT_SET)
+    endianness_(ENDIANNESS_NOT_SET),
+    discard_locals_(DISCARD_SEC_MERGE),
+    orphan_handling_enum_(ORPHAN_PLACE),
+    start_stop_visibility_enum_(elfcpp::STV_PROTECTED)
 {
   // Turn off option registration once construction is complete.
   gold::options::ready_to_register = false;
@@ -1085,6 +1187,53 @@ General_options::finalize()
       this->set_do_demangle(getenv("COLLECT_NO_DEMANGLE") == NULL);
     }
 
+  // Parse the --orphan-handling argument.
+  if (this->user_set_orphan_handling())
+    {
+      if (strcmp(this->orphan_handling(), "place") == 0)
+        this->set_orphan_handling_enum(ORPHAN_PLACE);
+      else if (strcmp(this->orphan_handling(), "discard") == 0)
+        this->set_orphan_handling_enum(ORPHAN_DISCARD);
+      else if (strcmp(this->orphan_handling(), "warn") == 0)
+        this->set_orphan_handling_enum(ORPHAN_WARN);
+      else if (strcmp(this->orphan_handling(), "error") == 0)
+        this->set_orphan_handling_enum(ORPHAN_ERROR);
+    }
+
+  // Parse the -z start-stop-visibility argument.
+  if (this->user_set_start_stop_visibility())
+    {
+      if (strcmp(this->start_stop_visibility(), "default") == 0)
+        this->set_start_stop_visibility_enum(elfcpp::STV_DEFAULT);
+      else if (strcmp(this->start_stop_visibility(), "internal") == 0)
+        this->set_start_stop_visibility_enum(elfcpp::STV_INTERNAL);
+      else if (strcmp(this->start_stop_visibility(), "hidden") == 0)
+        this->set_start_stop_visibility_enum(elfcpp::STV_HIDDEN);
+      else if (strcmp(this->start_stop_visibility(), "protected") == 0)
+        this->set_start_stop_visibility_enum(elfcpp::STV_PROTECTED);
+    }
+
+  // Parse the --power10-stubs argument.
+  if (!this->user_set_power10_stubs())
+    {
+      // --power10-stubs without an arg is equivalent to --power10-stubs=yes
+      // but not specifying --power10-stubs at all should be equivalent to
+      // --power10-stubs=auto.  This doesn't fit into the notion of
+      // "default_value", used both as a static initializer and to provide
+      // a missing optional arg.  Fix it here.
+      this->set_power10_stubs("auto");
+      this->set_power10_stubs_enum(POWER10_STUBS_AUTO);
+    }
+  else
+    {
+      if (strcmp(this->power10_stubs(), "auto") == 0)
+	this->set_power10_stubs_enum(POWER10_STUBS_AUTO);
+      else if (strcmp(this->power10_stubs(), "no") == 0)
+	this->set_power10_stubs_enum(POWER10_STUBS_NO);
+      else if (strcmp(this->power10_stubs(), "yes") == 0)
+	this->set_power10_stubs_enum(POWER10_STUBS_YES);
+    }
+
   // -M is equivalent to "-Map -".
   if (this->print_map() && !this->user_set_Map())
     {
@@ -1120,6 +1269,13 @@ General_options::finalize()
     gold_warning(_("ignoring --thread-count: "
 		   "%s was compiled without thread support"),
 		 program_name);
+#endif
+
+#ifndef ENABLE_PLUGINS
+  if (this->has_plugins())
+    gold_fatal(_("cannot use --plugin: "
+		 "%s was compiled without plugin support"),
+	       program_name);
 #endif
 
   std::string libpath;
@@ -1255,6 +1411,10 @@ General_options::finalize()
 		     "--emit-relocs"));
       if (this->has_plugins())
 	gold_fatal(_("incremental linking is not compatible with --plugin"));
+      if (this->relro())
+	gold_fatal(_("incremental linking is not compatible with -z relro"));
+      if (this->pie())
+	gold_fatal(_("incremental linking is not compatible with -pie"));
       if (this->gc_sections())
 	{
 	  gold_warning(_("ignoring --gc-sections for an incremental link"));
@@ -1272,6 +1432,15 @@ General_options::finalize()
 	  this->set_compress_debug_sections("none");
 	}
     }
+
+#ifndef HAVE_ZSTD
+  if (strcmp(this->compress_debug_sections(), "zstd") == 0)
+    {
+      gold_error(_("--compress-debug-sections=zstd: gold is not built with "
+		   "zstd support"));
+      this->set_compress_debug_sections("none");
+    }
+#endif
 
   // --rosegment-gap implies --rosegment.
   if (this->user_set_rosegment_gap())
@@ -1478,6 +1647,12 @@ Command_line::process(int argc, const char** argv)
   if (this->inputs_.in_group())
     {
       fprintf(stderr, _("%s: missing group end\n"), program_name);
+      usage();
+    }
+
+  if (this->inputs_.in_lib())
+    {
+      fprintf(stderr, _("%s: missing lib end\n"), program_name);
       usage();
     }
 

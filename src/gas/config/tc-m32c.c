@@ -1,5 +1,5 @@
 /* tc-m32c.c -- Assembler for the Renesas M32C.
-   Copyright (C) 2005, 2006, 2007, 2008, 2009, 2010 Free Software Foundation.
+   Copyright (C) 2005-2023 Free Software Foundation, Inc.
    Contributed by RedHat.
 
    This file is part of GAS, the GNU Assembler.
@@ -15,19 +15,18 @@
    GNU General Public License for more details.
 
    You should have received a copy of the GNU General Public License
-   along with GAS; see the file COPYING.  If not, write to
-   the Free Software Foundation, 59 Temple Place - Suite 330,
-   Boston, MA 02111-1307, USA.  */
+   along with this program; if not, write to the Free Software
+   Foundation, Inc., 51 Franklin Street - Fifth Floor, Boston,
+   MA 02110-1301, USA.  */
 
 #include "as.h"
-#include "subsegs.h"     
+#include "subsegs.h"
 #include "symcat.h"
 #include "opcodes/m32c-desc.h"
 #include "opcodes/m32c-opc.h"
 #include "cgen.h"
 #include "elf/common.h"
 #include "elf/m32c.h"
-#include "libbfd.h"
 #include "safe-ctype.h"
 
 /* Structure to hold all of the different components
@@ -87,7 +86,6 @@ size_t md_longopts_size = sizeof (md_longopts);
 
 static unsigned long m32c_mach = bfd_mach_m16c;
 static int cpu_mach = (1 << MACH_M16C);
-static int insn_size;
 static int m32c_relax = 0;
 
 /* Flags to set in the elf header */
@@ -105,7 +103,7 @@ set_isa (enum isa_attr isa_num)
 static void s_bss (int);
 
 int
-md_parse_option (int c, char * arg ATTRIBUTE_UNUSED)
+md_parse_option (int c, const char * arg ATTRIBUTE_UNUSED)
 {
   switch (c)
     {
@@ -141,7 +139,7 @@ void
 md_show_usage (FILE * stream)
 {
   fprintf (stream, _(" M32C specific command line options:\n"));
-} 
+}
 
 static void
 s_bss (int ignore ATTRIBUTE_UNUSED)
@@ -186,22 +184,6 @@ md_begin (void)
 
   /* Set the machine type */
   bfd_default_set_arch_mach (stdoutput, bfd_arch_m32c, m32c_mach);
-
-  insn_size = 0;
-}
-
-void
-m32c_md_end (void)
-{
-  int i, n_nops;
-
-  if (bfd_get_section_flags (stdoutput, now_seg) & SEC_CODE)
-    {
-      /* Pad with nops for objdump.  */
-      n_nops = (32 - ((insn_size) % 32)) / 8;
-      for (i = 1; i <= n_nops; i++)
-	md_assemble ("nop");
-    }
 }
 
 void
@@ -233,7 +215,7 @@ m32c_start_line_hook (void)
 
 /* Process [[indirect-operands]] in instruction str.  */
 
-static bfd_boolean
+static bool
 m32c_indirect_operand (char *str)
 {
   char *new_str;
@@ -261,21 +243,21 @@ m32c_indirect_operand (char *str)
       if (s[0] == '[' && s[1] == '[')
 	indirection[operand] = relative;
     }
-   
+
   if (indirection[1] == none && indirection[2] == none)
-    return FALSE;
-  
+    return false;
+
   operand = 1;
   ns_len = strlen (str);
-  new_str = (char*) xmalloc (ns_len);
+  new_str = XNEWVEC (char, ns_len);
   ns = new_str;
   ns_end = ns + ns_len;
- 
+
   for (s = str; *s; s++)
     {
       if (s[0] == ',')
 	operand = 2;
- 
+
       if (s[0] == '[' && ! brace_n[operand])
 	{
 	  brace_n[operand] += 1;
@@ -283,7 +265,7 @@ m32c_indirect_operand (char *str)
 	  if (indirection[operand] != none)
 	    continue;
 	}
- 
+
       else if (s[0] == '[' && brace_n[operand])
 	{
 	  brace_n[operand] += 1;
@@ -305,7 +287,7 @@ m32c_indirect_operand (char *str)
       *ns = s[0];
       ns += 1;
       if (ns >= ns_end)
-	return FALSE;
+	return false;
       if (s[0] == 0)
 	break;
     }
@@ -315,17 +297,17 @@ m32c_indirect_operand (char *str)
       {
 	fprintf (stderr, "Unmatched [[operand-%d]] %d\n", operand, brace_n[operand]);
       }
-       
+
   if (indirection[1] != none && indirection[2] != none)
-    md_assemble ("src-dest-indirect");
+    md_assemble ((char *) "src-dest-indirect");
   else if (indirection[1] != none)
-    md_assemble ("src-indirect");
+    md_assemble ((char *) "src-indirect");
   else if (indirection[2] != none)
-    md_assemble ("dest-indirect");
+    md_assemble ((char *) "dest-indirect");
 
   md_assemble (new_str);
   free (new_str);
-  return TRUE;
+  return true;
 }
 
 void
@@ -336,6 +318,7 @@ md_assemble (char * str)
   char *    errmsg;
   finished_insnS results;
   int rl_type;
+  int insn_size;
 
   if (m32c_mach == bfd_mach_m32c && m32c_indirect_operand (str))
     return;
@@ -345,7 +328,7 @@ md_assemble (char * str)
 
   insn.insn = m32c_cgen_assemble_insn
     (gas_cgen_cpu_desc, str, & insn.fields, insn.buffer, & errmsg);
-  
+
   if (!insn.insn)
     {
       as_bad ("%s", errmsg);
@@ -398,7 +381,7 @@ md_assemble (char * str)
 /* The syntax in the manual says constants begin with '#'.
    We just ignore it.  */
 
-void 
+void
 md_operand (expressionS * exp)
 {
   /* In case of a syntax error, escape back to try next syntax combo. */
@@ -409,8 +392,8 @@ md_operand (expressionS * exp)
 valueT
 md_section_align (segT segment, valueT size)
 {
-  int align = bfd_get_section_alignment (stdoutput, segment);
-  return ((size + (1 << align) - 1) & (-1 << align));
+  int align = bfd_section_alignment (segment);
+  return ((size + (1 << align) - 1) & -(1 << align));
 }
 
 symbolS *
@@ -475,7 +458,7 @@ enum {
   M32C_MACRO_ADJNZ_3,
   M32C_MACRO_ADJNZ_4,
   M32C_MACRO_ADJNZ_5,
-} M32C_Macros;
+};
 
 static struct {
   int insn;
@@ -536,8 +519,8 @@ insn_to_subtype (int inum, const CGEN_INSN *insn)
   unsigned int i;
 
   if (insn
-      && (strncmp (insn->base->mnemonic, "adjnz", 5) == 0
-	  || strncmp (insn->base->mnemonic, "sbjnz", 5) == 0))
+      && (startswith (insn->base->mnemonic, "adjnz")
+	  || startswith (insn->base->mnemonic, "sbjnz")))
     {
       i = 23 + insn->base->bitsize/8 - 3;
       /*printf("mapping %d used for %s\n", i, insn->base->mnemonic);*/
@@ -595,7 +578,7 @@ md_estimate_size_before_relax (fragS * fragP, segT segment ATTRIBUTE_UNUSED)
     }
 
   return subtype_mappings[fragP->fr_subtype].bytes - (fragP->fr_fix - where);
-} 
+}
 
 /* *fragP has been relaxed to its final size, and now needs to have
    the bytes inside it modified to conform to the new size.
@@ -1019,10 +1002,9 @@ void
 m32c_cons_fix_new (fragS *	frag,
 		   int		where,
 		   int		size,
-		   expressionS *exp)
+		   expressionS *exp,
+		   bfd_reloc_code_real_type type)
 {
-  bfd_reloc_code_real_type type;
-
   switch (size)
     {
     case 1:
@@ -1064,10 +1046,10 @@ tc_gen_reloc (asection *sec, fixS *fx)
       || fx->fx_r_type == BFD_RELOC_M32C_RL_2ADDR)
     {
       arelent * reloc;
- 
-      reloc = xmalloc (sizeof (* reloc));
- 
-      reloc->sym_ptr_ptr = xmalloc (sizeof (asymbol *));
+
+      reloc = XNEW (arelent);
+
+      reloc->sym_ptr_ptr = XNEW (asymbol *);
       *reloc->sym_ptr_ptr = symbol_get_bfdsym (fx->fx_addsy);
       reloc->address = fx->fx_frag->fr_address + fx->fx_where;
       reloc->howto = bfd_reloc_type_lookup (stdoutput, fx->fx_r_type);
@@ -1153,16 +1135,13 @@ md_number_to_chars (char * buf, valueT val, int n)
    type, and store the appropriate bytes in *litP.  The number of LITTLENUMS
    emitted is stored in *sizeP .  An error message is returned, or NULL on OK.  */
 
-/* Equal to MAX_PRECISION in atof-ieee.c.  */
-#define MAX_LITTLENUMS 6
-
-char *
+const char *
 md_atof (int type, char * litP, int * sizeP)
 {
-  return ieee_md_atof (type, litP, sizeP, TRUE);
+  return ieee_md_atof (type, litP, sizeP, true);
 }
 
-bfd_boolean
+bool
 m32c_fix_adjustable (fixS * fixP)
 {
   int reloc;
@@ -1248,19 +1227,16 @@ m32c_fix_adjustable (fixS * fixP)
 }
 
 /* Worker function for m32c_is_colon_insn().  */
-static char
-restore_colon (int advance_i_l_p_by)
+static int
+restore_colon (char *next_i_l_p, char *nul_char)
 {
-  char c;
-
   /* Restore the colon, and advance input_line_pointer to
      the end of the new symbol.  */
-  * input_line_pointer = ':';
-  input_line_pointer += advance_i_l_p_by;
-  c = * input_line_pointer;
-  * input_line_pointer = 0;
-
-  return c;
+  *input_line_pointer = *nul_char;
+  input_line_pointer = next_i_l_p;
+  *nul_char = *next_i_l_p;
+  *next_i_l_p = 0;
+  return 1;
 }
 
 /* Determines if the symbol starting at START and ending in
@@ -1268,28 +1244,31 @@ restore_colon (int advance_i_l_p_by)
    (but which has now been replaced bu a NUL) is in fact an
    :Z, :S, :Q, or :G suffix.
    If it is, then it restores the colon, advances INPUT_LINE_POINTER
-   to the real end of the instruction/symbol, and returns the character
-   that really terminated the symbol.  Otherwise it returns 0.  */
-char
-m32c_is_colon_insn (char *start ATTRIBUTE_UNUSED)
+   to the real end of the instruction/symbol, saves the char there to
+   NUL_CHAR and pokes a NUL, and returns 1.  Otherwise it returns 0.  */
+int
+m32c_is_colon_insn (char *start ATTRIBUTE_UNUSED, char *nul_char)
 {
   char * i_l_p = input_line_pointer;
 
+  if (*nul_char == '"')
+    ++i_l_p;
+
   /* Check to see if the text following the colon is 'G' */
   if (TOLOWER (i_l_p[1]) == 'g' && (i_l_p[2] == ' ' || i_l_p[2] == '\t'))
-    return restore_colon (2);
+    return restore_colon (i_l_p + 2, nul_char);
 
   /* Check to see if the text following the colon is 'Q' */
   if (TOLOWER (i_l_p[1]) == 'q' && (i_l_p[2] == ' ' || i_l_p[2] == '\t'))
-    return restore_colon (2);
+    return restore_colon (i_l_p + 2, nul_char);
 
   /* Check to see if the text following the colon is 'S' */
   if (TOLOWER (i_l_p[1]) == 's' && (i_l_p[2] == ' ' || i_l_p[2] == '\t'))
-    return restore_colon (2);
+    return restore_colon (i_l_p + 2, nul_char);
 
   /* Check to see if the text following the colon is 'Z' */
   if (TOLOWER (i_l_p[1]) == 'z' && (i_l_p[2] == ' ' || i_l_p[2] == '\t'))
-    return restore_colon (2);
+    return restore_colon (i_l_p + 2, nul_char);
 
   return 0;
 }

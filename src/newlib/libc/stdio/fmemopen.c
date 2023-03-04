@@ -10,7 +10,7 @@ FUNCTION
 INDEX
 	fmemopen
 
-ANSI_SYNOPSIS
+SYNOPSIS
 	#include <stdio.h>
 	FILE *fmemopen(void *restrict <[buf]>, size_t <[size]>,
 		       const char *restrict <[mode]>);
@@ -83,10 +83,9 @@ typedef struct fmemcookie {
 /* Read up to non-zero N bytes into BUF from stream described by
    COOKIE; return number of bytes read (0 on EOF).  */
 static _READ_WRITE_RETURN_TYPE
-_DEFUN(fmemreader, (ptr, cookie, buf, n),
-       struct _reent *ptr _AND
-       void *cookie _AND
-       char *buf _AND
+fmemreader (struct _reent *ptr,
+       void *cookie,
+       char *buf,
        _READ_WRITE_BUFSIZE_TYPE n)
 {
   fmemcookie *c = (fmemcookie *) cookie;
@@ -103,10 +102,9 @@ _DEFUN(fmemreader, (ptr, cookie, buf, n),
 /* Write up to non-zero N bytes of BUF into the stream described by COOKIE,
    returning the number of bytes written or EOF on failure.  */
 static _READ_WRITE_RETURN_TYPE
-_DEFUN(fmemwriter, (ptr, cookie, buf, n),
-       struct _reent *ptr _AND
-       void *cookie _AND
-       const char *buf _AND
+fmemwriter (struct _reent *ptr,
+       void *cookie,
+       const char *buf,
        _READ_WRITE_BUFSIZE_TYPE n)
 {
   fmemcookie *c = (fmemcookie *) cookie;
@@ -150,7 +148,7 @@ _DEFUN(fmemwriter, (ptr, cookie, buf, n),
     memcpy (c->buf + c->pos - n, buf, n - adjust);
   else
     {
-      ptr->_errno = ENOSPC;
+      _REENT_ERRNO(ptr) = ENOSPC;
       return EOF;
     }
   return n;
@@ -159,10 +157,9 @@ _DEFUN(fmemwriter, (ptr, cookie, buf, n),
 /* Seek to position POS relative to WHENCE within stream described by
    COOKIE; return resulting position or fail with EOF.  */
 static _fpos_t
-_DEFUN(fmemseeker, (ptr, cookie, pos, whence),
-       struct _reent *ptr _AND
-       void *cookie _AND
-       _fpos_t pos _AND
+fmemseeker (struct _reent *ptr,
+       void *cookie,
+       _fpos_t pos,
        int whence)
 {
   fmemcookie *c = (fmemcookie *) cookie;
@@ -178,18 +175,18 @@ _DEFUN(fmemseeker, (ptr, cookie, pos, whence),
     offset += c->eof;
   if (offset < 0)
     {
-      ptr->_errno = EINVAL;
+      _REENT_ERRNO(ptr) = EINVAL;
       offset = -1;
     }
   else if (offset > c->max)
     {
-      ptr->_errno = ENOSPC;
+      _REENT_ERRNO(ptr) = ENOSPC;
       offset = -1;
     }
 #ifdef __LARGE64_FILES
   else if ((_fpos_t) offset != offset)
     {
-      ptr->_errno = EOVERFLOW;
+      _REENT_ERRNO(ptr) = EOVERFLOW;
       offset = -1;
     }
 #endif /* __LARGE64_FILES */
@@ -214,10 +211,9 @@ _DEFUN(fmemseeker, (ptr, cookie, pos, whence),
    COOKIE; return resulting position or fail with EOF.  */
 #ifdef __LARGE64_FILES
 static _fpos64_t
-_DEFUN(fmemseeker64, (ptr, cookie, pos, whence),
-       struct _reent *ptr _AND
-       void *cookie _AND
-       _fpos64_t pos _AND
+fmemseeker64 (struct _reent *ptr,
+       void *cookie,
+       _fpos64_t pos,
        int whence)
 {
   _off64_t offset = (_off64_t) pos;
@@ -228,12 +224,12 @@ _DEFUN(fmemseeker64, (ptr, cookie, pos, whence),
     offset += c->eof;
   if (offset < 0)
     {
-      ptr->_errno = EINVAL;
+      _REENT_ERRNO(ptr) = EINVAL;
       offset = -1;
     }
   else if (offset > c->max)
     {
-      ptr->_errno = ENOSPC;
+      _REENT_ERRNO(ptr) = ENOSPC;
       offset = -1;
     }
   else
@@ -256,8 +252,7 @@ _DEFUN(fmemseeker64, (ptr, cookie, pos, whence),
 
 /* Reclaim resources used by stream described by COOKIE.  */
 static int
-_DEFUN(fmemcloser, (ptr, cookie),
-       struct _reent *ptr _AND
+fmemcloser (struct _reent *ptr,
        void *cookie)
 {
   fmemcookie *c = (fmemcookie *) cookie;
@@ -268,10 +263,9 @@ _DEFUN(fmemcloser, (ptr, cookie),
 /* Open a memstream around buffer BUF of SIZE bytes, using MODE.
    Return the new stream, or fail with NULL.  */
 FILE *
-_DEFUN(_fmemopen_r, (ptr, buf, size, mode),
-       struct _reent *ptr _AND
-       void *__restrict buf _AND
-       size_t size _AND
+_fmemopen_r (struct _reent *ptr,
+       void *__restrict buf,
+       size_t size,
        const char *__restrict mode)
 {
   FILE *fp;
@@ -283,7 +277,7 @@ _DEFUN(_fmemopen_r, (ptr, buf, size, mode),
     return NULL;
   if (!size || !(buf || flags & __SRW))
     {
-      ptr->_errno = EINVAL;
+      _REENT_ERRNO(ptr) = EINVAL;
       return NULL;
     }
   if ((fp = __sfp (ptr)) == NULL)
@@ -361,9 +355,8 @@ _DEFUN(_fmemopen_r, (ptr, buf, size, mode),
 
 #ifndef _REENT_ONLY
 FILE *
-_DEFUN(fmemopen, (buf, size, mode),
-       void *__restrict buf _AND
-       size_t size _AND
+fmemopen (void *__restrict buf,
+       size_t size,
        const char *__restrict mode)
 {
   return _fmemopen_r (_REENT, buf, size, mode);

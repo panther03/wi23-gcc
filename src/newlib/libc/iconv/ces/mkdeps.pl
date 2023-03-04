@@ -200,7 +200,7 @@ delete $sections{$section_cesdeps};
 print STDERR "Warning: section \"$_\" was ignored!\n"
 foreach (keys %sections);
 
-exit 1;
+exit 0;
 }
 
 # =============================================================================
@@ -213,7 +213,7 @@ exit 1;
 sub err($)
 {
   print STDERR "Error while running script.\n$_[0]\n";
-  exit 0;
+  exit 1;
 }
 
 
@@ -328,12 +328,15 @@ sub process_section_encodings($)
   generate_cesbi_c (\%cesenc);
 
   # Generate ccsbi.c file
-  my @ccs = keys %ccsenc;
+  my @ccs = sort keys %ccsenc;
   generate_ccsbi_c (\@ccs);
   
   # Generate ccsnames.h header file
   generate_ccsnames_h (\%ccsenc);
 
+  # Generate iconv.m4 file
+  my @encodings = sort keys %encalias;
+  generate_iconv_m4 (\@encodings);
 }
 
 # ==============================================================================
@@ -524,12 +527,12 @@ sub generate_cesbi_h($$)
   foreach my $ces (@ces)
   {
     print CESBI_H "#ifdef $macro_to_ucs_ces\U$ces\n";
-    print CESBI_H "extern _CONST iconv_to_ucs_ces_handlers_t\n";
+    print CESBI_H "extern const iconv_to_ucs_ces_handlers_t\n";
     print CESBI_H "$var_to_ucs_handlers$ces;\n";
     print CESBI_H "#endif\n";
 
     print CESBI_H "#ifdef $macro_from_ucs_ces\U$ces\n";
-    print CESBI_H "extern _CONST iconv_from_ucs_ces_handlers_t\n";
+    print CESBI_H "extern const iconv_from_ucs_ces_handlers_t\n";
     print CESBI_H "$var_from_ucs_handlers$ces;\n";
     print CESBI_H "#endif\n\n";
   }
@@ -584,8 +587,8 @@ sub generate_aliasesbi_c($)
   print ALIASESBI_C "$comment_automatic\n\n";
   print ALIASESBI_C "#include <_ansi.h>\n";
   print ALIASESBI_C "#include \"encnames.h\"\n\n";
-  print ALIASESBI_C "_CONST char *\n";
-  print ALIASESBI_C "$var_aliases =\n";
+  print ALIASESBI_C "const char\n";
+  print ALIASESBI_C "$var_aliases\[\] =\n";
   print ALIASESBI_C "{\n";
 
   foreach my $enc (sort keys %{$_[0]})
@@ -598,7 +601,7 @@ sub generate_aliasesbi_c($)
     print ALIASESBI_C "#endif\n";
   }
   print ALIASESBI_C "  \"\"\n";
-  print ALIASESBI_C "};\n\n";
+  print ALIASESBI_C "};\n";
   
   close ALIASESBI_C or err "Error while closing ../lib/aliasesbi.c file.";
 }
@@ -749,7 +752,7 @@ sub generate_ccsbi_h($)
   {
     print CCSBI_H "#if defined ($macro_to_ucs_ccs\U$ccs) \\\n";
     print CCSBI_H " || defined ($macro_from_ucs_ccs\U$ccs)\n";
-    print CCSBI_H "extern _CONST iconv_ccs_t\n";
+    print CCSBI_H "extern const iconv_ccs_t\n";
     print CCSBI_H "$var_ccs$ccs;\n";
     print CCSBI_H "#endif\n";
   }
@@ -789,7 +792,7 @@ sub generate_cesbi_c($)
   {
     print CESBI_C "#if defined ($macro_to_ucs_ces\U$ces) \\\n";
     print CESBI_C " || defined ($macro_from_ucs_ces\U$ces)\n";
-    print CESBI_C "static _CONST char *\n";
+    print CESBI_C "static const char *\n";
     print CESBI_C "$var_ces_names${ces}\[] =\n";
     print CESBI_C "{\n";
     my @encodings = sort @{$cesenc{$ces}};
@@ -808,36 +811,36 @@ sub generate_cesbi_c($)
   print CESBI_C "/*\n";
   print CESBI_C " * The following structure contains the list of \"to UCS\" linked-in CES converters.\n";
   print CESBI_C " */\n";
-  print CESBI_C "_CONST iconv_to_ucs_ces_t\n";
+  print CESBI_C "const iconv_to_ucs_ces_t\n";
   print CESBI_C "_iconv_to_ucs_ces[] =\n";
   print CESBI_C "{\n";
   
   foreach my $ces (@ces)
   {
     print CESBI_C "#ifdef $macro_to_ucs_ces\U$ces\n";
-    print CESBI_C "  {(_CONST char **)$var_ces_names$ces,\n";
+    print CESBI_C "  {(const char **)$var_ces_names$ces,\n";
     print CESBI_C "   &$var_to_ucs_handlers$ces},\n";
     print CESBI_C "#endif\n";
   }
-  print CESBI_C "  {(_CONST char **)NULL,\n";
+  print CESBI_C "  {(const char **)NULL,\n";
   print CESBI_C "  (iconv_to_ucs_ces_handlers_t *)NULL}\n";
   print CESBI_C "};\n\n";
 
   print CESBI_C "/*\n";
   print CESBI_C " * The following structure contains the list of \"from UCS\" linked-in CES converters.\n";
   print CESBI_C " */\n";
-  print CESBI_C "_CONST iconv_from_ucs_ces_t\n";
+  print CESBI_C "const iconv_from_ucs_ces_t\n";
   print CESBI_C "_iconv_from_ucs_ces[] =\n";
   print CESBI_C "{\n";
   
   foreach my $ces (@ces)
   {
     print CESBI_C "#ifdef $macro_from_ucs_ces\U$ces\n";
-    print CESBI_C "  {(_CONST char **)$var_ces_names$ces,\n";
+    print CESBI_C "  {(const char **)$var_ces_names$ces,\n";
     print CESBI_C "   &$var_from_ucs_handlers$ces},\n";
     print CESBI_C "#endif\n";
   }
-  print CESBI_C "  {(_CONST char **)NULL,\n";
+  print CESBI_C "  {(const char **)NULL,\n";
   print CESBI_C "  (iconv_from_ucs_ces_handlers_t *)NULL}\n";
   print CESBI_C "};\n";
 
@@ -866,7 +869,7 @@ sub generate_ccsbi_c($)
   print CESBI_C " * The following array contains the list of built-in CCS tables.\n";
   print CESBI_C " */\n";
 
-  print CESBI_C "_CONST iconv_ccs_t *\n";
+  print CESBI_C "const iconv_ccs_t *\n";
   print CESBI_C "_iconv_ccs[] =\n";
   print CESBI_C "{\n";
 
@@ -927,4 +930,40 @@ sub generate_ccsnames_h($)
 
   print CCSNAMES_H "\n#endif /* !__CCSNAMES_H__ */\n\n";
   close CCSNAMES_H or err "Error while closing ../ccs/ccsnames.h file.";
+}
+
+# ==============================================================================
+#
+# Generate iconv.m4 file.
+#
+# Parameter 1 (input): array reference with encoding names
+#
+# ==============================================================================
+sub generate_iconv_m4($)
+{
+  my @encodings = @{$_[0]};
+
+  print "Debug: create \"../../../iconv.m4\" file.\n" if $verbose;
+  open (ICONV_M4, '>', "../../../iconv.m4")
+  or err "Can't create \"../../../iconv.m4\" file for writing.\nSystem error message: $!.\n";
+
+  print ICONV_M4 "$comment_automatic\n";
+  print ICONV_M4 "AC_DEFUN([NEWLIB_ICONV_DEFINES],[dnl\n";
+  foreach my $encoding (@encodings)
+  {
+    my $ucencoding = uc $encoding;
+
+    my $tovar = "_ICONV_TO_ENCODING_$ucencoding";
+    print ICONV_M4 "  if test \"\$$tovar\" = 1; then\n";
+    print ICONV_M4 "    AC_DEFINE($tovar, 1, [Support $encoding output encoding.])\n";
+    print ICONV_M4 "  fi\n";
+
+    my $fromvar = "_ICONV_FROM_ENCODING_$ucencoding";
+    print ICONV_M4 "  if test \"\$$fromvar\" = 1; then\n";
+    print ICONV_M4 "    AC_DEFINE($fromvar, 1, [Support $encoding input encoding.])\n";
+    print ICONV_M4 "  fi\n";
+  }
+  print ICONV_M4 "])\n";
+
+  close ICONV_M4 or err "Error while closing ../../../iconv.m4 file.";
 }

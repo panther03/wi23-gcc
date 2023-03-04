@@ -1,7 +1,7 @@
 #ifndef MICROBLAZE_H
 #define MICROBLAZE_H
 
-/* Copyright 2009-2013 Free Software Foundation, Inc.
+/* Copyright 2009-2023 Free Software Foundation, Inc.
 
    This file is part of the Xilinx MicroBlaze simulator.
 
@@ -18,13 +18,13 @@
    You should have received a copy of the GNU General Public License
    along with this program; if not, see <http://www.gnu.org/licenses/>.  */
 
-#include "../../opcodes/microblaze-opcm.h"
+#include "opcodes/microblaze-opcm.h"
 
 #define GET_RD	((inst & RD_MASK) >> RD_LOW)
 #define GET_RA	((inst & RA_MASK) >> RA_LOW)
 #define GET_RB	((inst & RB_MASK) >> RB_LOW)
 
-#define CPU     microblaze_state.cpu[0].microblaze_cpu
+#define CPU     (*MICROBLAZE_SIM_CPU (cpu))
 
 #define RD      CPU.regs[rd]
 #define RA      CPU.regs[ra]
@@ -39,7 +39,7 @@
 #define IMM_ENABLE CPU.imm_enable
 
 #define IMM             (IMM_ENABLE ?					\
-                         (((uhalf)IMM_H << 16) | (uhalf)IMM_L) :	\
+                         (((unsigned_2)IMM_H << 16) | (unsigned_2)IMM_L) :	\
                          (imm_unsigned ?				\
 			  (0xFFFF & IMM_L) :				\
                           (IMM_L & 0x8000 ?                             \
@@ -52,18 +52,16 @@
 #define RETREG  CPU.regs[3]
 
 
-#define MEM(X)	memory[X]
+#define MEM_RD_BYTE(X)	sim_core_read_1 (cpu, 0, read_map, X)
+#define MEM_RD_HALF(X)	sim_core_read_2 (cpu, 0, read_map, X)
+#define MEM_RD_WORD(X)	sim_core_read_4 (cpu, 0, read_map, X)
+#define MEM_RD_UBYTE(X) (unsigned_1) MEM_RD_BYTE(X)
+#define MEM_RD_UHALF(X) (unsigned_2) MEM_RD_HALF(X)
+#define MEM_RD_UWORD(X) (unsigned_4) MEM_RD_WORD(X)
 
-#define MEM_RD_BYTE(X)	rbat(X)
-#define MEM_RD_HALF(X)	rhat(X)
-#define MEM_RD_WORD(X)	rlat(X)
-#define MEM_RD_UBYTE(X) (ubyte) MEM_RD_BYTE(X)
-#define MEM_RD_UHALF(X) (uhalf) MEM_RD_HALF(X)
-#define MEM_RD_UWORD(X) (uword) MEM_RD_WORD(X)
-
-#define MEM_WR_BYTE(X, D) wbat(X, D)
-#define MEM_WR_HALF(X, D) what(X, D)
-#define MEM_WR_WORD(X, D) wlat(X, D)
+#define MEM_WR_BYTE(X, D) sim_core_write_1 (cpu, 0, write_map, X, D)
+#define MEM_WR_HALF(X, D) sim_core_write_2 (cpu, 0, write_map, X, D)
+#define MEM_WR_WORD(X, D) sim_core_write_4 (cpu, 0, write_map, X, D)
 
 
 #define MICROBLAZE_SEXT8(X)	((char) X)
@@ -74,9 +72,9 @@
 #define C_rd		((MSR & 0x4) >> 2)
 #define C_wr(D)		MSR = (D ? MSR | 0x80000004 : MSR & 0x7FFFFFFB)
 
-#define C_calc(X, Y, C)	((((uword)Y == MAX_WORD) && (C == 1)) ?		 \
+#define C_calc(X, Y, C)	((((unsigned_4)Y == MAX_WORD) && (C == 1)) ?		 \
 			 1 :						 \
-			 ((MAX_WORD - (uword)X) < ((uword)Y + C)))
+			 ((MAX_WORD - (unsigned_4)X) < ((unsigned_4)Y + C)))
 
 #define BIP_MASK	0x00000008
 #define CARRY_MASK	0x00000004
@@ -92,13 +90,6 @@
 
 #define MAX_WORD	0xFFFFFFFF
 #define MICROBLAZE_HALT_INST  0xb8000000
-
-typedef char		byte;
-typedef short		half;
-typedef int		word;
-typedef unsigned char	ubyte;
-typedef unsigned short	uhalf;
-typedef unsigned int	uword;
 
 #endif /* MICROBLAZE_H */
 

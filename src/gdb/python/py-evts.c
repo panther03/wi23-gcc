@@ -1,6 +1,6 @@
 /* Python interface to inferior events.
 
-   Copyright (C) 2009-2013 Free Software Foundation, Inc.
+   Copyright (C) 2009-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -20,28 +20,25 @@
 #include "defs.h"
 #include "py-events.h"
 
-#ifdef IS_PY3K
 static struct PyModuleDef EventModuleDef =
 {
   PyModuleDef_HEAD_INIT,
-  "gdb.events",
+  "_gdbevents",
   NULL,
-  -1, 
+  -1,
   NULL,
   NULL,
   NULL,
   NULL,
   NULL
 };
-#endif
 
-/* Initialize python events.  */
+/* Helper function to add a single event registry to the events
+   module.  */
 
 static int CPYCHECKER_NEGATIVE_RESULT_SETS_EXCEPTION
-add_new_registry (eventregistry_object **registryp, char *name)
+add_new_registry (eventregistry_object **registryp, const char *name)
 {
-  int result;
-
   *registryp = create_eventregistry_object ();
 
   if (*registryp == NULL)
@@ -52,34 +49,21 @@ add_new_registry (eventregistry_object **registryp, char *name)
 				 (PyObject *)(*registryp));
 }
 
-int
-gdbpy_initialize_py_events (void)
+/* Create and populate the _gdbevents module.  Note that this is
+   always created, see the base gdb __init__.py.  */
+
+PyMODINIT_FUNC
+gdbpy_events_mod_func ()
 {
-#ifdef IS_PY3K
   gdb_py_events.module = PyModule_Create (&EventModuleDef);
-#else
-  gdb_py_events.module = Py_InitModule ("events", NULL);
-#endif
+  if (gdb_py_events.module == nullptr)
+    return nullptr;
 
-  if (!gdb_py_events.module)
-    return -1;
+#define GDB_PY_DEFINE_EVENT(name)					\
+  if (add_new_registry (&gdb_py_events.name, #name) < 0)	\
+    return nullptr;
+#include "py-all-events.def"
+#undef GDB_PY_DEFINE_EVENT
 
-  if (add_new_registry (&gdb_py_events.stop, "stop") < 0)
-    return -1;
-
-  if (add_new_registry (&gdb_py_events.cont, "cont") < 0)
-    return -1;
-
-  if (add_new_registry (&gdb_py_events.exited, "exited") < 0)
-    return -1;
-
-  if (add_new_registry (&gdb_py_events.new_objfile, "new_objfile") < 0)
-    return -1;
-
-  if (gdb_pymodule_addobject (gdb_module,
-			      "events",
-			      (PyObject *) gdb_py_events.module) < 0)
-    return -1;
-
-  return 0;
+  return gdb_py_events.module;
 }

@@ -34,17 +34,10 @@ FUNCTION
 INDEX
 	_fstat64_r
 
-ANSI_SYNOPSIS
+SYNOPSIS
 	#include <reent.h>
 	int _fstat64_r(struct _reent *<[ptr]>,
 		       int <[fd]>, struct stat64 *<[pstat]>);
-
-TRAD_SYNOPSIS
-	#include <reent.h>
-	int _fstat64_r(<[ptr]>, <[fd]>, <[pstat]>)
-	struct _reent *<[ptr]>;
-	int <[fd]>;
-	struct stat *<[pstat]>;
 
 DESCRIPTION
 	This is a reentrant version of <<fstat64>>.  It
@@ -54,16 +47,15 @@ DESCRIPTION
 */
 
 int
-_DEFUN (_fstat64_r, (ptr, fd, pstat),
-     struct _reent *ptr _AND
-     int fd _AND
+_fstat64_r (struct _reent *ptr,
+     int fd,
      struct stat64 *pstat)
 {
   int ret;
 
   errno = 0;
   if ((ret = _fstat64 (fd, pstat)) == -1 && errno != 0)
-    ptr->_errno = errno;
+    _REENT_ERRNO(ptr) = errno;
   return ret;
 }
 

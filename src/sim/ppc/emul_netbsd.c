@@ -25,17 +25,9 @@
 /* Note: this module is called via a table.  There is no benefit in
    making it inline */
 
-#include "emul_generic.h"
-#include "emul_netbsd.h"
+#include "defs.h"
 
-#ifdef HAVE_STRING_H
 #include <string.h>
-#else
-#ifdef HAVE_STRINGS_H
-#include <strings.h>
-#endif
-#endif
-
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <stdio.h>
@@ -44,6 +36,9 @@
 #include <errno.h>
 #include <sys/param.h>
 #include <sys/time.h>
+
+#include "emul_generic.h"
+#include "emul_netbsd.h"
 
 #ifdef HAVE_GETRUSAGE
 #ifndef HAVE_SYS_RESOURCE_H
@@ -77,14 +72,10 @@ int getrusage();
 # endif
 #endif
 
-#ifdef HAVE_UNISTD_H
 #undef MAXPATHLEN		/* sys/param.h might define this also */
 #include <unistd.h>
-#endif
 
-#ifdef HAVE_STDLIB_H
 #include <stdlib.h>
-#endif
 
 #define WITH_NetBSD_HOST (NetBSD >= 199306)
 #if WITH_NetBSD_HOST /* here NetBSD as that is what we're emulating */
@@ -105,10 +96,6 @@ extern int getdirentries(int fd, char *buf, int nbytes, long *basep);
 /* If this is not netbsd, don't allow fstatfs or getdirentries at this time */
 #undef HAVE_FSTATFS
 #undef HAVE_GETDIRENTRIES
-#endif
-
-#if (BSD < 199306) /* here BSD as just a bug */
-extern int errno;
 #endif
 
 #ifndef STATIC_INLINE_EMUL_NETBSD
@@ -292,6 +279,31 @@ write_rusage(unsigned_word addr,
 }
 #endif
 
+
+/* File descriptors 0, 1, and 2 should not be closed.  fd_closed[]
+   tracks whether these descriptors have been closed in do_close()
+   below.  */
+
+static int fd_closed[3];
+
+/* Check for some occurrences of bad file descriptors.  We only check
+   whether fd 0, 1, or 2 are "closed".  By "closed" we mean that these
+   descriptors aren't actually closed, but are considered to be closed
+   by this layer.
+
+   Other checks are performed by the underlying OS call.  */
+
+static int
+fdbad (int fd)
+{
+  if (fd >=0 && fd <= 2 && fd_closed[fd])
+    {
+      errno = EBADF;
+      return -1;
+    }
+  return 0;
+}
+
 static void
 do_exit(os_emul_data *emul,
 	unsigned call,
@@ -339,7 +351,9 @@ do_read(os_emul_data *emul,
       status = -1;
   }
 #endif
-  status = read (d, scratch_buffer, nbytes);
+  status = fdbad (d);
+  if (status == 0)
+    status = read (d, scratch_buffer, nbytes);
 
   emul_write_status(processor, status, errno);
   if (status > 0)
@@ -374,7 +388,10 @@ do_write(os_emul_data *emul,
 		   processor, cia);
 
   /* write */
-  status = write(d, scratch_buffer, nbytes);
+  status = fdbad (d);
+  if (status == 0)
+    status = write(d, scratch_buffer, nbytes);
+
   emul_write_status(processor, status, errno);
   free(scratch_buffer);
 
@@ -440,8 +457,20 @@ do_close(os_emul_data *emul,
 
   SYS(close);
 
-  /* Can't combine these statements, cuz close sets errno. */
-  status = close(d);
+  status = fdbad (d);
+  if (status == 0)
+    {
+      /* Do not close stdin, stdout, or stderr. GDB may still need access to
+	 these descriptors.  */
+      if (d == 0 || d == 1 || d == 2)
+	{
+	  fd_closed[d] = 1;
+	  status = 0;
+	}
+      else
+	status = close(d);
+    }
+
   emul_write_status(processor, status, errno);
 }
 
@@ -549,7 +578,7 @@ do_dup(os_emul_data *emul,
        unsigned_word cia)
 {
   int oldd = cpu_registers(processor)->gpr[arg0];
-  int status = dup(oldd);
+  int status = (fdbad (oldd) < 0) ? -1 : dup(oldd);
   int err = errno;
 
   if (WITH_TRACE && ppc_trace[trace_os_emul])
@@ -600,7 +629,7 @@ do_sigprocmask(os_emul_data *emul,
 	       cpu *processor,
 	       unsigned_word cia)
 {
-  natural_word how = cpu_registers(processor)->gpr[arg0];
+  signed_word how = cpu_registers(processor)->gpr[arg0];
   unsigned_word set = cpu_registers(processor)->gpr[arg0+1];
   unsigned_word oset = cpu_registers(processor)->gpr[arg0+2];
 #ifdef SYS_sigprocmask
@@ -608,7 +637,7 @@ do_sigprocmask(os_emul_data *emul,
 #endif
 
   if (WITH_TRACE && ppc_trace[trace_os_emul])
-    printf_filtered ("%ld, 0x%ld, 0x%ld", (long)how, (long)set, (long)oset);
+    printf_filtered ("%ld, 0x%lx, 0x%lx", (long)how, (long)set, (long)oset);
 
   emul_write_status(processor, 0, 0);
   cpu_registers(processor)->gpr[4] = set;
@@ -640,7 +669,9 @@ do_ioctl(os_emul_data *emul,
       || dir & IOC_OUT
       || !(dir & IOC_VOID))
     error("do_ioctl() read or write of parameter not implemented\n");
-  status = ioctl(d, request, NULL);
+  status = fdbad (d);
+  if (status == 0)
+    status = ioctl(d, request, NULL);
   emul_write_status(processor, status, errno);
 #endif
 
@@ -681,7 +712,7 @@ do_dup2(os_emul_data *emul,
 {
   int oldd = cpu_registers(processor)->gpr[arg0];
   int newd = cpu_registers(processor)->gpr[arg0+1];
-  int status = dup2(oldd, newd);
+  int status = (fdbad (oldd) < 0) ? -1 : dup2(oldd, newd);
   int err = errno;
 
   if (WITH_TRACE && ppc_trace[trace_os_emul])
@@ -711,7 +742,9 @@ do_fcntl(os_emul_data *emul,
     printf_filtered ("%d, %d, %d", fd, cmd, arg);
 
   SYS(fcntl);
-  status = fcntl(fd, cmd, arg);
+  status = fdbad (fd);
+  if (status == 0)
+    status = fcntl(fd, cmd, arg);
   emul_write_status(processor, status, errno);
 }
 #endif
@@ -730,8 +763,7 @@ do_gettimeofday(os_emul_data *emul,
   unsigned_word tz_addr = cpu_registers(processor)->gpr[arg0+1];
   struct timeval t;
   struct timezone tz;
-  int status = gettimeofday((t_addr != 0 ? &t : NULL),
-			    (tz_addr != 0 ? &tz : NULL));
+  int status = gettimeofday(&t, (tz_addr != 0 ? &tz : NULL));
   int err = errno;
 
   if (WITH_TRACE && ppc_trace[trace_os_emul])
@@ -796,7 +828,9 @@ do_fstatfs(os_emul_data *emul,
     printf_filtered ("%d, 0x%lx", fd, (long)buf_addr);
 
   SYS(fstatfs);
-  status = fstatfs(fd, (buf_addr == 0 ? NULL : &buf));
+  status = fdbad (fd);
+  if (status == 0)
+    status = fstatfs(fd, (buf_addr == 0 ? NULL : &buf));
   emul_write_status(processor, status, errno);
   if (status == 0) {
     if (buf_addr != 0)
@@ -843,13 +877,15 @@ do_fstat(os_emul_data *emul,
 {
   int fd = cpu_registers(processor)->gpr[arg0];
   unsigned_word stat_buf_addr = cpu_registers(processor)->gpr[arg0+1];
-  struct stat buf;
+  struct stat buf = {};
   int status;
 #ifdef SYS_fstat
   SYS(fstat);
 #endif
   /* Can't combine these statements, cuz fstat sets errno. */
-  status = fstat(fd, &buf);
+  status = fdbad (fd);
+  if (status == 0)
+    status = fstat(fd, &buf);
   emul_write_status(processor, status, errno);
   write_stat(stat_buf_addr, buf, processor, cia);
 }
@@ -951,7 +987,9 @@ do_lseek(os_emul_data *emul,
   int whence = cpu_registers(processor)->gpr[arg0+4];
   off_t status;
   SYS(lseek);
-  status = lseek(fildes, offset, whence);
+  status = fdbad (fildes);
+  if (status == 0)
+    status = lseek(fildes, offset, whence);
   if (status == -1)
     emul_write_status(processor, -1, errno);
   else {
@@ -970,12 +1008,12 @@ do___sysctl(os_emul_data *emul,
 {
   /* call the arguments by their real name */
   unsigned_word name = cpu_registers(processor)->gpr[arg0];
-  natural_word namelen = cpu_registers(processor)->gpr[arg0+1];
+  signed_word namelen = cpu_registers(processor)->gpr[arg0+1];
   unsigned_word oldp = cpu_registers(processor)->gpr[arg0+2];
   unsigned_word oldlenp = cpu_registers(processor)->gpr[arg0+3];
-  natural_word oldlen;
-  natural_word mib;
-  natural_word int_val;
+  signed_word oldlen;
+  signed_word mib;
+  signed_word int_val;
   SYS(__sysctl);
 
   /* pluck out the management information base id */
@@ -1009,7 +1047,7 @@ do___sysctl(os_emul_data *emul,
 				     oldlenp,
 				     processor,
 				     cia);
-      if (sizeof(natural_word) > oldlen)
+      if (sizeof(signed_word) > oldlen)
 	error("system_call()sysctl - CTL_HW.HW_PAGESIZE - to small\n");
       int_val = 8192;
       oldlen = sizeof(int_val);
@@ -1321,7 +1359,24 @@ static char *(netbsd_error_names[]) = {
   /* 79 */ "EFTYPE",
   /* 80 */ "EAUTH",
   /* 81 */ "ENEEDAUTH",
-  /* 81 */ "ELAST",
+  /* 82 */ "EIDRM",
+  /* 83 */ "ENOMSG",
+  /* 84 */ "EOVERFLOW",
+  /* 85 */ "EILSEQ",
+  /* 86 */ "ENOTSUP",
+  /* 87 */ "ECANCELED",
+  /* 88 */ "EBADMSG",
+  /* 89 */ "ENODATA",
+  /* 90 */ "ENOSR",
+  /* 91 */ "ENOSTR",
+  /* 92 */ "ETIME",
+  /* 93 */ "ENOATTR",
+  /* 94 */ "EMULTIHOP",
+  /* 95 */ "ENOLINK",
+  /* 96 */ "EPROTO",
+  /* 97 */ "EOWNERDEAD",
+  /* 98 */ "ENOTRECOVERABLE",
+  /* 98 */ "ELAST",
 };
 
 static char *(netbsd_signal_names[]) = {
@@ -1357,15 +1412,47 @@ static char *(netbsd_signal_names[]) = {
   /* 29 */ "SIGINFO",
   /* 30 */ "SIGUSR1",
   /* 31 */ "SIGUSR2",
+  /* 32 */ "SIGPWR",
+  /* 33 */ "SIGRTMIN",
+  /* 34 */ "SIGRTMIN+1",
+  /* 35 */ "SIGRTMIN+2",
+  /* 36 */ "SIGRTMIN+3",
+  /* 37 */ "SIGRTMIN+4",
+  /* 38 */ "SIGRTMIN+5",
+  /* 39 */ "SIGRTMIN+6",
+  /* 40 */ "SIGRTMIN+7",
+  /* 41 */ "SIGRTMIN+8",
+  /* 42 */ "SIGRTMIN+9",
+  /* 43 */ "SIGRTMIN+10",
+  /* 44 */ "SIGRTMIN+11",
+  /* 45 */ "SIGRTMIN+12",
+  /* 46 */ "SIGRTMIN+13",
+  /* 47 */ "SIGRTMIN+14",
+  /* 48 */ "SIGRTMIN+15",
+  /* 49 */ "SIGRTMIN+16",
+  /* 50 */ "SIGRTMIN+17",
+  /* 51 */ "SIGRTMIN+18",
+  /* 52 */ "SIGRTMIN+19",
+  /* 53 */ "SIGRTMIN+20",
+  /* 54 */ "SIGRTMIN+21",
+  /* 55 */ "SIGRTMIN+22",
+  /* 56 */ "SIGRTMIN+23",
+  /* 57 */ "SIGRTMIN+24",
+  /* 58 */ "SIGRTMIN+25",
+  /* 59 */ "SIGRTMIN+26",
+  /* 60 */ "SIGRTMIN+27",
+  /* 61 */ "SIGRTMIN+28",
+  /* 62 */ "SIGRTMIN+29",
+  /* 63 */ "SIGRTMAX",
 };
 
 static emul_syscall emul_netbsd_syscalls = {
   netbsd_descriptors,
-  sizeof(netbsd_descriptors) / sizeof(netbsd_descriptors[0]),
+  ARRAY_SIZE (netbsd_descriptors),
   netbsd_error_names,
-  sizeof(netbsd_error_names) / sizeof(netbsd_error_names[0]),
+  ARRAY_SIZE (netbsd_error_names),
   netbsd_signal_names,
-  sizeof(netbsd_signal_names) / sizeof(netbsd_signal_names[0]),
+  ARRAY_SIZE (netbsd_signal_names),
 };
 
 
@@ -1450,7 +1537,9 @@ static void
 emul_netbsd_init(os_emul_data *emul_data,
 		 int nr_cpus)
 {
-  /* nothing yet */
+  fd_closed[0] = 0;
+  fd_closed[1] = 0;
+  fd_closed[2] = 0;
 }
 
 static void

@@ -1,6 +1,5 @@
 /* Disassemble moxie instructions.
-   Copyright 2009, 2012
-   Free Software Foundation, Inc.
+   Copyright (C) 2009-2023 Free Software Foundation, Inc.
 
    This file is part of the GNU opcodes library.
 
@@ -26,7 +25,7 @@
 #define DEFINE_TABLE
 
 #include "opcode/moxie.h"
-#include "dis-asm.h"
+#include "disassemble.h"
 
 static fprintf_ftype fpr;
 static void *stream;
@@ -34,7 +33,7 @@ static void *stream;
 /* Macros to extract operands from the instruction word.  */
 #define OP_A(i) ((i >> 4) & 0xf)
 #define OP_B(i) (i & 0xf)
-#define INST2OFFSET(o) ((((signed short)((o & ((1<<10)-1))<<6))>>6)<<1)
+#define INST2OFFSET(o) (((((o) & 0x3ff) ^ 0x200) - 0x200) * 2)
 
 static const char * reg_names[16] =
   { "$fp", "$sp", "$r0", "$r1", "$r2", "$r3", "$r4", "$r5",
@@ -141,37 +140,37 @@ print_insn_moxie (bfd_vma addr, struct disassemble_info * info)
 	    length = 6;
 	  }
 	  break;
-	case MOXIE_F1_AiB4:
+	case MOXIE_F1_AiB2:
 	  {
 	    unsigned imm;
-	    if ((status = info->read_memory_func (addr+2, buffer, 4, info)))
+	    if ((status = info->read_memory_func (addr+2, buffer, 2, info)))
 	      goto fail;
 	    if (info->endian == BFD_ENDIAN_BIG)
-	      imm = bfd_getb32 (buffer);
+	      imm = bfd_getb16 (buffer);
 	    else
-	      imm = bfd_getl32 (buffer);
+	      imm = bfd_getl16 (buffer);
 	    fpr (stream, "%s\t0x%x(%s), %s", opcode->name,
 		 imm,
 		 reg_names[OP_A(iword)],
 		 reg_names[OP_B(iword)]);
-	    length = 6;
+	    length = 4;
 	  }
 	  break;
-	case MOXIE_F1_ABi4:
+	case MOXIE_F1_ABi2:
 	  {
 	    unsigned imm;
-	    if ((status = info->read_memory_func (addr+2, buffer, 4, info)))
+	    if ((status = info->read_memory_func (addr+2, buffer, 2, info)))
 	      goto fail;
 	    if (info->endian == BFD_ENDIAN_BIG)
-	      imm = bfd_getb32 (buffer);
+	      imm = bfd_getb16 (buffer);
 	    else
-	      imm = bfd_getl32 (buffer);
+	      imm = bfd_getl16 (buffer);
 	    fpr (stream, "%s\t%s, 0x%x(%s)",
 		 opcode->name,
 		 reg_names[OP_A(iword)],
 		 imm,
 		 reg_names[OP_B(iword)]);
-	    length = 6;
+	    length = 4;
 	  }
 	  break;
         case MOXIE_BAD:
@@ -211,8 +210,7 @@ print_insn_moxie (bfd_vma addr, struct disassemble_info * info)
 	{
 	case MOXIE_F3_PCREL:
 	  fpr (stream, "%s\t", opcode->name);
-	  info->print_address_func ((bfd_vma) (addr + INST2OFFSET(iword) + 2), 
-				    info);
+	  info->print_address_func (addr + INST2OFFSET (iword) + 2, info);
 	  break;
         case MOXIE_BAD:
 	  fpr (stream, "bad");

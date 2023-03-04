@@ -1,4 +1,4 @@
-/* Copyright 2013 Free Software Foundation, Inc.
+/* Copyright 2013-2023 Free Software Foundation, Inc.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -15,7 +15,8 @@
 
 	.text
 pc_start:
-	.byte	0
+        /* Enough space to fit at least one instruction.  */
+	.4byte	0
 pc_end:
 
 	.section	.debug_info
@@ -73,3 +74,4 @@ dieb:
 	.byte	0x0
 
 	.byte	0x0
+	.section	.note.GNU-stack,"",@progbits

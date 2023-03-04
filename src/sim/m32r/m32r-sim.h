@@ -1,5 +1,5 @@
 /* collection of junk waiting time to sort out
-   Copyright (C) 1996-2013 Free Software Foundation, Inc.
+   Copyright (C) 1996-2023 Free Software Foundation, Inc.
    Contributed by Cygnus Support.
 
    This file is part of GDB, the GNU debugger.
@@ -19,6 +19,8 @@
 
 #ifndef M32R_SIM_H
 #define M32R_SIM_H
+
+#include "symcat.h"
 
 /* GDB register numbers.  */
 #define PSW_REGNUM	16
@@ -61,10 +63,19 @@ extern void m32rbf_h_psw_set_handler (SIM_CPU *, UQI);
   XCONCAT2 (WANT_CPU,_h_psw_set_handler) (current_cpu, (val))
 #endif
 
-#ifndef  GET_H_ACCUM
+/* FIXME: These prototypes are necessary because the cgen generated
+   cpu.h, cpux.h and cpu2.h headers do not provide them, and functions
+   which take or return parameters that are larger than an int must be
+   prototyed in order for them to work correctly.
+
+   The correct solution is to fix the code in cgen/sim.scm to generate
+   prototypes for each of the functions it generates.  */
 extern DI   m32rbf_h_accum_get_handler (SIM_CPU *);
 extern void m32rbf_h_accum_set_handler (SIM_CPU *, DI);
+extern DI   m32r2f_h_accums_get_handler (SIM_CPU *, UINT);
+extern void m32r2f_h_accums_set_handler (SIM_CPU *, UINT, DI);
 
+#ifndef  GET_H_ACCUM
 #define GET_H_ACCUM() \
   XCONCAT2 (WANT_CPU,_h_accum_get_handler) (current_cpu)
 #define SET_H_ACCUM(val) \
@@ -153,59 +164,29 @@ do { \
 #define TRAP_SYSCALL	0
 #define TRAP_BREAKPOINT	1
 
-/* Support for the MSPR register (Cache Purge Control Register)
-   and the MCCR register (Cache Control Register) are needed in order for
-   overlays to work correctly with the scache.
-   MSPR no longer exists but is supported for upward compatibility with
-   early overlay support.  */
-
-/* Cache Purge Control (only exists on early versions of chips) */
-#define MSPR_ADDR 0xfffffff7
-#define MSPR_PURGE 1
-
-/* Lock Control Register (not supported) */
-#define MLCR_ADDR 0xfffffff7
-#define MLCR_LM 1
-
-/* Power Management Control Register (not supported) */
-#define MPMR_ADDR 0xfffffffb
-
-/* Cache Control Register */
-#define MCCR_ADDR 0xffffffff
-#define MCCR_CP 0x80
-/* not supported */
-#define MCCR_CM0 2
-#define MCCR_CM1 1
-
-/* Serial device addresses.  */
-#ifdef M32R_EVA /* orig eva board, no longer supported */
-#define UART_INCHAR_ADDR	0xff102013
-#define UART_OUTCHAR_ADDR	0xff10200f
-#define UART_STATUS_ADDR	0xff102006
-/* Indicate ready bit is inverted.  */
-#define UART_INPUT_READY0
-#else
-/* These are the values for the MSA2000 board.
-   ??? Will eventually need to move this to a config file.  */
-#define UART_INCHAR_ADDR	0xff004009
-#define UART_OUTCHAR_ADDR	0xff004007
-#define UART_STATUS_ADDR	0xff004002
-#endif
-
-#define UART_INPUT_READY	0x4
-#define UART_OUTPUT_READY	0x1
-
-/* Start address and length of all device support.  */
-#define M32R_DEVICE_ADDR	0xff000000
-#define M32R_DEVICE_LEN		0x00ffffff
-
-/* sim_core_attach device argument.  */
-extern device m32r_devices;
-
-/* FIXME: Temporary, until device support ready.  */
-struct _device { int foo; };
-
 /* Handle the trap insn.  */
 USI m32r_trap (SIM_CPU *, PCADDR, int);
+
+struct m32r_sim_cpu {
+  M32R_MISC_PROFILE m32r_misc_profile;
+#define CPU_M32R_MISC_PROFILE(cpu) (& M32R_SIM_CPU (cpu)->m32r_misc_profile)
+
+  /* CPU specific parts go here.
+     Note that in files that don't need to access these pieces WANT_CPU_FOO
+     won't be defined and thus these parts won't appear.  This is ok in the
+     sense that things work.  It is a source of bugs though.
+     One has to of course be careful to not take the size of this
+     struct and no structure members accessed in non-cpu specific files can
+     go after here.  Oh for a better language.  */
+#if defined (WANT_CPU_M32RBF)
+  M32RBF_CPU_DATA cpu_data;
+#endif
+#if defined (WANT_CPU_M32RXF)
+  M32RXF_CPU_DATA cpu_data;
+#elif defined (WANT_CPU_M32R2F)
+  M32R2F_CPU_DATA cpu_data;
+#endif
+};
+#define M32R_SIM_CPU(cpu) ((struct m32r_sim_cpu *) CPU_ARCH_DATA (cpu))
 
 #endif /* M32R_SIM_H */

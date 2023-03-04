@@ -5,7 +5,7 @@
  * Redistribution and use in source and binary forms are permitted
  * provided that the above copyright notice and this paragraph are
  * duplicated in all such forms and that any documentation,
- * advertising materials, and other materials related to such
+ * and/or other materials related to such
  * distribution and use acknowledge that the software was developed
  * by the University of California, Berkeley.  The name of the
  * University may not be used to endorse or promote products derived
@@ -28,7 +28,7 @@ INDEX
 INDEX
 	_fflush_unlocked_r
 
-ANSI_SYNOPSIS
+SYNOPSIS
 	#include <stdio.h>
 	int fflush(FILE *<[fp]>);
 
@@ -100,8 +100,7 @@ No supporting OS subroutines are required.
 /* Core function which does not lock file pointer.  This gets called
    directly from __srefill. */
 int
-_DEFUN(__sflush_r, (ptr, fp),
-       struct _reent *ptr _AND
+__sflush_r (struct _reent *ptr,
        register FILE * fp)
 {
   register unsigned char *p;
@@ -138,8 +137,8 @@ _DEFUN(__sflush_r, (ptr, fp),
 	  /* Save last errno and set errno to 0, so we can check if a device
 	     returns with a valid position -1.  We restore the last errno if
 	     no other error condition has been encountered. */
-	  tmp_errno = ptr->_errno;
-	  ptr->_errno = 0;
+	  tmp_errno = _REENT_ERRNO(ptr);
+	  _REENT_ERRNO(ptr) = 0;
 	  /* Get the physical position we are at in the file.  */
 	  if (fp->_flags & __SOFF)
 	    curoff = fp->_offset;
@@ -153,13 +152,13 @@ _DEFUN(__sflush_r, (ptr, fp),
 	      else
 #endif
 		curoff = fp->_seek (ptr, fp->_cookie, 0, SEEK_CUR);
-	      if (curoff == -1L && ptr->_errno != 0)
+	      if (curoff == -1L && _REENT_ERRNO(ptr) != 0)
 		{
 		  int result = EOF;
-		  if (ptr->_errno == ESPIPE || ptr->_errno == EINVAL)
+		  if (_REENT_ERRNO(ptr) == ESPIPE || _REENT_ERRNO(ptr) == EINVAL)
 		    {
 		      result = 0;
-		      ptr->_errno = tmp_errno;
+		      _REENT_ERRNO(ptr) = tmp_errno;
 		    }
 		  else
 		    fp->_flags |= __SERR;
@@ -181,8 +180,8 @@ _DEFUN(__sflush_r, (ptr, fp),
 	  else
 #endif
 	    curoff = fp->_seek (ptr, fp->_cookie, curoff, SEEK_SET);
-	  if (curoff != -1 || ptr->_errno == 0
-	      || ptr->_errno == ESPIPE || ptr->_errno == EINVAL)
+	  if (curoff != -1 || _REENT_ERRNO(ptr) == 0
+	      || _REENT_ERRNO(ptr) == ESPIPE || _REENT_ERRNO(ptr) == EINVAL)
 	    {
 	      /* Seek successful or ignorable error condition.
 		 We can clear read buffer now.  */
@@ -191,9 +190,9 @@ _DEFUN(__sflush_r, (ptr, fp),
 #endif
 	      fp->_r = 0;
 	      fp->_p = fp->_bf._base;
-	      if ((fp->_flags & __SOFF) && (curoff != -1 || ptr->_errno == 0))
+	      if ((fp->_flags & __SOFF) && (curoff != -1 || _REENT_ERRNO(ptr) == 0))
 		fp->_offset = curoff;
-	      ptr->_errno = tmp_errno;
+	      _REENT_ERRNO(ptr) = tmp_errno;
 	      if (HASUB (fp))
 		FREEUB (ptr, fp);
 	    }
@@ -235,12 +234,11 @@ _DEFUN(__sflush_r, (ptr, fp),
 }
 
 #ifdef _STDIO_BSD_SEMANTICS
-/* Called from _cleanup_r.  At exit time, we don't need file locking,
+/* Called from cleanup_stdio().  At exit time, we don't need file locking,
    and we don't want to move the underlying file pointer unless we're
    writing. */
 int
-_DEFUN(__sflushw_r, (ptr, fp),
-       struct _reent *ptr _AND
+__sflushw_r (struct _reent *ptr,
        register FILE *fp)
 {
   return (fp->_flags & __SWR) ?  __sflush_r (ptr, fp) : 0;
@@ -250,8 +248,7 @@ _DEFUN(__sflushw_r, (ptr, fp),
 #endif /* __IMPL_UNLOCKED__ */
 
 int
-_DEFUN(_fflush_r, (ptr, fp),
-       struct _reent *ptr _AND
+_fflush_r (struct _reent *ptr,
        register FILE * fp)
 {
   int ret;
@@ -286,11 +283,10 @@ _DEFUN(_fflush_r, (ptr, fp),
 #ifndef _REENT_ONLY
 
 int
-_DEFUN(fflush, (fp),
-       register FILE * fp)
+fflush (register FILE * fp)
 {
   if (fp == NULL)
-    return _fwalk_reent (_GLOBAL_REENT, _fflush_r);
+    return _fwalk_sglue (_GLOBAL_REENT, _fflush_r, &__sglue);
 
   return _fflush_r (_REENT, fp);
 }

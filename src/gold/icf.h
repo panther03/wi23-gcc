@@ -1,6 +1,6 @@
 // icf.h --  Identical Code Folding
 
-// Copyright 2009, 2010, 2013 Free Software Foundation, Inc.
+// Copyright (C) 2009-2023 Free Software Foundation, Inc.
 // Written by Sriraman Tallam <tmsriram@google.com>.
 
 // This file is part of gold.
@@ -64,6 +64,19 @@ class Icf
   typedef Unordered_map<Section_id, Reloc_info,
                         Section_id_hash> Reloc_info_list;
 
+  // A region of some other section that should be considered part of
+  // a section for ICF purposes. This is used to avoid folding sections
+  // that have identical text and relocations but different .eh_frame
+  // information.
+  typedef struct
+  {
+	Section_id section;
+	section_offset_type offset;
+	section_size_type length;
+  } Extra_identity_info;
+
+  typedef std::multimap<Section_id, Extra_identity_info> Extra_identity_list;
+
   Icf()
   : id_section_(), section_id_(), kept_section_id_(),
     fptr_section_id_(),
@@ -74,7 +87,7 @@ class Icf
   // Returns the kept folded identical section corresponding to
   // dup_obj and dup_shndx.
   Section_id
-  get_folded_section(Object* dup_obj, unsigned int dup_shndx);
+  get_folded_section(Relobj* dup_obj, unsigned int dup_shndx);
 
   // Forms groups of identical sections where the first member
   // of each group is the kept section during folding.
@@ -95,17 +108,17 @@ class Icf
 
   // Unfolds the section denoted by OBJ and SHNDX if folded.
   void
-  unfold_section(Object* obj, unsigned int shndx);
+  unfold_section(Relobj* obj, unsigned int shndx);
 
   // Returns the kept section corresponding to the
   // given section.
   bool
-  is_section_folded(Object* obj, unsigned int shndx);
+  is_section_folded(Relobj* obj, unsigned int shndx);
 
   // Given an object and a section index, this returns true if the
   // pointer of the function defined in this section is taken.
   bool
-  section_has_function_pointers(Object* obj, unsigned int shndx)
+  section_has_function_pointers(Relobj* obj, unsigned int shndx)
   {
     return (this->fptr_section_id_.find(Section_id(obj, shndx))
             != this->fptr_section_id_.end());
@@ -114,7 +127,7 @@ class Icf
   // Records that a pointer of the function defined in this section
   // is taken.
   void
-  set_section_has_function_pointers(Object* obj, unsigned int shndx)
+  set_section_has_function_pointers(Relobj* obj, unsigned int shndx)
   {
     this->fptr_section_id_.insert(Section_id(obj, shndx));
   }
@@ -137,12 +150,22 @@ class Icf
   reloc_info_list()
   { return this->reloc_info_list_; }
 
+  // Returns a map from section to region of a different section that should
+  // be considered part of the key section for ICF purposes.
+  Extra_identity_list&
+  extra_identity_list()
+  { return this->extra_identity_list_; }
+
   // Returns a mapping of each section to a unique integer.
   Uniq_secn_id_map&
   section_to_int_map()
   { return this->section_id_; }
 
  private:
+
+  bool
+  add_ehframe_links(Relobj* object, unsigned int ehframe_shndx,
+		    Reloc_info& ehframe_relocs);
 
   // Maps integers to sections.
   std::vector<Section_id> id_section_;
@@ -160,17 +183,24 @@ class Icf
   bool icf_ready_;
   // This list is populated by gc_process_relocs in gc.h.
   Reloc_info_list reloc_info_list_;
+  // Regions of other sections that should be considered part of
+  // each section for ICF purposes.
+  Extra_identity_list extra_identity_list_;
 };
 
 // This function returns true if this section corresponds to a function that
 // should be considered by icf as a possible candidate for folding.  Some
 // earlier gcc versions, like 4.0.3, put constructors and destructors in
 // .gnu.linkonce.t sections and hence should be included too.
+// The mechanism used to safely fold functions referenced by .eh_frame
+// requires folding .gcc_except_table sections as well; see "Notes regarding
+// C++ exception handling" at the top of icf.cc for an explanation why.
 inline bool
 is_section_foldable_candidate(const std::string& section_name)
 {
   const char* section_name_cstr = section_name.c_str();
   return (is_prefix_of(".text", section_name_cstr)
+          || is_prefix_of(".gcc_except_table", section_name_cstr)
           || is_prefix_of(".gnu.linkonce.t", section_name_cstr));
 }
 

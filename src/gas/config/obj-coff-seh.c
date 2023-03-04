@@ -1,6 +1,5 @@
 /* seh pdata/xdata coff object file format
-   Copyright 2009, 2010
-   Free Software Foundation, Inc.
+   Copyright (C) 2009-2023 Free Software Foundation, Inc.
 
    This file is part of GAS.
 
@@ -32,7 +31,7 @@ struct seh_seg_list {
 /* Local data.  */
 static seh_context *seh_ctx_cur = NULL;
 
-static struct hash_control *seh_hash;
+static htab_t seh_hash;
 
 static struct seh_seg_list *x_segcur = NULL;
 static struct seh_seg_list *p_segcur = NULL;
@@ -49,7 +48,7 @@ get_pxdata_name (segT seg, const char *base_name)
   const char *name,*dollar, *dot;
   char *sname;
 
-  name = bfd_get_section_name (stdoutput, seg);
+  name = bfd_section_name (seg);
 
   dollar = strchr (name, '$');
   dot = strchr (name + 1, '.');
@@ -65,7 +64,7 @@ get_pxdata_name (segT seg, const char *base_name)
   else
     name = dollar;
 
-  sname = concat (base_name, name, NULL);
+  sname = notes_concat (base_name, name, NULL);
 
   return sname;
 }
@@ -76,8 +75,7 @@ alloc_pxdata_item (segT seg, int subseg, char *name)
 {
   struct seh_seg_list *r;
 
-  r = (struct seh_seg_list *)
-    xmalloc (sizeof (struct seh_seg_list) + strlen (name));
+  r = notes_alloc (sizeof (struct seh_seg_list) + strlen (name));
   r->seg = seg;
   r->subseg = subseg;
   r->seg_name = name;
@@ -96,16 +94,16 @@ make_pxdata_seg (segT cseg, char *name)
 
   r = subseg_new (name, 0);
   /* Check if code segment is marked as linked once.  */
-  flags = bfd_get_section_flags (stdoutput, cseg)
-    & (SEC_LINK_ONCE | SEC_LINK_DUPLICATES_DISCARD
-       | SEC_LINK_DUPLICATES_ONE_ONLY | SEC_LINK_DUPLICATES_SAME_SIZE
-       | SEC_LINK_DUPLICATES_SAME_CONTENTS);
+  flags = (bfd_section_flags (cseg)
+	   & (SEC_LINK_ONCE | SEC_LINK_DUPLICATES_DISCARD
+	      | SEC_LINK_DUPLICATES_ONE_ONLY | SEC_LINK_DUPLICATES_SAME_SIZE
+	      | SEC_LINK_DUPLICATES_SAME_CONTENTS));
 
   /* Add standard section flags.  */
   flags |= SEC_ALLOC | SEC_LOAD | SEC_READONLY | SEC_DATA;
 
   /* Apply possibly linked once flags to new generated segment, too.  */
-  if (!bfd_set_section_flags (stdoutput, r, flags))
+  if (!bfd_set_section_flags (r, flags))
     as_bad (_("bfd_set_section_flags: %s"),
 	    bfd_errmsg (bfd_get_error ()));
 
@@ -117,17 +115,13 @@ make_pxdata_seg (segT cseg, char *name)
 static void
 seh_hash_insert (const char *name, struct seh_seg_list *item)
 {
-  const char *error_string;
-
-  if ((error_string = hash_jam (seh_hash, name, (char *) item)))
-    as_fatal (_("Inserting \"%s\" into structure table failed: %s"),
-	      name, error_string);
+  str_hash_insert (seh_hash, name, item, 1);
 }
 
 static struct seh_seg_list *
 seh_hash_find (char *name)
 {
-  return (struct seh_seg_list *) hash_find (seh_hash, name);
+  return (struct seh_seg_list *) str_hash_find (seh_hash, name);
 }
 
 static struct seh_seg_list *
@@ -138,7 +132,7 @@ seh_hash_find_or_make (segT cseg, const char *base_name)
 
   /* Initialize seh_hash once.  */
   if (!seh_hash)
-    seh_hash = hash_new ();
+    seh_hash = str_htab_create ();
 
   name = get_pxdata_name (cseg, base_name);
 
@@ -150,7 +144,7 @@ seh_hash_find_or_make (segT cseg, const char *base_name)
       seh_hash_insert (item->seg_name, item);
     }
   else
-    free (name);
+    notes_free (name);
 
   return item;
 }
@@ -162,12 +156,19 @@ seh_validate_seg (const char *directive)
   const char *cseg_name, *nseg_name;
   if (seh_ctx_cur->code_seg == now_seg)
     return 1;
-  cseg_name = bfd_get_section_name (stdoutput, seh_ctx_cur->code_seg);
-  nseg_name = bfd_get_section_name (stdoutput, now_seg);
+  cseg_name = bfd_section_name (seh_ctx_cur->code_seg);
+  nseg_name = bfd_section_name (now_seg);
   as_bad (_("%s used in segment '%s' instead of expected '%s'"),
   	  directive, nseg_name, cseg_name);
   ignore_rest_of_line ();
   return 0;
+}
+
+/* Switch back to the code section, whatever that may be.  */
+static void
+obj_coff_seh_code (int ignored ATTRIBUTE_UNUSED)
+{
+  subseg_set (seh_ctx_cur->code_seg, 0);
 }
 
 static void
@@ -323,8 +324,7 @@ obj_coff_seh_handler (int what ATTRIBUTE_UNUSED)
 
   if (*input_line_pointer == '@')
     {
-      symbol_name = input_line_pointer;
-      name_end = get_symbol_end ();
+      name_end = get_symbol_name (&symbol_name);
 
       seh_ctx_cur->handler.X_op = O_constant;
       seh_ctx_cur->handler.X_add_number = 0;
@@ -337,7 +337,7 @@ obj_coff_seh_handler (int what ATTRIBUTE_UNUSED)
       else
 	as_bad (_("unknown constant value '%s' for handler"), symbol_name);
 
-      *input_line_pointer = name_end;
+      (void) restore_line_pointer (name_end);
     }
   else
     expression (&seh_ctx_cur->handler);
@@ -353,8 +353,7 @@ obj_coff_seh_handler (int what ATTRIBUTE_UNUSED)
     {
       do
 	{
-	  symbol_name = input_line_pointer;
-	  name_end = get_symbol_end ();
+	  name_end = get_symbol_name (&symbol_name);
 
 	  if (strcasecmp (symbol_name, "@unwind") == 0)
 	    seh_ctx_cur->handler_flags |= UNW_FLAG_UHANDLER;
@@ -363,7 +362,7 @@ obj_coff_seh_handler (int what ATTRIBUTE_UNUSED)
 	  else
 	    as_bad (_(".seh_handler constant '%s' unknown"), symbol_name);
 
-	  *input_line_pointer = name_end;
+	  (void) restore_line_pointer (name_end);
 	}
       while (skip_whitespace_and_comma (0));
     }
@@ -448,10 +447,9 @@ obj_coff_seh_proc (int what ATTRIBUTE_UNUSED)
 
   SKIP_WHITESPACE ();
 
-  symbol_name = input_line_pointer;
-  name_end = get_symbol_end ();
+  name_end = get_symbol_name (&symbol_name);
   seh_ctx_cur->func_name = xstrdup (symbol_name);
-  *input_line_pointer = name_end;
+  (void) restore_line_pointer (name_end);
 
   demand_empty_rest_of_line ();
 
@@ -480,10 +478,7 @@ void
 obj_coff_seh_do_final (void)
 {
   if (seh_ctx_cur != NULL)
-    {
-      as_bad (_("open SEH entry at end of file (missing .cfi_endproc)"));
-      do_seh_endproc ();
-    }
+    as_bad (_("open SEH entry at end of file (missing .seh_endproc)"));
 }
 
 /* Enter a prologue element into current context (x64).  */
@@ -543,14 +538,13 @@ seh_x64_read_reg (const char *directive, int kind)
   SKIP_WHITESPACE ();
   if (*input_line_pointer == '%')
     ++input_line_pointer;
-  symbol_name = input_line_pointer;
-  name_end = get_symbol_end ();
+  name_end = get_symbol_name (& symbol_name);
 
   for (i = 0; i < 16; i++)
     if (! strcasecmp (regs[i], symbol_name))
       break;
 
-  *input_line_pointer = name_end;
+  (void) restore_line_pointer (name_end);
 
   /* Error if register not found, or EAX used as a frame pointer.  */
   if (i == 16 || (kind == 0 && i == 0))
@@ -587,12 +581,31 @@ obj_coff_seh_pushreg (int what ATTRIBUTE_UNUSED)
 static void
 obj_coff_seh_pushframe (int what ATTRIBUTE_UNUSED)
 {
+  int code = 0;
+  
   if (!verify_context_and_target (".seh_pushframe", seh_kind_x64)
       || !seh_validate_seg (".seh_pushframe"))
     return;
+  
+  SKIP_WHITESPACE();
+  
+  if (is_name_beginner (*input_line_pointer))
+    {
+      char* identifier;
+
+      get_symbol_name (&identifier);
+      if (strcmp (identifier, "code") != 0)
+	{
+	  as_bad(_("invalid argument \"%s\" for .seh_pushframe. Expected \"code\" or nothing"),
+		 identifier);
+	  return;
+	}
+      code = 1;
+    }
+  
   demand_empty_rest_of_line ();
 
-  seh_x64_make_prologue_element (UWOP_PUSH_MACHFRAME, 0, 0);
+  seh_x64_make_prologue_element (UWOP_PUSH_MACHFRAME, code, 0);
 }
 
 /* Add a register save-unwind token to current context.  */

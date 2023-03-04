@@ -1,5 +1,5 @@
 # This shell script emits a C file. -*- C -*-
-#   Copyright 2006, 2007, 2008, 2009 Free Software Foundation, Inc.
+#   Copyright (C) 2006-2023 Free Software Foundation, Inc.
 #
 # This file is part of the GNU Binutils.
 #
@@ -23,6 +23,7 @@
 #
 fragment <<EOF
 #include "elf-bfd.h"
+#include "ldelfgen.h"
 
 EOF
 source_em ${srcdir}/emultempl/elf-generic.em
@@ -37,31 +38,33 @@ gld${EMULATION_NAME}_after_open (void)
 
   after_open_default ();
 
-  if (link_info.relocatable)
-    for (ibfd = link_info.input_bfds; ibfd != NULL; ibfd = ibfd->link_next)
+  if (bfd_link_relocatable (&link_info))
+    for (ibfd = link_info.input_bfds; ibfd != NULL; ibfd = ibfd->link.next)
       if ((syms = bfd_get_outsymbols (ibfd)) != NULL
 	  && bfd_get_flavour (ibfd) == bfd_target_elf_flavour)
 	for (sec = ibfd->sections; sec != NULL; sec = sec->next)
 	  if ((sec->flags & (SEC_GROUP | SEC_LINKER_CREATED)) == SEC_GROUP)
 	    {
 	      struct bfd_elf_section_data *sec_data = elf_section_data (sec);
-	      elf_group_id (sec) = syms[sec_data->this_hdr.sh_info - 1];
+	      struct bfd_symbol *sym = syms[sec_data->this_hdr.sh_info - 1];
+	      elf_group_id (sec) = sym;
+	      sym->flags |= BSF_KEEP;
 	    }
 }
 
 static void
 gld${EMULATION_NAME}_before_allocation (void)
 {
-  if (link_info.relocatable
+  if (bfd_link_relocatable (&link_info)
       && !_bfd_elf_size_group_sections (&link_info))
-    einfo ("%X%P: can not size group sections: %E\n");
+    einfo (_("%X%P: can not size group sections: %E\n"));
   before_allocation_default ();
 }
 
 static void
 gld${EMULATION_NAME}_after_allocation (void)
 {
-  gld${EMULATION_NAME}_map_segments (FALSE);
+  ldelf_map_segments (false);
 }
 EOF
 # Put these extra routines in ld_${EMULATION_NAME}_emulation

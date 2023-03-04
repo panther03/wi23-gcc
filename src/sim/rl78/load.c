@@ -1,6 +1,6 @@
 /* load.c --- loading object files into the RL78 simulator.
 
-   Copyright (C) 2005-2013 Free Software Foundation, Inc.
+   Copyright (C) 2005-2023 Free Software Foundation, Inc.
    Contributed by Red Hat, Inc.
 
    This file is part of the GNU simulators.
@@ -19,15 +19,17 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+/* This must come before any other includes.  */
+#include "defs.h"
 
-#include "config.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "libiberty.h"
 #include "bfd.h"
-#include "libbfd.h"
+#include "bfd/elf-bfd.h"
+#include "elf/rl78.h"
 #include "cpu.h"
 #include "mem.h"
 #include "load.h"
@@ -55,7 +57,7 @@ find_section_name_by_offset (bfd *abfd, file_ptr filepos)
 
   for (s = abfd->sections; s; s = s->next)
     if (s->filepos == filepos)
-      return bfd_get_section_name (abfd, s);
+      return bfd_section_name (s);
 
   return "(unknown)";
 }
@@ -89,7 +91,30 @@ rl78_load (bfd *prog, host_callback *callbacks, const char * const simname)
       fprintf (stderr, "%s: Failed to read program headers\n", simname);
       return;
     }
-  
+
+  switch (elf_elfheader (prog)->e_flags & E_FLAG_RL78_CPU_MASK)
+    {
+    case E_FLAG_RL78_G10:
+      rl78_g10_mode = 1;
+      g13_multiply = 0;
+      g14_multiply = 0;
+      mem_set_mirror (0, 0xf8000, 4096);
+      break;
+    case E_FLAG_RL78_G13:
+      rl78_g10_mode = 0;
+      g13_multiply = 1;
+      g14_multiply = 0;
+      break;
+    case E_FLAG_RL78_G14:
+      rl78_g10_mode = 0;
+      g13_multiply = 0;
+      g14_multiply = 1;
+      break;
+    default:
+      /* Keep whatever was manually specified.  */
+      break;
+    }
+
   for (i = 0; i < num_headers; i++)
     {
       Elf_Internal_Phdr * p = phdrs + i;
@@ -104,33 +129,39 @@ rl78_load (bfd *prog, host_callback *callbacks, const char * const simname)
 
       base = p->p_paddr;
       if (verbose > 1)
-	fprintf (stderr, "[load segment: lma=%08x vma=%08x size=%08x]\n",
-		 (int) base, (int) p->p_vaddr, (int) size);
+	fprintf (stderr,
+		 "[load segment: lma=%08" PRIx64 " vma=%08" PRIx64 " "
+		 "size=%08" PRIx64 "]\n",
+		 (uint64_t) base, (uint64_t) p->p_vaddr, (uint64_t) size);
       if (callbacks)
 	xprintf (callbacks,
-	         "Loading section %s, size %#lx lma %08lx vma %08lx\n",
-	         find_section_name_by_offset (prog, p->p_offset),
-		 size, base, p->p_vaddr);
+		 "Loading section %s, size %#" PRIx64 " "
+		 "lma %08" PRIx64 " vma %08" PRIx64 "\n",
+		 find_section_name_by_offset (prog, p->p_offset),
+		 (uint64_t) size, (uint64_t) base, (uint64_t) p->p_vaddr);
 
       buf = xmalloc (size);
 
       offset = p->p_offset;
-      if (prog->iovec->bseek (prog, offset, SEEK_SET) != 0)
+      if (bfd_seek (prog, offset, SEEK_SET) != 0)
 	{
 	  fprintf (stderr, "%s, Failed to seek to offset %lx\n", simname, (long) offset);
 	  continue;
 	}
 
-      if (prog->iovec->bread (prog, buf, size) != size)
+      if (bfd_bread (buf, size, prog) != size)
 	{
-	  fprintf (stderr, "%s: Failed to read %lx bytes\n", simname, size);
+	  fprintf (stderr, "%s: Failed to read %" PRIx64 " bytes\n",
+		   simname, (uint64_t) size);
 	  continue;
 	}
 
       if (base > 0xeffff || base + size > 0xeffff)
 	{
-	  fprintf (stderr, "%s, Can't load image to RAM/SFR space: 0x%lx - 0x%lx\n",
-		   simname, base, base+size);
+	  fprintf (stderr,
+		   "%s, Can't load image to RAM/SFR space: 0x%" PRIx64 " "
+		   "- 0x%" PRIx64 "\n",
+		   simname, (uint64_t) base, (uint64_t) (base + size));
 	  continue;
 	}
       if (max_rom < base + size)
