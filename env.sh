@@ -1,0 +1,1 @@
+export PATH="/opt/autoconf-2.64/bin:$PATH"

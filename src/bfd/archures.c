@@ -363,6 +363,8 @@ DESCRIPTION
 .#define bfd_mach_fr550		550
 .  bfd_arch_moxie,       {* The moxie processor *}
 .#define bfd_mach_moxie		1
+.  bfd_arch_wi23,       {* WI-23 CPU *}
+.#define bfd_mach_wi23	1
 .  bfd_arch_mcore,
 .  bfd_arch_mep,
 .#define bfd_mach_mep		1
@@ -603,6 +605,7 @@ extern const bfd_arch_info_type bfd_v850_rh850_arch;
 extern const bfd_arch_info_type bfd_vax_arch;
 extern const bfd_arch_info_type bfd_w65_arch;
 extern const bfd_arch_info_type bfd_we32k_arch;
+extern const bfd_arch_info_type bfd_wi23_arch;
 extern const bfd_arch_info_type bfd_xstormy16_arch;
 extern const bfd_arch_info_type bfd_xtensa_arch;
 extern const bfd_arch_info_type bfd_xc16x_arch;
@@ -689,6 +692,7 @@ static const bfd_arch_info_type * const bfd_archures_list[] =
     &bfd_vax_arch,
     &bfd_w65_arch,
     &bfd_we32k_arch,
+    &bfd_wi23_arch,
     &bfd_xstormy16_arch,
     &bfd_xtensa_arch,
     &bfd_xc16x_arch,

@@ -1637,6 +1637,10 @@ case "${targ}" in
     targ_defvec=we32kcoff_vec
     ;;
 
+  wi23-*-elf)
+    targ_defvec=bfd_elf32_wi23_vec
+    ;;
+
   w65-*-*)
     targ_defvec=w65_vec
     ;;
