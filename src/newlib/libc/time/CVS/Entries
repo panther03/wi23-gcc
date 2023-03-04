@@ -1,0 +1,27 @@
+/Makefile.am/1.9/Thu Sep 11 21:55:00 2014/-ko/
+/Makefile.in/1.29/Thu Sep 11 21:55:01 2014/-ko/
+/asctime.c/1.4/Mon Apr 29 21:06:23 2013/-ko/
+/asctime_r.c/1.4/Mon Nov 25 13:46:22 2013/-ko/
+/clock.c/1.3/Thu Sep  4 08:27:03 2014/-ko/
+/ctime.c/1.3/Fri Oct 31 21:08:03 2008/-ko/
+/ctime_r.c/1.1.1.1/Thu Feb 17 19:39:51 2000/-ko/
+/difftime.c/1.2/Tue Jan 21 19:37:04 2003/-ko/
+/gettzinfo.c/1.2/Fri Feb 25 22:31:21 2005//
+/gmtime.c/1.5/Mon Apr 29 21:06:23 2013/-ko/
+/gmtime_r.c/1.7/Mon Dec  8 11:48:31 2014/-ko/
+/lcltime.c/1.5/Mon Apr 29 21:06:23 2013/-ko/
+/lcltime_r.c/1.4/Thu Sep 11 21:55:01 2014/-ko/
+/local.h/1.3/Thu Sep 11 21:55:01 2014//
+/mktime.c/1.10/Tue Oct 11 11:28:05 2011/-ko/
+/month_lengths.c/1.2/Mon Sep 15 16:05:37 2014//
+/strftime.c/1.24/Thu Jan  8 09:51:34 2015/-ko/
+/strptime.c/1.11/Thu Sep  4 08:27:03 2014//
+/time.c/1.3/Fri Jul  6 16:56:30 2007/-ko/
+/time.tex/1.5/Mon Mar  9 12:35:03 2009/-ko/
+/tzcalc_limits.c/1.2/Fri Sep 12 21:41:46 2014//
+/tzlock.c/1.3/Fri Oct 28 21:21:08 2005//
+/tzset.c/1.2/Fri Oct 31 21:08:03 2008//
+/tzset_r.c/1.12/Tue Jun 14 14:31:59 2011//
+/tzvars.c/1.1/Tue Nov  8 22:44:16 2005//
+/wcsftime.c/1.2/Thu Mar 12 15:34:57 2009//
+D
