@@ -340,6 +340,7 @@ if test x${all_targets} = xfalse ; then
 	bfd_vax_arch)		ta="$ta vax-dis.lo" ;;
 	bfd_visium_arch)	ta="$ta visium-dis.lo visium-opc.lo" ;;
         bfd_wasm32_arch)        ta="$ta wasm32-dis.lo" ;;
+	bfd_wi23_arch)		ta="$ta wi23-dis.lo wi23-opc.lo" ;;
 	bfd_xgate_arch)		ta="$ta xgate-dis.lo xgate-opc.lo" ;;
 	bfd_xstormy16_arch)	ta="$ta xstormy16-asm.lo xstormy16-desc.lo xstormy16-dis.lo xstormy16-ibld.lo xstormy16-opc.lo" using_cgen=yes ;;
 	bfd_xtensa_arch)	ta="$ta xtensa-dis.lo" ;;

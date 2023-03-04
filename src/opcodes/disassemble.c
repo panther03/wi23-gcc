@@ -97,6 +97,7 @@
 #define ARCH_vax
 #define ARCH_visium
 #define ARCH_wasm32
+#define ARCH_wi23
 #define ARCH_xstormy16
 #define ARCH_xgate
 #define ARCH_xtensa
@@ -550,6 +551,11 @@ disassembler (enum bfd_architecture a,
 #ifdef ARCH_loongarch
     case bfd_arch_loongarch:
       disassemble = print_insn_loongarch;
+      break;
+#endif
+#ifdef ARCH_wi23
+    case bfd_arch_wi23:
+      disassemble = print_insn_wi23;
       break;
 #endif
     default:

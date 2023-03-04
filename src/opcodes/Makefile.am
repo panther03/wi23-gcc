@@ -258,6 +258,8 @@ TARGET32_LIBOPCODES_CFILES = \
 	visium-dis.c \
 	visium-opc.c \
 	wasm32-dis.c \
+	wi23-dis.c \
+	wi23-opc.c \
 	xstormy16-asm.c \
 	xstormy16-desc.c \
 	xstormy16-dis.c \
