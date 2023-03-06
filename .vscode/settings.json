@@ -1,6 +1,8 @@
 {
     "files.associations": {
         "wi23.h": "c",
-        "moxie.h": "c"
+        "moxie.h": "c",
+        "riscv.h": "c",
+        "sysdep.h": "c"
     }
 }

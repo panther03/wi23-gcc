@@ -21,6 +21,8 @@
 /* Relocation types.  */
 START_RELOC_NUMBERS (elf_wi23_reloc_type)
   RELOC_NUMBER (R_WI23_NONE, 0)
+  RELOC_NUMBER (R_WI23_32, 1)
+  RELOC_NUMBER (R_WI23_PCREL26_S, 2)
 END_RELOC_NUMBERS (R_WI23_max)
 
 #endif /* _ELF_WI23f_H */

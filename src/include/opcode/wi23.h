@@ -90,8 +90,12 @@ typedef struct wi23_opc_info_t
 typedef struct wi23_fnc_info_t
 {
   short         fncode;
+  short         opcode;
   const char *  name;
 } wi23_fnc_info_t;
+
+extern const char * ireg_names[32];
+extern const char * freg_names[32];
 
 extern const wi23_opc_info_t wi23_opc_info[64];
 extern const wi23_fnc_info_t wi23_arith_fnc[4];

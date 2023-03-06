@@ -21,6 +21,18 @@
 #include "sysdep.h"
 #include "opcode/wi23.h"
 
+const char * ireg_names[32] =
+  { "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7",
+    "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
+    "r16", "r17", "r18", "r19", "r20", "r21", "r22", "r23",
+    "r24", "r25", "r26", "gp", "fp", "sp", "ra", "csr" };
+
+const char * freg_names[32] =
+  { "f0", "f1", "f2", "f3", "f4", "f5", "f6", "f7",
+    "f8", "f9", "f10", "f11", "f12", "f13", "f14", "f15",
+    "f16", "f17", "f18", "f19", "f20", "f21", "f22", "f23",
+    "f24", "f25", "f26", "f27", "f28", "f29", "f30", "fcsr" };
+
 const wi23_opc_info_t wi23_opc_info[64] =
   {
     { 0x00, WI23_OTHER,       "halt" },
@@ -102,24 +114,24 @@ const wi23_opc_info_t wi23_opc_info[64] =
 
 const wi23_fnc_info_t wi23_arith_fnc[4] =
   {
-    { 0x00, "add" },
-    { 0x01, "sub" },
-    { 0x02, "xor" },
-    { 0x03, "andn" }
+    { 0x00, 0x1B, "add" },
+    { 0x01, 0x1B, "sub" },
+    { 0x02, 0x1B, "xor" },
+    { 0x03, 0x1B, "andn" }
   };
 
 const wi23_fnc_info_t wi23_shift_fnc[4] =
   {
-    { 0x00, "rol" },
-    { 0x01, "sll" },
-    { 0x02, "ror" },
-    { 0x03, "srl" }
+    { 0x00, 0x1A, "rol" },
+    { 0x01, 0x1A, "sll" },
+    { 0x02, 0X1A, "ror" },
+    { 0x03, 0x1A, "srl" }
   };
 
 const wi23_fnc_info_t wi23_float_fnc[4] =
   {
-    { 0x00, "fadd" },
-    { 0x01, "fsub" },
-    { 0x02, "fmul" },
-    { 0x03, "fdiv" }
+    { 0x00, 0x3A, "fadd" },
+    { 0x01, 0x3A, "fsub" },
+    { 0x02, 0X3A, "fmul" },
+    { 0x03, 0x3A, "fdiv" }
   };

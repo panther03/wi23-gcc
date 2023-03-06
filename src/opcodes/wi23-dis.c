@@ -39,18 +39,6 @@ static void *stream;
 #define IMM_ZX(i)  (XT(i, 0, 16))
 #define D26(i)     (XTS(i, 0, 26))
 
-static const char * ireg_names[32] =
-  { "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7",
-    "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
-    "r16", "r17", "r18", "r19", "r20", "r21", "r22", "r23",
-    "r24", "r25", "r26", "gp", "fp", "sp", "ra", "csr" };
-
-static const char * freg_names[32] =
-  { "f0", "f1", "f2", "f3", "f4", "f5", "f6", "f7",
-    "f8", "f9", "f10", "f11", "f12", "f13", "f14", "f15",
-    "f16", "f17", "f18", "f19", "f20", "f21", "f22", "f23",
-    "f24", "f25", "f26", "f27", "f28", "f29", "f30", "fcsr" };
-
 int
 print_insn_wi23 (bfd_vma addr, struct disassemble_info * info)
 {
@@ -94,7 +82,7 @@ print_insn_wi23 (bfd_vma addr, struct disassemble_info * info)
     if (opcode->opcode == 0x1A) {
       fncode = &wi23_shift_fnc[XT(iword, 0, 2)];
     } else { // 0x1B
-      fncode = &wi23_arith_fnc[XT(iword, 0, 2)]; break; // 1B
+      fncode = &wi23_arith_fnc[XT(iword, 0, 2)]; // 1B
     }
     fpr (stream, "%s\t%s,%s,%s",
       fncode->name,
