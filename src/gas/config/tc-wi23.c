@@ -241,7 +241,10 @@ md_assemble (char *str)
 
   p = frag_more (4);
 
+  printf("DEBUG: assembling instruction with itype = %x, op = %s\n", itype, op_start);
+
   *op_end = pend;
+
 
   switch (itype)
   {
@@ -344,7 +347,7 @@ md_assemble (char *str)
 
         op_end = parse_exp_save_ilp (op_end, &arg);
         fix_new_exp (frag_now,
-		     (p - frag_now->fr_literal),
+		     (p - frag_now->fr_literal + 2),
 		     2,
 		     &arg,
 		     0,
@@ -376,7 +379,7 @@ md_assemble (char *str)
 
         op_end = parse_exp_save_ilp (op_end, &arg);
         fix_new_exp (frag_now,
-          (p - frag_now->fr_literal),
+          (p - frag_now->fr_literal + 2),
           2,
           &arg,
           0,
@@ -407,7 +410,7 @@ md_assemble (char *str)
 
         op_end = parse_exp_save_ilp (op_end, &arg);
         fix_new_exp (frag_now,
-          (p - frag_now->fr_literal),
+          (p - frag_now->fr_literal + 2),
           2,
           &arg,
           true,
@@ -430,7 +433,7 @@ md_assemble (char *str)
 
         op_end = parse_exp_save_ilp (op_end, &arg);
         fix_new_exp (frag_now,
-          (p - frag_now->fr_literal),
+          (p - frag_now->fr_literal + 2),
           2,
           &arg,
           0,
@@ -471,6 +474,7 @@ md_assemble (char *str)
       abort ();
   }
 
+  printf("instruction fragment: %x\n", iword);
   md_number_to_chars (p, iword, 4);
   dwarf2_emit_insn (4);
 
@@ -513,9 +517,6 @@ md_parse_option (int c ATTRIBUTE_UNUSED, const char *arg ATTRIBUTE_UNUSED)
 void
 md_show_usage (FILE *stream ATTRIBUTE_UNUSED)
 {
-  fprintf (stream, _("\
-  -EB                     assemble for a big endian system (default)\n\
-  -EL                     assemble for a little endian system\n"));
 }
 
 /* Apply a fixup to the object file.  */
