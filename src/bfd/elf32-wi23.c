@@ -63,7 +63,7 @@ static reloc_howto_type wi23_elf_howto_table [] =
 
   /* A 16 bit absolute relocation.  */
   HOWTO (R_WI23_16,		/* type */
-	 3,			/* rightshift */
+	 0,			/* rightshift */
 	 4,			/* size */
 	 16,			/* bitsize */
 	 false,			/* pc_relative */
@@ -81,15 +81,15 @@ static reloc_howto_type wi23_elf_howto_table [] =
 	 0,			/* rightshift */
 	 4,			/* size */
 	 16,			/* bitsize */
-	 false,			/* pc_relative */
+	 true,			/* pc_relative */
 	 0,			/* bitpos */
 	 complain_overflow_signed, /* complain_on_overflow */
 	 bfd_elf_generic_reloc,	/* special_function */
-	 "R_WI23_16",		/* name */
+	 "R_WI23_PCREL16_S",		/* name */
 	 true,			/* partial_inplace */
 	 0x00000000,		/* src_mask */
 	 0x0000ffff,		/* dst_mask */
-	 false),		/* pcrel_offset */
+	 true),		/* pcrel_offset */
 
   /* A 26 bit PC-relative relocation.  */
   HOWTO (R_WI23_PCREL26_S,	/* type.  */
