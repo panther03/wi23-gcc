@@ -432,6 +432,8 @@ case ${generic_target} in
 
   z8k-*-coff | z8k-*-sim)		fmt=coff ;;
 
+  wi23-*-*)				fmt=elf ;;
+
   *-*-aout | *-*-scout)			fmt=aout ;;
   *-*-cloudabi*)			fmt=elf em=cloudabi ;;
   *-*-dragonfly*)			fmt=elf em=dragonfly ;;

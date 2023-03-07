@@ -67,8 +67,8 @@ const wi23_opc_info_t wi23_opc_info[64] =
 
     { 0x18, WI23_IF_SI_S,     "lbi" },
     { 0x19, WI23_RF_DS,       "btr" },
-    { 0x1A, WI23_RF_I_FN_DST,   "" }, // shift
-    { 0x1B, WI23_RF_I_FN_DST,   "" }, // arithmetic
+    { 0x1A, WI23_RF_I_FN_DST,   "undefined1" }, // shift
+    { 0x1B, WI23_RF_I_FN_DST,   "undefined2" }, // arithmetic
 
     { 0x1C, WI23_RF_I_DST,      "seq" },
     { 0x1D, WI23_RF_I_DST,      "slt" },
@@ -106,7 +106,7 @@ const wi23_opc_info_t wi23_opc_info[64] =
     { 0x39, WI23_ILLEGAL,     "illegal" },
     { 0x3A, WI23_ILLEGAL,     "illegal" },
 
-    { 0x3B, WI23_RF_F_FN_DST,   "" }, // float arithmetic
+    { 0x3B, WI23_RF_F_FN_DST,   "undefined3" }, // float arithmetic
     { 0x3C, WI23_RF_F_DST,      "feq" },
     { 0x3E, WI23_RF_F_DST,      "fle" },
     { 0x3F, WI23_RF_F_DST,      "flt" }
@@ -114,24 +114,24 @@ const wi23_opc_info_t wi23_opc_info[64] =
 
 const wi23_fnc_info_t wi23_arith_fnc[4] =
   {
-    { 0x00, 0x1B, "add" },
-    { 0x01, 0x1B, "sub" },
-    { 0x02, 0x1B, "xor" },
-    { 0x03, 0x1B, "andn" }
+    { 0x00, 0x1B, WI23_RF_I_FN_DST, "add" },
+    { 0x01, 0x1B, WI23_RF_I_FN_DST, "sub" },
+    { 0x02, 0x1B, WI23_RF_I_FN_DST, "xor" },
+    { 0x03, 0x1B, WI23_RF_I_FN_DST, "andn" }
   };
 
 const wi23_fnc_info_t wi23_shift_fnc[4] =
   {
-    { 0x00, 0x1A, "rol" },
-    { 0x01, 0x1A, "sll" },
-    { 0x02, 0X1A, "ror" },
-    { 0x03, 0x1A, "srl" }
+    { 0x00, 0x1A, WI23_RF_I_FN_DST, "rol" },
+    { 0x01, 0x1A, WI23_RF_I_FN_DST, "sll" },
+    { 0x02, 0X1A, WI23_RF_I_FN_DST, "ror" },
+    { 0x03, 0x1A, WI23_RF_I_FN_DST, "srl" }
   };
 
 const wi23_fnc_info_t wi23_float_fnc[4] =
   {
-    { 0x00, 0x3A, "fadd" },
-    { 0x01, 0x3A, "fsub" },
-    { 0x02, 0X3A, "fmul" },
-    { 0x03, 0x3A, "fdiv" }
+    { 0x00, 0x3A, WI23_RF_F_FN_DST, "fadd" },
+    { 0x01, 0x3A, WI23_RF_F_FN_DST, "fsub" },
+    { 0x02, 0X3A, WI23_RF_F_FN_DST, "fmul" },
+    { 0x03, 0x3A, WI23_RF_F_FN_DST, "fdiv" }
   };

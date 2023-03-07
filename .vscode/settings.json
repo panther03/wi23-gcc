@@ -3,6 +3,13 @@
         "wi23.h": "c",
         "moxie.h": "c",
         "riscv.h": "c",
-        "sysdep.h": "c"
+        "sysdep.h": "c",
+        "elf-bfd.h": "c",
+        "hash_map": "c",
+        "hash_set": "c",
+        "algorithm": "c",
+        "bitset": "c",
+        "dynamic_bitset": "c",
+        "chrono": "c"
     }
 }

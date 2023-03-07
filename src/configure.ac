@@ -1329,7 +1329,7 @@ case "${target}" in
     noconfigdirs="$noconfigdirs ld"
     ;;
   wi23-*-*)
-    noconfigdirs="$noconfigdirs gdb sim binutils gas ld gprof"
+    noconfigdirs="$noconfigdirs gdb sim binutils ld gprof"
     ;;
   loongarch*-*-linux*)
     ;;

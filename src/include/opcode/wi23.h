@@ -91,6 +91,7 @@ typedef struct wi23_fnc_info_t
 {
   short         fncode;
   short         opcode;
+  unsigned      itype;
   const char *  name;
 } wi23_fnc_info_t;
 

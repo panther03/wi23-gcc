@@ -52,6 +52,9 @@ const pseudo_typeS md_pseudo_table[] =
   {0, 0, 0}
 };
 
+const char FLT_CHARS[] = "rRsSfFdDxXpP";
+const char EXP_CHARS[] = "eE";
+
 static valueT md_chars_to_number (char * buf, int n);
 
 /* Byte order.  */
@@ -80,8 +83,9 @@ md_begin (void)
   const wi23_opc_info_t *opcode;
 
   /* Insert names into hash table.  */
-  for (count = 0, opcode = wi23_opc_info; count++ < 64; opcode++)
+  for (count = 0, opcode = wi23_opc_info; count++ < 63; opcode++) {
     str_hash_insert (opcode_hash_table, opcode->name, opcode, 0);
+  }
 
   ///////////////////
   // FNCODE TABLE //
@@ -94,11 +98,11 @@ md_begin (void)
   const wi23_fnc_info_t *fncode;
 
   /* Insert names into hash table.  */
-  for (count = 0, fncode = wi23_shift_fnc; count++ < 4; fncode++)
+  for (count = 0, fncode = wi23_shift_fnc; count++ < 3; fncode++)
     str_hash_insert (fncode_hash_table, fncode->name, fncode, 0);
-  for (count = 0, fncode = wi23_arith_fnc; count++ < 4; fncode++)
+  for (count = 0, fncode = wi23_arith_fnc; count++ < 3; fncode++)
     str_hash_insert (fncode_hash_table, fncode->name, fncode, 0);
-  for (count = 0, fncode = wi23_float_fnc; count++ < 4; fncode++)
+  for (count = 0, fncode = wi23_float_fnc; count++ < 3; fncode++)
     str_hash_insert (fncode_hash_table, fncode->name, fncode, 0);
 
   //////////////////////////
@@ -106,7 +110,6 @@ md_begin (void)
   ////////////////////////
 
   regnames_hash_table = str_htab_create ();
-  const wi23_fnc_info_t *fncode;
   void* hash;
 
   /* Insert names into hash table.  */
@@ -120,6 +123,7 @@ md_begin (void)
   }
 
   bfd_set_arch_mach (stdoutput, TARGET_ARCH, 0);
+
 }
 
 /* Parse an expression and then restore the input line pointer.  */
@@ -139,7 +143,7 @@ parse_exp_save_ilp (char *s, expressionS *op)
 static unsigned int
 parse_register_operand (char **ptr, enum reg_class class)
 {
-  unsigned int reg;
+  void* reg;
   char *s = *ptr;
   char s_end_temp = 0;
 
@@ -180,7 +184,7 @@ parse_register_operand (char **ptr, enum reg_class class)
   *s = s_end_temp;
   *ptr = s;
   
-  return reg;
+  return DECODE_REG_NUM (reg);
 }
 
 /* This is the guts of the machine-dependent assembler.  STR points to
@@ -194,7 +198,8 @@ md_assemble (char *str)
   char *op_end;
 
   wi23_opc_info_t *opcode;
-  wi23_fnc_info_t *fncode;
+  wi23_fnc_info_t *fncode = NULL;
+  unsigned int itype = 0;
   char *p;
   char pend;
 
@@ -224,40 +229,48 @@ md_assemble (char *str)
   {
     // Attempt to look up in the function code table instead
     fncode = (wi23_fnc_info_t *) str_hash_find (fncode_hash_table, op_start);
-    *op_end = pend;
 
     if (fncode == NULL) {
       as_bad (_("unknown opcode %s"), op_start);
       return;
     }
+    itype = fncode->itype;
   } else {
-    *op_end = pend;
+    itype = opcode->itype;
   }  
 
   p = frag_more (4);
 
-  switch (opcode->itype)
+  *op_end = pend;
+
+  switch (itype)
   {
     /////////////////////////////
     // R-type - function code //
     ///////////////////////////
     case WI23_RF_F_FN_DST:
     case WI23_RF_I_FN_DST:
-      iword = (fncode->opcode << 26) | (fncode->fncode);
+      if (fncode != NULL) {
+        iword = (fncode->opcode << 26) | (fncode->fncode);
+      } else {
+        as_bad (_("bad news\n"));
+      }
+      
       
       // Skip whitespace after opcode
       while (ISSPACE (*op_end)) op_end++;
 
       {
         int dst, src, trg;
-        dst = parse_register_operand (&op_end, (opcode->itype == WI23_RF_F_FN_DST) ? RCLASS_FPR : RCLASS_GPR);
+        dst = parse_register_operand (&op_end, (itype == WI23_RF_F_FN_DST) ? RCLASS_FPR : RCLASS_GPR);
         if (*op_end != ',')
           as_warn (_("expecting comma delimited register operands"));
         op_end++;
-        src = parse_register_operand (&op_end, (opcode->itype == WI23_RF_F_FN_DST) ? RCLASS_FPR : RCLASS_GPR);
+        src = parse_register_operand (&op_end, (itype == WI23_RF_F_FN_DST) ? RCLASS_FPR : RCLASS_GPR);
         if (*op_end != ',')
           as_warn (_("expecting comma delimited register operands"));
-        trg = parse_register_operand (&op_end, (opcode->itype == WI23_RF_F_FN_DST) ? RCLASS_FPR : RCLASS_GPR);
+        op_end++;
+        trg = parse_register_operand (&op_end, (itype == WI23_RF_F_FN_DST) ? RCLASS_FPR : RCLASS_GPR);
         iword |= (dst << 11) + (trg << 16) + (src << 21);
       }
       break;
@@ -273,14 +286,15 @@ md_assemble (char *str)
 
       {
         int dst, src, trg;
-        dst = parse_register_operand (&op_end, (opcode->itype == WI23_RF_F_DST) ? RCLASS_FPR : RCLASS_GPR);
+        dst = parse_register_operand (&op_end, (itype == WI23_RF_F_DST) ? RCLASS_FPR : RCLASS_GPR);
         if (*op_end != ',')
           as_warn (_("expecting comma delimited register operands"));
         op_end++;
-        src = parse_register_operand (&op_end, (opcode->itype == WI23_RF_F_DST) ? RCLASS_FPR : RCLASS_GPR);
+        src = parse_register_operand (&op_end, (itype == WI23_RF_F_DST) ? RCLASS_FPR : RCLASS_GPR);
         if (*op_end != ',')
           as_warn (_("expecting comma delimited register operands"));
-        trg = parse_register_operand (&op_end, (opcode->itype == WI23_RF_F_DST) ? RCLASS_FPR : RCLASS_GPR);
+        op_end++;
+        trg = parse_register_operand (&op_end, (itype == WI23_RF_F_DST) ? RCLASS_FPR : RCLASS_GPR);
         iword |= (dst << 11) + (trg << 16) + (src << 21);
       }
       break;
@@ -295,11 +309,11 @@ md_assemble (char *str)
 
       {
         int dst, src;
-        dst = parse_register_operand (&op_end, (opcode->itype == WI23_RF_F_DST) ? RCLASS_FPR : RCLASS_GPR);
+        dst = parse_register_operand (&op_end, (itype == WI23_RF_F_DST) ? RCLASS_FPR : RCLASS_GPR);
         if (*op_end != ',')
           as_warn (_("expecting comma delimited register operands"));
         op_end++;
-        src = parse_register_operand (&op_end, (opcode->itype == WI23_RF_F_DST) ? RCLASS_FPR : RCLASS_GPR);
+        src = parse_register_operand (&op_end, (itype == WI23_RF_F_DST) ? RCLASS_FPR : RCLASS_GPR);
         iword |= (dst << 11) + (src << 21);
       }
       break;
@@ -324,6 +338,9 @@ md_assemble (char *str)
         src = parse_register_operand (&op_end, RCLASS_GPR);
 
         while (ISSPACE (*op_end)) op_end++;
+        if (*op_end != ',')
+          as_warn (_("expecting comma delimited register operands"));
+        op_end++;
 
         op_end = parse_exp_save_ilp (op_end, &arg);
         fix_new_exp (frag_now,
@@ -351,8 +368,11 @@ md_assemble (char *str)
         int src;
 
         src = parse_register_operand (&op_end, RCLASS_GPR);
-        
+
         while (ISSPACE (*op_end)) op_end++;
+        if (*op_end != ',')
+          as_warn (_("expecting comma delimited register operands"));
+        op_end++;
 
         op_end = parse_exp_save_ilp (op_end, &arg);
         fix_new_exp (frag_now,
@@ -381,6 +401,9 @@ md_assemble (char *str)
         src = parse_register_operand (&op_end, RCLASS_GPR);
         
         while (ISSPACE (*op_end)) op_end++;
+        if (*op_end != ',')
+          as_warn (_("expecting comma delimited register operands"));
+        op_end++;
 
         op_end = parse_exp_save_ilp (op_end, &arg);
         fix_new_exp (frag_now,
@@ -433,7 +456,7 @@ md_assemble (char *str)
           4,
           &arg,
           true,
-          BFD_RELOC_D26);
+          BFD_RELOC_WI23_PCREL26_S);
 
       }
       break;
@@ -472,6 +495,15 @@ md_atof (int type, char *litP, int *sizeP)
   return ieee_md_atof (type, litP, sizeP, TARGET_BYTES_BIG_ENDIAN);
 }
 
+struct option md_longopts[] =
+{
+  { NULL,          no_argument, NULL, 0}
+};
+
+size_t md_longopts_size = sizeof (md_longopts);
+
+const char *md_shortopts = "";
+
 int
 md_parse_option (int c ATTRIBUTE_UNUSED, const char *arg ATTRIBUTE_UNUSED)
 {
@@ -481,6 +513,9 @@ md_parse_option (int c ATTRIBUTE_UNUSED, const char *arg ATTRIBUTE_UNUSED)
 void
 md_show_usage (FILE *stream ATTRIBUTE_UNUSED)
 {
+  fprintf (stream, _("\
+  -EB                     assemble for a big endian system (default)\n\
+  -EL                     assemble for a little endian system\n"));
 }
 
 /* Apply a fixup to the object file.  */

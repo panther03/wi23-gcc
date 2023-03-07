@@ -1,43 +1,3 @@
-/*
- wi23-specific support for 32-bit ELF.
-   Copyright 2009, 2010, 2012 Free Software Foundation, Inc.
-   Copied from elf32-moxie.c, elf32-fr30.c which is..
-   Copyright 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007
-   Free Software Foundation, Inc.
-   This file is part of BFD, the Binary File Descriptor library.
-   This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; either version 3 of the License, or
-   (at your option) any later version.
-   This program is distributed in the hope that it will be useful,
-   but WITHOUT ANY WARRANTY; without even the implied warranty of
-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
-   You should have received a copy of the GNU General Public License
-   along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin Street - Fifth Floor, Boston,
-   MA 02110-1301, USA.
-
-#include "sysdep.h"
-#include "bfd.h"
-#include "libbfd.h"
-#include "elf-bfd.h"
-//#include "elf/wi23.h"
-
-#define TARGET_BIG_SYM          wi23_elf32_vec
-#define TARGET_BIG_NAME		"elf32-wi23"
-
-#define ELF_ARCH		bfd_arch_wi23
-#define ELF_MACHINE_CODE	EM_WI23
-#define ELF_MAXPAGESIZE		0x1
-
-
-#define bfd_elf32_bfd_reloc_type_lookup		bfd_default_reloc_type_lookup
-#define bfd_elf32_bfd_reloc_name_lookup		_bfd_norelocs_bfd_reloc_name_lookup
-#define elf_info_to_howto			_bfd_elf_no_info_to_howto
-
-#include "elf32-target.h"*/
-
 /* wi23-specific support for 32-bit ELF.
    Copyright (C) 2009-2023 Free Software Foundation, Inc.
 
@@ -96,9 +56,39 @@ static reloc_howto_type wi23_elf_howto_table [] =
 	 complain_overflow_bitfield, /* complain_on_overflow */
 	 bfd_elf_generic_reloc,	/* special_function */
 	 "R_WI23_32",		/* name */
-	 false,			/* partial_inplace */
+	 true,			/* partial_inplace */
 	 0x00000000,		/* src_mask */
 	 0xffffffff,		/* dst_mask */
+	 false),		/* pcrel_offset */
+
+  /* A 16 bit absolute relocation.  */
+  HOWTO (R_WI23_16,		/* type */
+	 3,			/* rightshift */
+	 4,			/* size */
+	 16,			/* bitsize */
+	 false,			/* pc_relative */
+	 0,			/* bitpos */
+	 complain_overflow_bitfield, /* complain_on_overflow */
+	 bfd_elf_generic_reloc,	/* special_function */
+	 "R_WI23_16",		/* name */
+	 true,			/* partial_inplace */
+	 0x00000000,		/* src_mask */
+	 0x0000ffff,		/* dst_mask */
+	 false),		/* pcrel_offset */
+
+   /* A 16 bit PC-relative relocation.  */
+  HOWTO (R_WI23_PCREL16_S,		/* type */
+	 0,			/* rightshift */
+	 4,			/* size */
+	 16,			/* bitsize */
+	 false,			/* pc_relative */
+	 0,			/* bitpos */
+	 complain_overflow_signed, /* complain_on_overflow */
+	 bfd_elf_generic_reloc,	/* special_function */
+	 "R_WI23_16",		/* name */
+	 true,			/* partial_inplace */
+	 0x00000000,		/* src_mask */
+	 0x0000ffff,		/* dst_mask */
 	 false),		/* pcrel_offset */
 
   /* A 26 bit PC-relative relocation.  */
@@ -111,7 +101,7 @@ static reloc_howto_type wi23_elf_howto_table [] =
 	 complain_overflow_signed, /* complain_on_overflow.  */
 	 bfd_elf_generic_reloc,	/* special_function.  */
 	 "R_WI23_PCREL26_S",		/* name.  */
-	 false,			/* partial_inplace.  */
+	 true,			/* partial_inplace.  */
 	 0,			/* src_mask.  */
 	 0x03ffffff,		/* dst_mask.  */
 	 true),			/* pcrel_offset.  */
@@ -122,56 +112,58 @@ static reloc_howto_type wi23_elf_howto_table [] =
 struct wi23_reloc_map
 {
   bfd_reloc_code_real_type bfd_reloc_val;
-  unsigned int moxie_reloc_val;
+  unsigned int wi23_reloc_val;
 };
 
-static const struct moxie_reloc_map moxie_reloc_map [] =
+static const struct wi23_reloc_map wi23_reloc_map [] =
 {
-  { BFD_RELOC_NONE,	       R_MOXIE_NONE },
-  { BFD_RELOC_32,	       R_MOXIE_32 },
-  { BFD_RELOC_MOXIE_10_PCREL,  R_MOXIE_PCREL10 },
+  { BFD_RELOC_NONE,	       R_WI23_NONE },
+  { BFD_RELOC_32,	       R_WI23_32 },
+  { BFD_RELOC_16,        R_WI23_16 },
+  { BFD_RELOC_16_PCREL,        R_WI23_PCREL16_S },
+  { BFD_RELOC_WI23_PCREL26_S,        R_WI23_PCREL26_S },
 };
 
 static reloc_howto_type *
-moxie_reloc_type_lookup (bfd *abfd ATTRIBUTE_UNUSED,
+wi23_reloc_type_lookup (bfd *abfd ATTRIBUTE_UNUSED,
 			 bfd_reloc_code_real_type code)
 {
   unsigned int i;
 
-  for (i = sizeof (moxie_reloc_map) / sizeof (moxie_reloc_map[0]);
+  for (i = sizeof (wi23_reloc_map) / sizeof (wi23_reloc_map[0]);
        i--;)
-    if (moxie_reloc_map [i].bfd_reloc_val == code)
-      return & moxie_elf_howto_table [moxie_reloc_map[i].moxie_reloc_val];
+    if (wi23_reloc_map [i].bfd_reloc_val == code)
+      return & wi23_elf_howto_table [wi23_reloc_map[i].wi23_reloc_val];
 
   return NULL;
 }
 
 static reloc_howto_type *
-moxie_reloc_name_lookup (bfd *abfd ATTRIBUTE_UNUSED, const char *r_name)
+wi23_reloc_name_lookup (bfd *abfd ATTRIBUTE_UNUSED, const char *r_name)
 {
   unsigned int i;
 
   for (i = 0;
-       i < sizeof (moxie_elf_howto_table) / sizeof (moxie_elf_howto_table[0]);
+       i < sizeof (wi23_elf_howto_table) / sizeof (wi23_elf_howto_table[0]);
        i++)
-    if (moxie_elf_howto_table[i].name != NULL
-	&& strcasecmp (moxie_elf_howto_table[i].name, r_name) == 0)
-      return &moxie_elf_howto_table[i];
+    if (wi23_elf_howto_table[i].name != NULL
+	&& strcasecmp (wi23_elf_howto_table[i].name, r_name) == 0)
+      return &wi23_elf_howto_table[i];
 
   return NULL;
 }
 
-/* Set the howto pointer for an MOXIE ELF reloc.  */
+/* Set the howto pointer for an WI-23 ELF reloc.  */
 
 static bool
-moxie_info_to_howto_rela (bfd *abfd,
+wi23_info_to_howto_rela (bfd *abfd,
 			  arelent *cache_ptr,
 			  Elf_Internal_Rela *dst)
 {
   unsigned int r_type;
 
   r_type = ELF32_R_TYPE (dst->r_info);
-  if (r_type >= (unsigned int) R_MOXIE_max)
+  if (r_type >= (unsigned int) R_WI23_max)
     {
       /* xgettext:c-format */
       _bfd_error_handler (_("%pB: unsupported relocation type %#x"),
@@ -179,7 +171,7 @@ moxie_info_to_howto_rela (bfd *abfd,
       bfd_set_error (bfd_error_bad_value);
       return false;
     }
-  cache_ptr->howto = & moxie_elf_howto_table [r_type];
+  cache_ptr->howto = & wi23_elf_howto_table [r_type];
   return true;
 }
 
@@ -187,7 +179,7 @@ moxie_info_to_howto_rela (bfd *abfd,
    routines, but a few relocs, we have to do them ourselves.  */
 
 static bfd_reloc_status_type
-moxie_final_link_relocate (reloc_howto_type *howto,
+wi23_final_link_relocate (reloc_howto_type *howto,
 			   bfd *input_bfd,
 			   asection *input_section,
 			   bfd_byte *contents,
@@ -207,7 +199,7 @@ moxie_final_link_relocate (reloc_howto_type *howto,
   return r;
 }
 
-/* Relocate an MOXIE ELF section.
+/* Relocate an WI-23 ELF section.
 
    The RELOCATE_SECTION function is called by the new ELF backend linker
    to handle the relocations for a section.
@@ -238,7 +230,7 @@ moxie_final_link_relocate (reloc_howto_type *howto,
    accordingly.  */
 
 static int
-moxie_elf_relocate_section (bfd *output_bfd,
+wi23_elf_relocate_section (bfd *output_bfd,
 			    struct bfd_link_info *info,
 			    bfd *input_bfd,
 			    asection *input_section,
@@ -270,7 +262,7 @@ moxie_elf_relocate_section (bfd *output_bfd,
 
       r_type = ELF32_R_TYPE (rel->r_info);
       r_symndx = ELF32_R_SYM (rel->r_info);
-      howto  = moxie_elf_howto_table + r_type;
+      howto  = wi23_elf_howto_table + r_type;
       h      = NULL;
       sym    = NULL;
       sec    = NULL;
@@ -304,7 +296,7 @@ moxie_elf_relocate_section (bfd *output_bfd,
       if (bfd_link_relocatable (info))
 	continue;
 
-      r = moxie_final_link_relocate (howto, input_bfd, input_section,
+      r = wi23_final_link_relocate (howto, input_bfd, input_section,
 				     contents, rel, relocation);
 
       if (r != bfd_reloc_ok)
@@ -354,7 +346,7 @@ moxie_elf_relocate_section (bfd *output_bfd,
    relocation.  */
 
 static asection *
-moxie_elf_gc_mark_hook (asection *sec,
+wi23_elf_gc_mark_hook (asection *sec,
 			struct bfd_link_info *info,
 			Elf_Internal_Rela *rel,
 			struct elf_link_hash_entry *h,
@@ -368,7 +360,7 @@ moxie_elf_gc_mark_hook (asection *sec,
    virtual table relocs for gc.  */
 
 static bool
-moxie_elf_check_relocs (bfd *abfd,
+wi23_elf_check_relocs (bfd *abfd,
 			struct bfd_link_info *info,
 			asection *sec,
 			const Elf_Internal_Rela *relocs)
@@ -405,26 +397,24 @@ moxie_elf_check_relocs (bfd *abfd,
   return true;
 }
 
-#define ELF_ARCH		bfd_arch_moxie
-#define ELF_MACHINE_CODE	EM_MOXIE
-#define ELF_MACHINE_ALT1	EM_MOXIE_OLD
+
+#define ELF_ARCH		bfd_arch_wi23
+#define ELF_MACHINE_CODE	EM_WI23
 #define ELF_MAXPAGESIZE		0x1
 
-#define TARGET_BIG_SYM		moxie_elf32_be_vec
-#define TARGET_BIG_NAME		"elf32-bigmoxie"
-#define TARGET_LITTLE_SYM	moxie_elf32_le_vec
-#define TARGET_LITTLE_NAME	"elf32-littlemoxie"
+#define TARGET_BIG_SYM          wi23_elf32_vec
+#define TARGET_BIG_NAME		"elf32-wi23"
 
 #define elf_info_to_howto_rel			NULL
-#define elf_info_to_howto			moxie_info_to_howto_rela
-#define elf_backend_relocate_section		moxie_elf_relocate_section
-#define elf_backend_gc_mark_hook		moxie_elf_gc_mark_hook
-#define elf_backend_check_relocs		moxie_elf_check_relocs
+#define elf_info_to_howto			wi23_info_to_howto_rela
+#define elf_backend_relocate_section		wi23_elf_relocate_section
+#define elf_backend_gc_mark_hook		wi23_elf_gc_mark_hook
+#define elf_backend_check_relocs		wi23_elf_check_relocs
 
 #define elf_backend_can_gc_sections		1
 #define elf_backend_rela_normal			1
 
-#define bfd_elf32_bfd_reloc_type_lookup		moxie_reloc_type_lookup
-#define bfd_elf32_bfd_reloc_name_lookup		moxie_reloc_name_lookup
+#define bfd_elf32_bfd_reloc_type_lookup		wi23_reloc_type_lookup
+#define bfd_elf32_bfd_reloc_name_lookup		wi23_reloc_name_lookup
 
 #include "elf32-target.h"

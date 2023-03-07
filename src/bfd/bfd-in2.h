@@ -2611,6 +2611,10 @@ to compensate for the borrow when the low bits are added.  */
   BFD_RELOC_MOXIE_10_PCREL,
 
 
+/* WI-23 ELF relocations.  */
+  BFD_RELOC_WI23_PCREL26_S,
+
+
 /* FT32 ELF relocations.  */
   BFD_RELOC_FT32_10,
   BFD_RELOC_FT32_20,
