@@ -124,6 +124,8 @@ ft32*)	cpu_type=ft32
 	;;
 moxie*)	cpu_type=moxie
 	;;
+wi23*)	cpu_type=wi23
+	;;
 i[34567]86-*-*)
 	cpu_type=i386
 	;;

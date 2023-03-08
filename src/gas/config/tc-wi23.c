@@ -32,6 +32,9 @@ static htab_t opcode_hash_table = NULL;
 static htab_t fncode_hash_table = NULL;
 static htab_t regnames_hash_table = NULL;
 
+#define VERY_BAD_CHECK_FOR_S_FREG(opcode) ((opcode->opcode == 0x20) || (opcode->opcode == 0x22) || (opcode->opcode == 0x24))
+#define VERY_BAD_CHECK_FOR_D_FREG(opcode) ((opcode->opcode == 0x21) || (opcode->opcode == 0x23))
+
 // Borrowed from tc-riscv.c
 
 /* All WI-23 registers belong to one of these classes.  */
@@ -241,7 +244,7 @@ md_assemble (char *str)
 
   p = frag_more (4);
 
-  printf("DEBUG: assembling instruction with itype = %x, op = %s\n", itype, op_start);
+  printf("insn: type = %x, name = %s\n", itype, op_start);
 
   *op_end = pend;
 
@@ -312,12 +315,13 @@ md_assemble (char *str)
 
       {
         int dst, src;
-        dst = parse_register_operand (&op_end, (itype == WI23_RF_F_DST) ? RCLASS_FPR : RCLASS_GPR);
+        dst = parse_register_operand (&op_end, VERY_BAD_CHECK_FOR_D_FREG(opcode) ? RCLASS_FPR : RCLASS_GPR);
         if (*op_end != ',')
           as_warn (_("expecting comma delimited register operands"));
         op_end++;
-        src = parse_register_operand (&op_end, (itype == WI23_RF_F_DST) ? RCLASS_FPR : RCLASS_GPR);
+        src = parse_register_operand (&op_end, VERY_BAD_CHECK_FOR_S_FREG(opcode) ? RCLASS_FPR : RCLASS_GPR);
         iword |= (dst << 11) + (src << 21);
+        printf("IWORD !!! %x", iword);
       }
       break;
     //////////////////////////////////////////////
@@ -478,6 +482,8 @@ md_assemble (char *str)
   md_number_to_chars (p, iword, 4);
   dwarf2_emit_insn (4);
 
+  printf("iword: iword = %x\n", iword);
+
   while (ISSPACE (*op_end))
     op_end++;
 
@@ -542,8 +548,8 @@ md_apply_fix (fixS *fixP ATTRIBUTE_UNUSED,
       break;
     case BFD_RELOC_16_PCREL:
     case BFD_RELOC_16:
-      buf[1] = val >> 8;
-      buf[0] = val >> 0;
+      buf[0] = val >> 8;
+      buf[1] = val >> 0;
       buf += 2;
       break;
     case BFD_RELOC_8:
