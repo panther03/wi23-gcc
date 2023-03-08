@@ -1,1 +1,1 @@
-export PATH="/opt/autoconf-2.64/bin:$PATH"
+export PATH="/opt/am151/bin:$PATH"
