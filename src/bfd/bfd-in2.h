@@ -2612,6 +2612,8 @@ to compensate for the borrow when the low bits are added.  */
 
 
 /* WI-23 ELF relocations.  */
+  BFD_RELOC_WI23_16_LO,
+  BFD_RELOC_WI23_PCREL16_LO,
   BFD_RELOC_WI23_PCREL26_S,
 
 

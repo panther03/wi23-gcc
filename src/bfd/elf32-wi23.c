@@ -56,22 +56,22 @@ static reloc_howto_type wi23_elf_howto_table [] =
 	 complain_overflow_bitfield, /* complain_on_overflow */
 	 bfd_elf_generic_reloc,	/* special_function */
 	 "R_WI23_32",		/* name */
-	 true,			/* partial_inplace */
+	 false,			/* partial_inplace */
 	 0x00000000,		/* src_mask */
 	 0xffffffff,		/* dst_mask */
 	 false),		/* pcrel_offset */
 
   /* A 16 bit absolute relocation.  */
-  HOWTO (R_WI23_16,		/* type */
+  HOWTO (R_WI23_16_LO,		/* type */
 	 0,			/* rightshift */
-	 4,			/* size */
+	 2,			/* size */
 	 16,			/* bitsize */
 	 false,			/* pc_relative */
 	 0,			/* bitpos */
 	 complain_overflow_bitfield, /* complain_on_overflow */
 	 bfd_elf_generic_reloc,	/* special_function */
-	 "R_WI23_16",		/* name */
-	 true,			/* partial_inplace */
+	 "R_WI23_16_LO",		/* name */
+	 false,			/* partial_inplace */
 	 0x00000000,		/* src_mask */
 	 0x0000ffff,		/* dst_mask */
 	 false),		/* pcrel_offset */
@@ -79,14 +79,14 @@ static reloc_howto_type wi23_elf_howto_table [] =
    /* A 16 bit PC-relative relocation.  */
   HOWTO (R_WI23_PCREL16_S,		/* type */
 	 0,			/* rightshift */
-	 4,			/* size */
+	 2,			/* size */
 	 16,			/* bitsize */
 	 true,			/* pc_relative */
 	 0,			/* bitpos */
 	 complain_overflow_signed, /* complain_on_overflow */
 	 bfd_elf_generic_reloc,	/* special_function */
 	 "R_WI23_PCREL16_S",		/* name */
-	 true,			/* partial_inplace */
+	 false,			/* partial_inplace */
 	 0x00000000,		/* src_mask */
 	 0x0000ffff,		/* dst_mask */
 	 true),		/* pcrel_offset */
@@ -101,7 +101,7 @@ static reloc_howto_type wi23_elf_howto_table [] =
 	 complain_overflow_signed, /* complain_on_overflow.  */
 	 bfd_elf_generic_reloc,	/* special_function.  */
 	 "R_WI23_PCREL26_S",		/* name.  */
-	 true,			/* partial_inplace.  */
+	 false,			/* partial_inplace.  */
 	 0,			/* src_mask.  */
 	 0x03ffffff,		/* dst_mask.  */
 	 true),			/* pcrel_offset.  */
@@ -119,8 +119,8 @@ static const struct wi23_reloc_map wi23_reloc_map [] =
 {
   { BFD_RELOC_NONE,	       R_WI23_NONE },
   { BFD_RELOC_32,	       R_WI23_32 },
-  { BFD_RELOC_16,        R_WI23_16 },
-  { BFD_RELOC_16_PCREL,        R_WI23_PCREL16_S },
+  { BFD_RELOC_WI23_16_LO,          R_WI23_16_LO },
+  { BFD_RELOC_WI23_PCREL16_LO,    R_WI23_PCREL16_S },
   { BFD_RELOC_WI23_PCREL26_S,        R_WI23_PCREL26_S },
 };
 

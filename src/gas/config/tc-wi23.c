@@ -351,11 +351,11 @@ md_assemble (char *str)
 
         op_end = parse_exp_save_ilp (op_end, &arg);
         fix_new_exp (frag_now,
-		     (p - frag_now->fr_literal + 2),
+		     (p - frag_now->fr_literal),
 		     2,
 		     &arg,
 		     0,
-		     BFD_RELOC_16);
+		     BFD_RELOC_WI23_16_LO);
 
         iword |= (dst << 16) + (src << 21);
       }
@@ -383,11 +383,11 @@ md_assemble (char *str)
 
         op_end = parse_exp_save_ilp (op_end, &arg);
         fix_new_exp (frag_now,
-          (p - frag_now->fr_literal + 2),
+          (p - frag_now->fr_literal),
           2,
           &arg,
           0,
-          BFD_RELOC_16);
+          BFD_RELOC_WI23_16_LO);
 
         iword |= (src << 21);
       }
@@ -414,11 +414,11 @@ md_assemble (char *str)
 
         op_end = parse_exp_save_ilp (op_end, &arg);
         fix_new_exp (frag_now,
-          (p - frag_now->fr_literal + 2),
+          (p - frag_now->fr_literal),
           2,
           &arg,
           true,
-          BFD_RELOC_16_PCREL);
+          BFD_RELOC_WI23_PCREL16_LO);
 
         iword |= (src << 21);
       }
@@ -437,11 +437,11 @@ md_assemble (char *str)
 
         op_end = parse_exp_save_ilp (op_end, &arg);
         fix_new_exp (frag_now,
-          (p - frag_now->fr_literal + 2),
+          (p - frag_now->fr_literal),
           2,
           &arg,
           0,
-          BFD_RELOC_16);
+          BFD_RELOC_WI23_16_LO);
 
       }
       break;
@@ -528,8 +528,7 @@ md_show_usage (FILE *stream ATTRIBUTE_UNUSED)
 /* Apply a fixup to the object file.  */
 
 void
-md_apply_fix (fixS *fixP ATTRIBUTE_UNUSED,
-	      valueT * valP ATTRIBUTE_UNUSED, segT seg ATTRIBUTE_UNUSED)
+md_apply_fix (fixS *fixP, valueT * valP, segT seg ATTRIBUTE_UNUSED)
 {
   char *buf = fixP->fx_where + fixP->fx_frag->fr_literal;
   long val = *valP;
@@ -546,10 +545,10 @@ md_apply_fix (fixS *fixP ATTRIBUTE_UNUSED,
       buf[3] = val >> 0;
       buf += 4;
       break;
-    case BFD_RELOC_16_PCREL:
-    case BFD_RELOC_16:
-      buf[0] = val >> 8;
-      buf[1] = val >> 0;
+    case BFD_RELOC_WI23_PCREL16_LO:
+    case BFD_RELOC_WI23_16_LO:
+      buf[2] = val >> 8;
+      buf[3] = val >> 0;
       buf += 2;
       break;
     case BFD_RELOC_8:
@@ -613,8 +612,9 @@ tc_gen_reloc (asection *section ATTRIBUTE_UNUSED, fixS *fixP)
   switch (fixP->fx_r_type)
     {
     case BFD_RELOC_32:
-    case BFD_RELOC_16:
-    case BFD_RELOC_16_PCREL:
+    // FIXME: should probably throw an error trying to reference a label for an immediate
+    case BFD_RELOC_WI23_16_LO:
+    case BFD_RELOC_WI23_PCREL16_LO:
     case BFD_RELOC_WI23_PCREL26_S:
       code = fixP->fx_r_type;
       break;
@@ -684,10 +684,10 @@ md_pcrel_from (fixS *fixP)
 
   switch (fixP->fx_r_type)
     {
-    case BFD_RELOC_16:
-    case BFD_RELOC_16_PCREL:
+    //case BFD_RELOC_LO16:
+    case BFD_RELOC_WI23_PCREL16_LO:
     case BFD_RELOC_WI23_PCREL26_S:
-    case BFD_RELOC_32:
+    //case BFD_RELOC_32:
       return addr + 4;
     default:
       abort ();
