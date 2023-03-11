@@ -321,7 +321,6 @@ md_assemble (char *str)
         op_end++;
         src = parse_register_operand (&op_end, VERY_BAD_CHECK_FOR_S_FREG(opcode) ? RCLASS_FPR : RCLASS_GPR);
         iword |= (dst << 11) + (src << 21);
-        printf("IWORD !!! %x", iword);
       }
       break;
     //////////////////////////////////////////////
@@ -547,8 +546,10 @@ md_apply_fix (fixS *fixP, valueT * valP, segT seg ATTRIBUTE_UNUSED)
       break;
     case BFD_RELOC_WI23_PCREL16_LO:
     case BFD_RELOC_WI23_16_LO:
+      //printf("%d %x %x %x %x\n", fixP->fx_line,  buf[0], buf[1], buf[2],buf[3]);
       buf[2] = val >> 8;
       buf[3] = val >> 0;
+      //printf("%d %x %x %x %x\n", fixP->fx_line,  buf[0], buf[1], buf[2],buf[3]);
       buf += 2;
       break;
     case BFD_RELOC_8:
