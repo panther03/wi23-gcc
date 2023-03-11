@@ -1,4 +1,4 @@
-;; Constraint definitions for Moxie
+;; Constraint definitions for wi23
 ;; Copyright (C) 2009-2022 Free Software Foundation, Inc.
 ;; Contributed by Anthony Green <green@moxielogic.com>
 
@@ -22,36 +22,27 @@
 ;; Constraints
 ;; -------------------------------------------------------------------------
 
-;;(define_constraint "A"
-;;  "An absolute address."
-;;  (and (match_code "mem")
-;;       (ior (match_test "GET_CODE (XEXP (op, 0)) == SYMBOL_REF")
-;;	    (match_test "GET_CODE (XEXP (op, 0)) == LABEL_REF")
-;;	    (match_test "GET_CODE (XEXP (op, 0)) == CONST"))))
-;;
-;;(define_constraint "B"
-;;  "An offset address."
-;;  (and (match_code "mem")
-;;       (match_test "moxie_offset_address_p (op)")))
-;;
-;;(define_constraint "W"
-;;  "A register indirect memory operand."
-;;  (and (match_code "mem")
-;;       (match_test "REG_P (XEXP (op, 0))
-;;		    && REGNO_OK_FOR_BASE_P (REGNO (XEXP (op, 0)))")))
-;;
-;;(define_constraint "O"
-;;  "The constant zero"
-;;  (and (match_code "const_int")
-;;       (match_test "ival == 0")))
-;;
-;;(define_constraint "I"
-;;  "An 8-bit constant (0..255)"
-;;  (and (match_code "const_int")
-;;       (match_test "ival >= 0 && ival <= 255")))
-;;
-;;(define_constraint "N"
-;;  "A constant -(0..255)"
-;;  (and (match_code "const_int")
-;;       (match_test "ival >= -255 && ival <= 0")))
-;;
+ (define_constraint "L"
+   "An unsigned 5-bit constant (for shift counts)."
+   (and (match_code "const_int")
+        (match_test "IMM_SHIFT (ival)")))
+
+(define_constraint "I"
+  "A signed 16-bit constant (for arithmetic instructions)."
+  (and (match_code "const_int")
+       (match_test "IMM16_S (ival)")))
+
+(define_constraint "J"
+  "An unsigned 16-bit constant (for logical instructions)."
+  (and (match_code "const_int")
+       (match_test "IMM16_Z (ival)")))
+
+(define_constraint "M"
+  "A shifted unsigned 16-bit constant suitable for slbi"
+  (and (match_code "const_int")
+       (match_test "IMM16_UPPER (ival)")))
+
+(define_constraint "O"
+  "The constant zero"
+  (and (match_code "const_int")
+       (match_test "ival == 0")))

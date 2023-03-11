@@ -1,4 +1,4 @@
-/* Target Definitions for moxie.
+/* Target Definitions for wi23.
    Copyright (C) 2008-2022 Free Software Foundation, Inc.
    Contributed by Anthony Green.
 
@@ -18,8 +18,8 @@
    along with GCC; see the file COPYING3.  If not see
    <http://www.gnu.org/licenses/>.  */
 
-#ifndef GCC_MOXIE_H
-#define GCC_MOXIE_H
+#ifndef GCC_WI23_H
+#define GCC_WI23_H
 
 #undef  STARTFILE_SPEC
 #define STARTFILE_SPEC "%{!mno-crt0:crt0%O%s} crti.o%s crtbegin.o%s"
@@ -71,80 +71,113 @@
 #define WCHAR_TYPE "unsigned int"
 
 #undef  WCHAR_TYPE_SIZE
-#define WCHAR_TYPE_SIZE BITS_PER_WORD
+#define WCHAR_TYPE_SIZE 32
 
 /* Registers...
 
-   $fp  - frame pointer
-   $sp  - stack pointer
-   $r0  - general purpose 32-bit register.
-   $r1  - general purpose 32-bit register.
-   $r2  - general purpose 32-bit register.
-   $r3  - general purpose 32-bit register.
-   $r4  - general purpose 32-bit register.
-   $r5  - general purpose 32-bit register.
-   $r6  - general purpose 32-bit register.
-   $r7  - general purpose 32-bit register.
-   $r8  - general purpose 32-bit register.
-   $r9  - general purpose 32-bit register.
-   $r10 - general purpose 32-bit register.
-   $r11 - general purpose 32-bit register.
-   $r12 - general purpose 32-bit register.
-   $r13 - reserved for execution environment.
+   General-purpose
 
-   Special Registers...
+   r0   - always 0
+   r1   - argument 0
+   r2   - argument 1
+   r3   - argument 2
+   r4   - argument 3
+   r5   - argument 4
+   r6   - argument 5
+   r7   - argument 6
+   r8   - argument 7
+   r9   - return value
+   r10  - temporary
+   r11  - temporary
+   r12  - temporary
+   r13  - temporary
+   r14  - temporary
+   r15  - temporary
+   r16  - temporary
+   r17  - temporary
+   r18  - temporary   
+   r19  - callee saved
+   r20  - callee saved
+   r21  - callee saved
+   r22  - callee saved
+   r23  - callee saved
+   r24  - callee saved
+   r25  - callee saved
+   r26  - callee saved
+   gp   - global pointer (tbd) probably just make it another callee saved
+   fp   - frame pointer
+   sp   - stack pointer
+   ra   - return address
+   csr  - status register
 
-   $pc - 32-bit program counter.
+   Floating-point
+
+   f0   - reserved (???)
+   f1   - argument 0
+   f2   - argument 1
+   f3   - argument 2
+   f4   - argument 3
+   f5   - argument 4
+   f6   - argument 5
+   f7   - argument 6
+   f8   - argument 7
+   f9   - return value
+   f10  - temporary
+   f11  - temporary
+   f12  - temporary
+   f13  - temporary
+   f14  - temporary
+   f15  - temporary
+   f16  - temporary
+   f17  - temporary
+   f18  - temporary   
+   f19  - callee saved
+   f20  - callee saved
+   f21  - callee saved
+   f22  - callee saved
+   f23  - callee saved
+   f24  - callee saved
+   f25  - callee saved
+   f26  - callee saved
+   f27  - callee saved
+   f28  - callee saved
+   f29  - callee saved
+   f30  - callee saved
+   fcsr - floating point status register
    
 */
 
-#define REGISTER_NAMES {	\
-  "$fp", "$sp", "$r0", "$r1",   \
-  "$r2", "$r3", "$r4", "$r5",   \
-  "$r6", "$r7", "$r8", "$r9",   \
-  "$r10", "$r11", "$r12", "$r13",   \
-  "?fp", "?ap", "$pc", "?cc" }
+#define REGISTER_NAMES   { \
+   /* general-purpose regs */ \
+    "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7", \
+    "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", \
+    "r16", "r17", "r18", "r19", "r20", "r21", "r22", "r23", \
+    "r24", "r25", "r26", "gp", "fp", "sp", "ra", "csr", \
+   /* floating-point regs */ \
+    "f0", "f1", "f2", "f3", "f4", "f5", "f6", "f7", \
+    "f8", "f9", "f10", "f11", "f12", "f13", "f14", "f15", \
+    "f16", "f17", "f18", "f19", "f20", "f21", "f22", "f23", \
+    "f24", "f25", "f26", "f27", "f28", "f29", "f30", "fcsr", \
+   /* fake regs   still not entirely clear on what these do lol */ \
+    "?ap", "?fp" };
 
-#define MOXIE_FP     0
-#define MOXIE_SP     1
-#define MOXIE_R0     2
-#define MOXIE_R1     3 
-#define MOXIE_R2     4
-#define MOXIE_R3     5
-#define MOXIE_R4     6
-#define MOXIE_R5     7
-#define MOXIE_R6     8
-#define MOXIE_R7     9
-#define MOXIE_R8     10
-#define MOXIE_R9     11
-#define MOXIE_R10    12
-#define MOXIE_R11    13
-#define MOXIE_R12    14
-#define MOXIE_R13    15
-#define MOXIE_QFP    16
-#define MOXIE_QAP    17
-#define MOXIE_PC     18
-#define MOXIE_CC     19
-
-#define FIRST_PSEUDO_REGISTER 20
+#define FIRST_PSEUDO_REGISTER 66
 
 enum reg_class
 {
   NO_REGS,
   GENERAL_REGS,
-  SPECIAL_REGS,
-  CC_REGS,
+  FLOAT_REGS,
   ALL_REGS,
   LIM_REG_CLASSES
 };
 
 
 #define REG_CLASS_CONTENTS \
-{ { 0x00000000 }, /* Empty */			   \
-  { 0x0003FFFF }, /* $fp, $sp, $r0 to $r13, ?fp */ \
-  { 0x00040000 }, /* $pc */	                   \
-  { 0x00080000 }, /* ?cc */                        \
-  { 0x000FFFFF }  /* All registers */              \
+{ { 0x00000000, 0x00000000, 0x00000000 }, /* empty */ \
+  { 0xFFFFFFFF, 0x00000000, 0x00000003 }, /* general */ \
+  { 0x00000000, 0xFFFFFFFF, 0x00000000 }, /* float */ \
+  { 0xFFFFFFFF, 0xFFFFFFFF, 0x00000003 }, /* all */ \
 }
 
 #define N_REG_CLASSES LIM_REG_CLASSES
@@ -152,35 +185,50 @@ enum reg_class
 #define REG_CLASS_NAMES {\
     "NO_REGS", \
     "GENERAL_REGS", \
-    "SPECIAL_REGS", \
-    "CC_REGS", \
+    "FLOAT_REGS", \
     "ALL_REGS" }
 
-#define FIXED_REGISTERS     { 1, 1, 0, 0, \
-			      0, 0, 0, 0, \
-			      0, 0, 0, 0, \
-			      0, 0, 0, 1, \
-                              1, 1, 1, 1 }
+#define FIXED_REGISTERS		\
+{ /* general */ \
+  1, 0, 0, 0, 0, 0, 0, 0,	\
+  0, 0, 0, 0, 0, 0, 0, 0,	\
+  0, 0, 0, 0, 0, 0, 0, 0,	\
+  0, 0, 0, 0, 1, 1, 1, 1,	\
+  /* float */ \
+  0, 0, 0, 0, 0, 0, 0, 0,	\
+  0, 0, 0, 0, 0, 0, 0, 0,	\
+  0, 0, 0, 0, 0, 0, 0, 0,	\
+  0, 0, 0, 0, 0, 0, 0, 1,	\
+  /* fake */ \
+  1, 1, 1 }
 
-#define CALL_USED_REGISTERS { 1, 1, 1, 1, \
-			      1, 1, 1, 1, \
-			      0, 0, 0, 0, \
-			      0, 0, 1, 1, \
-                              1, 1, 1, 1 }
-
-/* We can't copy to or from our CC register. */
-#define AVOID_CCMODE_COPIES 1
+#define CALL_USED_REGISTERS		\
+{ \
+  1, 1, 1, 1, 1, 1, 1, 1,	/* general */ \
+  1, 1, 1, 1, 1, 1, 1, 1,	\
+  1, 1, 1, 1, 0, 0, 0, 0,	\
+  0, 0, 0, 0, 1, 1, 1, 1,	\
+  1, 1, 1, 1, 1, 1, 1, 1,	/* float */ \
+  1, 1, 1, 1, 1, 1, 1, 1,	\
+  1, 1, 1, 1, 0, 0, 0, 0,	\
+  0, 0, 0, 0, 0, 0, 0, 1,	\
+  1, 1, 1 /* fake */ }
 
 /* A C expression whose value is a register class containing hard
    register REGNO.  */
-#define REGNO_REG_CLASS(R) ((R < MOXIE_PC) ? GENERAL_REGS :		\
-                            (R == MOXIE_CC ? CC_REGS : SPECIAL_REGS))
+#define REGNO_REG_CLASS(R) ((R > CSR_REGNUM && R <= FCSR_REGNUM) ? FLOAT_REGS : GENERAL_REGS)
+
+// immediate size checks, borrowed from nios2.h
+#define IMM16_S(X) ((unsigned HOST_WIDE_INT)(X) + 0x8000 < 0x10000)
+#define IMM16_Z(X) ((X) >= 0 && (X) < 0x10000)
+#define IMM16_UPPER(X) (((X) & 0xffff) == 0)
+#define IMM_SHIFT(X) ((X) >= 0 && (X) <= 31)
 
 /* The Overall Framework of an Assembler File */
 
 #undef  ASM_SPEC
 #define ASM_SPEC "%{!mel:-EB} %{mel:-EL}"
-#define ASM_COMMENT_START "#"
+#define ASM_COMMENT_START "//"
 #define ASM_APP_ON ""
 #define ASM_APP_OFF ""
 
@@ -212,11 +260,19 @@ enum reg_class
    increase the stack frame size by this amount.  */
 #define ACCUMULATE_OUTGOING_ARGS 1
 
+typedef struct {
+  /* Number of integer registers used so far, up to MAX_ARGS_IN_REGISTERS. */
+  unsigned int num_gprs;
+
+  /* Number of floating-point registers used so far, likewise.  */
+  unsigned int num_fprs;
+} CUMULATIVE_ARGS;
+
 /* A C statement (sans semicolon) for initializing the variable CUM
    for the state at the beginning of the argument list.  
-   For moxie, the first arg is passed in register 2 (aka $r0).  */
+   No fucking clue what this actually does, just copied from riscv */
 #define INIT_CUMULATIVE_ARGS(CUM,FNTYPE,LIBNAME,FNDECL,N_NAMED_ARGS) \
-  (CUM = MOXIE_R0)
+  memset (&(CUM), 0, sizeof (CUM))
 
 /* How Scalar Function Values Are Returned */
 
@@ -229,16 +285,15 @@ enum reg_class
 /* Define this if the above stack space is to be considered part of the
    space allocated by the caller.  */
 #define OUTGOING_REG_PARM_STACK_SPACE(FNTYPE) 1
-#define STACK_PARMS_IN_REG_PARM_AREA
 
 /* Define this if it is the responsibility of the caller to allocate
    the area reserved for arguments passed in registers.  */
-#define REG_PARM_STACK_SPACE(FNDECL) (6 * UNITS_PER_WORD)
+#define REG_PARM_STACK_SPACE(FNDECL) 0 // FIXME: changed this from moxie??
 
 /* Offset from the argument pointer register to the first argument's
    address.  On some machines it may depend on the data type of the
    function.  */
-#define FIRST_PARM_OFFSET(F) 12
+#define FIRST_PARM_OFFSET(F) 0
 
 /* Define this macro to nonzero value if the addresses of local variable slots
    are at negative offsets from the frame pointer.  */
@@ -247,22 +302,24 @@ enum reg_class
 /* Define this macro as a C expression that is nonzero for registers that are
    used by the epilogue or the return pattern.  The stack and frame
    pointer registers are already assumed to be used as needed.  */
-#define EPILOGUE_USES(R) (R == MOXIE_R5)
+#define EPILOGUE_USES(R) (R == RA_REGNUM)
 
 /* A C expression whose value is RTL representing the location of the
    incoming return address at the beginning of any function, before
    the prologue.  */
-#define INCOMING_RETURN_ADDR_RTX					\
-  gen_frame_mem (Pmode,							\
-		 plus_constant (Pmode, stack_pointer_rtx, UNITS_PER_WORD))
+#define INCOMING_RETURN_ADDR_RTX	gen_rtx_REG (Pmode, LR_REGNUM)
 
-/* Describe how we implement __builtin_eh_return.  */
+// FIXME cba to implement this just going to not implement it and hope gcc doesnt explode
+
+/*
+// Describe how we implement __builtin_eh_return.  
 #define EH_RETURN_DATA_REGNO(N)	((N) < 4 ? (N+2) : INVALID_REGNUM)
 
-/* Store the return handler into the call frame.  */
+// Store the return handler into the call frame. 
 #define EH_RETURN_HANDLER_RTX						\
   gen_frame_mem (Pmode,							\
 		 plus_constant (Pmode, frame_pointer_rtx, UNITS_PER_WORD))
+*/
 
 /* Storage Layout */
 
@@ -271,7 +328,7 @@ enum reg_class
 #define WORDS_BIG_ENDIAN ( ! TARGET_LITTLE_ENDIAN )
 
 /* Alignment required for a function entry point, in bits.  */
-#define FUNCTION_BOUNDARY 16
+#define FUNCTION_BOUNDARY 32
 
 /* Define this macro as a C expression which is nonzero if accessing
    less than a word of memory (i.e. a `char' or a `short') is no
@@ -316,7 +373,7 @@ enum reg_class
 /* Make arrays of chars word-aligned for the same reasons.  */
 #define DATA_ALIGNMENT(TYPE, ALIGN)		\
   (TREE_CODE (TYPE) == ARRAY_TYPE		\
-   && TYPE_MODE (TREE_TYPE (TYPE)) == QImode	\
+   && TYPE_MODE (TREE_TYPE (TYPE)) == SIMode	\
    && (ALIGN) < FASTEST_ALIGNMENT ? FASTEST_ALIGNMENT : (ALIGN))
      
 /* Set this nonzero if move instructions will actually fail to work
@@ -327,7 +384,8 @@ enum reg_class
 #define FUNCTION_PROFILER(FILE,LABELNO) (abort (), 0)
 
 /* Trampolines for Nested Functions.  */
-#define TRAMPOLINE_SIZE (2 + 6 + 4 + 2 + 6)
+// FIXME figure out how to actually calculate this
+// #define TRAMPOLINE_SIZE (2 + 6 + 4 + 2 + 6)
 
 /* Alignment required for trampolines, in bits.  */
 #define TRAMPOLINE_ALIGNMENT 32
@@ -337,21 +395,21 @@ enum reg_class
 
 /* An alias for the machine mode used for memory references to
    functions being called, in `call' RTL expressions.  */
-#define FUNCTION_MODE QImode
+#define FUNCTION_MODE SIMode
 
 /* The register number of the stack pointer register, which must also
    be a fixed register according to `FIXED_REGISTERS'.  */
-#define STACK_POINTER_REGNUM MOXIE_SP
+#define STACK_POINTER_REGNUM SP_REGNUM
 
 /* The register number of the frame pointer register, which is used to
    access automatic variables in the stack frame.  */
-#define FRAME_POINTER_REGNUM MOXIE_QFP
+#define FRAME_POINTER_REGNUM SFP_REGNUM
 
 /* The register number of the arg pointer register, which is used to
    access the function's argument list.  */
-#define ARG_POINTER_REGNUM MOXIE_QAP
+#define ARG_POINTER_REGNUM AP_REGNUM
 
-#define HARD_FRAME_POINTER_REGNUM MOXIE_FP
+#define HARD_FRAME_POINTER_REGNUM FP_REGNUM
 
 #define ELIMINABLE_REGS							\
 {{ FRAME_POINTER_REGNUM, HARD_FRAME_POINTER_REGNUM },			\
@@ -359,6 +417,7 @@ enum reg_class
 
 /* This macro returns the initial difference between the specified pair
    of registers.  */
+// FIXME -- need to implement this function for wi23
 #define INITIAL_ELIMINATION_OFFSET(FROM, TO, OFFSET)			\
   do {									\
     (OFFSET) = moxie_initial_elimination_offset ((FROM), (TO));		\
@@ -366,7 +425,9 @@ enum reg_class
 
 /* A C expression that is nonzero if REGNO is the number of a hard
    register in which function arguments are sometimes passed.  */
-#define FUNCTION_ARG_REGNO_P(r) (r >= MOXIE_R0 && r <= MOXIE_R5)
+#define FUNCTION_ARG_REGNO_P(N)						\
+  (IN_RANGE ((N), GP_ARG_FIRST, GP_ARG_LAST)				\
+   || (IN_RANGE ((N), FP_ARG_FIRST, FP_ARG_LAST)))
 
 /* A macro whose definition is the name of the class to which a valid
    base register must belong.  A base register is one used in an
@@ -375,6 +436,7 @@ enum reg_class
 
 #define INDEX_REG_CLASS NO_REGS
 
+// FIXME only used by moxie
 #define HARD_REGNO_OK_FOR_BASE_P(NUM) \
   ((unsigned) (NUM) < FIRST_PSEUDO_REGISTER \
    && (REGNO_REG_CLASS(NUM) == GENERAL_REGS \
@@ -393,7 +455,7 @@ enum reg_class
 
 /* A C expression which is nonzero if register number NUM is suitable
    for use as an index register in operand addresses.  */
-#define REGNO_OK_FOR_INDEX_P(NUM) MOXIE_FP
+#define REGNO_OK_FOR_INDEX_P(NUM) FP_REGNUM
 
 /* The maximum number of bytes that a single instruction can move
    quickly between memory and registers or between two memory
@@ -401,6 +463,7 @@ enum reg_class
 #define MOVE_MAX 4
 
 /* All load operations zero extend.  */
+// FIXME: lbi sign extends?
 #define LOAD_EXTEND_OP(MEM) ZERO_EXTEND
 
 /* A number, the maximum number of registers that can appear in a
@@ -415,14 +478,8 @@ enum reg_class
 
 #define TARGET_CPU_CPP_BUILTINS() \
   { \
-    builtin_define_std ("moxie");			\
-    builtin_define_std ("MOXIE");			\
-    if (TARGET_LITTLE_ENDIAN)				\
-      builtin_define ("__MOXIE_LITTLE_ENDIAN__");	\
-    else						\
-      builtin_define ("__MOXIE_BIG_ENDIAN__");		\
+    builtin_define_std ("wi23");			\
+    builtin_define_std ("WI23");			\
   }
 
-#define HAS_LONG_UNCOND_BRANCH true
-
-#endif /* GCC_MOXIE_H */
+#endif /* GCC_WI23_h */
