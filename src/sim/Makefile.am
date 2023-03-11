@@ -202,6 +202,9 @@ endif
 if SIM_ENABLE_ARCH_v850
 include v850/local.mk
 endif
+if SIM_ENABLE_ARCH_wi23
+include wi23/local.mk
+endif
 
 ## Helper targets for running make from the top-level when some subdirs still
 ## have Makefiles in subdirs.

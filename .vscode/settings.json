@@ -12,6 +12,10 @@
         "dynamic_bitset": "c",
         "chrono": "c",
         "*.x": "c",
-        "complex": "c"
+        "complex": "c",
+        "*.def": "cpp",
+        "riscv-sim.h": "c",
+        "riscv-opc.h": "c",
+        "disassemble.h": "c"
     }
 }

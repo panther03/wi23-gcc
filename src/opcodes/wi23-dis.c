@@ -30,15 +30,6 @@
 static fprintf_ftype fpr;
 static void *stream;
 
-/* Macros to extract operands from the instruction word.  */
-#define OP_RS(i)   (XT(i, 21, 5))
-#define OP_RD_I(i) (XT(i, 16, 5))
-#define OP_RT_R(i) (XT(i, 16, 5))
-#define OP_RD_R(i) (XT(i, 11, 5))
-#define IMM_SX(i)  (XTS(i, 0, 16))
-#define IMM_ZX(i)  (XT(i, 0, 16))
-#define D26(i)     (XTS(i, 0, 26))
-
 int
 print_insn_wi23 (bfd_vma addr, struct disassemble_info * info)
 {

@@ -80,6 +80,15 @@
 // n = length of field
 #define XTS(x, s, n) (XT(x, s, n) | ((-(XT(x, (s + n - 1), 1))) << (n)))
 
+/* Macros to extract operands from the instruction word.  */
+#define OP_RS(i)   (XT(i, 21, 5))
+#define OP_RD_I(i) (XT(i, 16, 5))
+#define OP_RT_R(i) (XT(i, 16, 5))
+#define OP_RD_R(i) (XT(i, 11, 5))
+#define IMM_SX(i)  (XTS(i, 0, 16))
+#define IMM_ZX(i)  (XT(i, 0, 16))
+#define D26(i)     (XTS(i, 0, 26))
+
 typedef struct wi23_opc_info_t
 {
   short         opcode;

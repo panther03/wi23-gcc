@@ -29,6 +29,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+#AM_CPPFLAGS_%C% =
+
 
 
 
@@ -118,7 +120,7 @@ noinst_PROGRAMS = $(am__EXEEXT_9) $(am__EXEEXT_10) $(am__EXEEXT_11) \
 	$(am__EXEEXT_30) $(am__EXEEXT_31) $(am__EXEEXT_32) \
 	$(am__EXEEXT_33) $(am__EXEEXT_34) $(am__EXEEXT_35) \
 	$(am__EXEEXT_36) $(am__EXEEXT_37) $(am__EXEEXT_38) \
-	$(am__EXEEXT_39) $(am__EXEEXT_40)
+	$(am__EXEEXT_39) $(am__EXEEXT_40) $(am__EXEEXT_41)
 EXTRA_PROGRAMS = $(am__EXEEXT_1) testsuite/common/bits-gen$(EXEEXT) \
 	testsuite/common/fpu-tst$(EXEEXT) $(am__EXEEXT_2) \
 	$(am__EXEEXT_3) $(am__EXEEXT_4) $(am__EXEEXT_5) \
@@ -314,6 +316,8 @@ TESTS = testsuite/common/bits32m0$(EXEEXT) \
 @SIM_ENABLE_ARCH_v850_TRUE@	v850/engine.h
 
 @SIM_ENABLE_ARCH_v850_TRUE@am__append_109 = $(v850_BUILD_OUTPUTS)
+@SIM_ENABLE_ARCH_wi23_TRUE@am__append_110 = wi23/libsim.a
+@SIM_ENABLE_ARCH_wi23_TRUE@am__append_111 = wi23/run
 subdir = .
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
 am__aclocal_m4_deps = $(top_srcdir)/../config/acx.m4 \
@@ -359,7 +363,8 @@ CONFIG_CLEAN_FILES = aarch64/.gdbinit arm/.gdbinit avr/.gdbinit \
 	mips/.gdbinit mn10300/.gdbinit moxie/.gdbinit msp430/.gdbinit \
 	or1k/.gdbinit ppc/.gdbinit pru/.gdbinit riscv/.gdbinit \
 	rl78/.gdbinit rx/.gdbinit sh/.gdbinit erc32/.gdbinit \
-	v850/.gdbinit example-synacor/.gdbinit arch-subdir.mk .gdbinit
+	v850/.gdbinit wi23/.gdbinit example-synacor/.gdbinit \
+	arch-subdir.mk .gdbinit
 CONFIG_CLEAN_VPATH_FILES =
 LIBRARIES = $(noinst_LIBRARIES)
 ARFLAGS = cru
@@ -884,6 +889,18 @@ v850_libsim_a_AR = $(AR) $(ARFLAGS)
 @SIM_ENABLE_ARCH_v850_TRUE@	v850/modules.$(OBJEXT)
 v850_libsim_a_OBJECTS = $(am_v850_libsim_a_OBJECTS) \
 	$(nodist_v850_libsim_a_OBJECTS)
+wi23_libsim_a_AR = $(AR) $(ARFLAGS)
+@SIM_ENABLE_ARCH_wi23_TRUE@wi23_libsim_a_DEPENDENCIES = $(patsubst \
+@SIM_ENABLE_ARCH_wi23_TRUE@	%,wi23/%,$(SIM_NEW_COMMON_OBJS)) \
+@SIM_ENABLE_ARCH_wi23_TRUE@	$(patsubst \
+@SIM_ENABLE_ARCH_wi23_TRUE@	%,wi23/dv-%.o,$(SIM_HW_DEVICES)) \
+@SIM_ENABLE_ARCH_wi23_TRUE@	wi23/interp.o wi23/sim-resume.o
+@SIM_ENABLE_ARCH_wi23_TRUE@am_wi23_libsim_a_OBJECTS =  \
+@SIM_ENABLE_ARCH_wi23_TRUE@	$(am__objects_1)
+@SIM_ENABLE_ARCH_wi23_TRUE@nodist_wi23_libsim_a_OBJECTS =  \
+@SIM_ENABLE_ARCH_wi23_TRUE@	wi23/modules.$(OBJEXT)
+wi23_libsim_a_OBJECTS = $(am_wi23_libsim_a_OBJECTS) \
+	$(nodist_wi23_libsim_a_OBJECTS)
 am__EXEEXT_1 = $(IGEN) igen/filter$(EXEEXT) igen/gen$(EXEEXT) \
 	igen/ld-cache$(EXEEXT) igen/ld-decode$(EXEEXT) \
 	igen/ld-insn$(EXEEXT) igen/table$(EXEEXT)
@@ -933,6 +950,7 @@ am__EXEEXT_7 = testsuite/common/bits32m0$(EXEEXT) \
 @SIM_ENABLE_ARCH_rx_TRUE@am__EXEEXT_38 = rx/run$(EXEEXT)
 @SIM_ENABLE_ARCH_sh_TRUE@am__EXEEXT_39 = sh/run$(EXEEXT)
 @SIM_ENABLE_ARCH_v850_TRUE@am__EXEEXT_40 = v850/run$(EXEEXT)
+@SIM_ENABLE_ARCH_wi23_TRUE@am__EXEEXT_41 = wi23/run$(EXEEXT)
 PROGRAMS = $(noinst_PROGRAMS)
 am_aarch64_run_OBJECTS =
 aarch64_run_OBJECTS = $(am_aarch64_run_OBJECTS)
@@ -1159,6 +1177,10 @@ am_v850_run_OBJECTS =
 v850_run_OBJECTS = $(am_v850_run_OBJECTS)
 @SIM_ENABLE_ARCH_v850_TRUE@v850_run_DEPENDENCIES = v850/nrun.o \
 @SIM_ENABLE_ARCH_v850_TRUE@	v850/libsim.a $(am__DEPENDENCIES_4)
+am_wi23_run_OBJECTS =
+wi23_run_OBJECTS = $(am_wi23_run_OBJECTS)
+@SIM_ENABLE_ARCH_wi23_TRUE@wi23_run_DEPENDENCIES = wi23/nrun.o \
+@SIM_ENABLE_ARCH_wi23_TRUE@	wi23/libsim.a $(am__DEPENDENCIES_4)
 AM_V_P = $(am__v_P_@AM_V@)
 am__v_P_ = $(am__v_P_@AM_DEFAULT_V@)
 am__v_P_0 = false
@@ -1227,7 +1249,8 @@ SOURCES = $(aarch64_libsim_a_SOURCES) \
 	$(nodist_rl78_libsim_a_SOURCES) $(rx_libsim_a_SOURCES) \
 	$(nodist_rx_libsim_a_SOURCES) $(sh_libsim_a_SOURCES) \
 	$(nodist_sh_libsim_a_SOURCES) $(v850_libsim_a_SOURCES) \
-	$(nodist_v850_libsim_a_SOURCES) $(aarch64_run_SOURCES) \
+	$(nodist_v850_libsim_a_SOURCES) $(wi23_libsim_a_SOURCES) \
+	$(nodist_wi23_libsim_a_SOURCES) $(aarch64_run_SOURCES) \
 	$(arm_run_SOURCES) $(avr_run_SOURCES) $(bfin_run_SOURCES) \
 	$(bpf_run_SOURCES) $(cr16_gencode_SOURCES) $(cr16_run_SOURCES) \
 	$(cris_run_SOURCES) $(cris_rvdummy_SOURCES) \
@@ -1250,7 +1273,8 @@ SOURCES = $(aarch64_libsim_a_SOURCES) \
 	testsuite/common/alu-tst.c testsuite/common/bits-gen.c \
 	testsuite/common/bits32m0.c testsuite/common/bits32m31.c \
 	testsuite/common/bits64m0.c testsuite/common/bits64m63.c \
-	testsuite/common/fpu-tst.c $(v850_run_SOURCES)
+	testsuite/common/fpu-tst.c $(v850_run_SOURCES) \
+	$(wi23_run_SOURCES)
 RECURSIVE_TARGETS = all-recursive check-recursive cscopelist-recursive \
 	ctags-recursive dvi-recursive html-recursive info-recursive \
 	install-data-recursive install-dvi-recursive \
@@ -1548,6 +1572,7 @@ AS_FOR_TARGET_RL78 = @AS_FOR_TARGET_RL78@
 AS_FOR_TARGET_RX = @AS_FOR_TARGET_RX@
 AS_FOR_TARGET_SH = @AS_FOR_TARGET_SH@
 AS_FOR_TARGET_V850 = @AS_FOR_TARGET_V850@
+AS_FOR_TARGET_WI23 = @AS_FOR_TARGET_WI23@
 AUTOCONF = @AUTOCONF@
 AUTOHEADER = @AUTOHEADER@
 AUTOMAKE = @AUTOMAKE@
@@ -1588,6 +1613,7 @@ CC_FOR_TARGET_RL78 = @CC_FOR_TARGET_RL78@
 CC_FOR_TARGET_RX = @CC_FOR_TARGET_RX@
 CC_FOR_TARGET_SH = @CC_FOR_TARGET_SH@
 CC_FOR_TARGET_V850 = @CC_FOR_TARGET_V850@
+CC_FOR_TARGET_WI23 = @CC_FOR_TARGET_WI23@
 CFLAGS = @CFLAGS@
 CFLAGS_FOR_BUILD = @CFLAGS_FOR_BUILD@
 CGEN_MAINT = @CGEN_MAINT@
@@ -1650,6 +1676,7 @@ LD_FOR_TARGET_RL78 = @LD_FOR_TARGET_RL78@
 LD_FOR_TARGET_RX = @LD_FOR_TARGET_RX@
 LD_FOR_TARGET_SH = @LD_FOR_TARGET_SH@
 LD_FOR_TARGET_V850 = @LD_FOR_TARGET_V850@
+LD_FOR_TARGET_WI23 = @LD_FOR_TARGET_WI23@
 LIBOBJS = @LIBOBJS@
 LIBS = @LIBS@
 LIBTOOL = @LIBTOOL@
@@ -1757,6 +1784,7 @@ pdfdir = @pdfdir@
 prefix = @prefix@
 program_transform_name = @program_transform_name@
 psdir = @psdir@
+runstatedir = @runstatedir@
 sbindir = @sbindir@
 sharedstatedir = @sharedstatedir@
 srcdir = @srcdir@
@@ -1788,7 +1816,7 @@ noinst_LIBRARIES = common/libcommon.a $(am__append_3) $(am__append_5) \
 	$(am__append_71) $(am__append_79) $(am__append_83) \
 	$(am__append_85) $(am__append_87) $(am__append_93) \
 	$(am__append_95) $(am__append_97) $(am__append_99) \
-	$(am__append_101) $(am__append_106)
+	$(am__append_101) $(am__append_106) $(am__append_110)
 BUILT_SOURCES = $(am__append_13) $(am__append_17) $(am__append_23) \
 	$(am__append_27) $(am__append_38) $(am__append_46) \
 	$(am__append_50) $(am__append_58) $(am__append_73) \
@@ -3059,6 +3087,24 @@ testsuite_common_CPPFLAGS = \
 @SIM_ENABLE_ARCH_v850_TRUE@v850_IGEN_TRACE = # -G omit-line-numbers # -G trace-rule-selection -G trace-rule-rejection -G trace-entries
 @SIM_ENABLE_ARCH_v850_TRUE@v850_IGEN_INSN = $(srcdir)/v850/v850.igen
 @SIM_ENABLE_ARCH_v850_TRUE@v850_IGEN_DC = $(srcdir)/v850/v850.dc
+@SIM_ENABLE_ARCH_wi23_TRUE@nodist_wi23_libsim_a_SOURCES = \
+@SIM_ENABLE_ARCH_wi23_TRUE@	wi23/modules.c
+
+@SIM_ENABLE_ARCH_wi23_TRUE@wi23_libsim_a_SOURCES = \
+@SIM_ENABLE_ARCH_wi23_TRUE@	$(common_libcommon_a_SOURCES)
+
+@SIM_ENABLE_ARCH_wi23_TRUE@wi23_libsim_a_LIBADD = \
+@SIM_ENABLE_ARCH_wi23_TRUE@	$(patsubst %,wi23/%,$(SIM_NEW_COMMON_OBJS)) \
+@SIM_ENABLE_ARCH_wi23_TRUE@	$(patsubst %,wi23/dv-%.o,$(SIM_HW_DEVICES)) \
+@SIM_ENABLE_ARCH_wi23_TRUE@	wi23/interp.o \
+@SIM_ENABLE_ARCH_wi23_TRUE@	wi23/sim-resume.o
+
+@SIM_ENABLE_ARCH_wi23_TRUE@wi23_run_SOURCES = 
+@SIM_ENABLE_ARCH_wi23_TRUE@wi23_run_LDADD = \
+@SIM_ENABLE_ARCH_wi23_TRUE@	wi23/nrun.o \
+@SIM_ENABLE_ARCH_wi23_TRUE@	wi23/libsim.a \
+@SIM_ENABLE_ARCH_wi23_TRUE@	$(SIM_COMMON_LIBS)
+
 all: $(BUILT_SOURCES) config.h
 	$(MAKE) $(AM_MAKEFLAGS) all-recursive
 
@@ -3066,7 +3112,7 @@ all: $(BUILT_SOURCES) config.h
 .SUFFIXES: .c .lo .log .o .obj .test .test$(EXEEXT) .trs
 am--refresh: Makefile
 	@:
-$(srcdir)/Makefile.in: @MAINTAINER_MODE_TRUE@ $(srcdir)/Makefile.am $(srcdir)/common/local.mk $(srcdir)/igen/local.mk $(srcdir)/testsuite/local.mk $(srcdir)/testsuite/common/local.mk $(srcdir)/aarch64/local.mk $(srcdir)/arm/local.mk $(srcdir)/avr/local.mk $(srcdir)/bfin/local.mk $(srcdir)/bpf/local.mk $(srcdir)/cr16/local.mk $(srcdir)/cris/local.mk $(srcdir)/d10v/local.mk $(srcdir)/erc32/local.mk $(srcdir)/example-synacor/local.mk $(srcdir)/frv/local.mk $(srcdir)/ft32/local.mk $(srcdir)/h8300/local.mk $(srcdir)/iq2000/local.mk $(srcdir)/lm32/local.mk $(srcdir)/m32c/local.mk $(srcdir)/m32r/local.mk $(srcdir)/m68hc11/local.mk $(srcdir)/mcore/local.mk $(srcdir)/microblaze/local.mk $(srcdir)/mips/local.mk $(srcdir)/mn10300/local.mk $(srcdir)/moxie/local.mk $(srcdir)/msp430/local.mk $(srcdir)/or1k/local.mk $(srcdir)/ppc/local.mk $(srcdir)/pru/local.mk $(srcdir)/riscv/local.mk $(srcdir)/rl78/local.mk $(srcdir)/rx/local.mk $(srcdir)/sh/local.mk $(srcdir)/v850/local.mk $(am__configure_deps)
+$(srcdir)/Makefile.in: @MAINTAINER_MODE_TRUE@ $(srcdir)/Makefile.am $(srcdir)/common/local.mk $(srcdir)/igen/local.mk $(srcdir)/testsuite/local.mk $(srcdir)/testsuite/common/local.mk $(srcdir)/aarch64/local.mk $(srcdir)/arm/local.mk $(srcdir)/avr/local.mk $(srcdir)/bfin/local.mk $(srcdir)/bpf/local.mk $(srcdir)/cr16/local.mk $(srcdir)/cris/local.mk $(srcdir)/d10v/local.mk $(srcdir)/erc32/local.mk $(srcdir)/example-synacor/local.mk $(srcdir)/frv/local.mk $(srcdir)/ft32/local.mk $(srcdir)/h8300/local.mk $(srcdir)/iq2000/local.mk $(srcdir)/lm32/local.mk $(srcdir)/m32c/local.mk $(srcdir)/m32r/local.mk $(srcdir)/m68hc11/local.mk $(srcdir)/mcore/local.mk $(srcdir)/microblaze/local.mk $(srcdir)/mips/local.mk $(srcdir)/mn10300/local.mk $(srcdir)/moxie/local.mk $(srcdir)/msp430/local.mk $(srcdir)/or1k/local.mk $(srcdir)/ppc/local.mk $(srcdir)/pru/local.mk $(srcdir)/riscv/local.mk $(srcdir)/rl78/local.mk $(srcdir)/rx/local.mk $(srcdir)/sh/local.mk $(srcdir)/v850/local.mk $(srcdir)/wi23/local.mk $(am__configure_deps)
 	@for dep in $?; do \
 	  case '$(am__configure_deps)' in \
 	    *$$dep*) \
@@ -3088,7 +3134,7 @@ Makefile: $(srcdir)/Makefile.in $(top_builddir)/config.status
 	    echo ' cd $(top_builddir) && $(SHELL) ./config.status $@ $(am__depfiles_maybe)'; \
 	    cd $(top_builddir) && $(SHELL) ./config.status $@ $(am__depfiles_maybe);; \
 	esac;
-$(srcdir)/common/local.mk $(srcdir)/igen/local.mk $(srcdir)/testsuite/local.mk $(srcdir)/testsuite/common/local.mk $(srcdir)/aarch64/local.mk $(srcdir)/arm/local.mk $(srcdir)/avr/local.mk $(srcdir)/bfin/local.mk $(srcdir)/bpf/local.mk $(srcdir)/cr16/local.mk $(srcdir)/cris/local.mk $(srcdir)/d10v/local.mk $(srcdir)/erc32/local.mk $(srcdir)/example-synacor/local.mk $(srcdir)/frv/local.mk $(srcdir)/ft32/local.mk $(srcdir)/h8300/local.mk $(srcdir)/iq2000/local.mk $(srcdir)/lm32/local.mk $(srcdir)/m32c/local.mk $(srcdir)/m32r/local.mk $(srcdir)/m68hc11/local.mk $(srcdir)/mcore/local.mk $(srcdir)/microblaze/local.mk $(srcdir)/mips/local.mk $(srcdir)/mn10300/local.mk $(srcdir)/moxie/local.mk $(srcdir)/msp430/local.mk $(srcdir)/or1k/local.mk $(srcdir)/ppc/local.mk $(srcdir)/pru/local.mk $(srcdir)/riscv/local.mk $(srcdir)/rl78/local.mk $(srcdir)/rx/local.mk $(srcdir)/sh/local.mk $(srcdir)/v850/local.mk $(am__empty):
+$(srcdir)/common/local.mk $(srcdir)/igen/local.mk $(srcdir)/testsuite/local.mk $(srcdir)/testsuite/common/local.mk $(srcdir)/aarch64/local.mk $(srcdir)/arm/local.mk $(srcdir)/avr/local.mk $(srcdir)/bfin/local.mk $(srcdir)/bpf/local.mk $(srcdir)/cr16/local.mk $(srcdir)/cris/local.mk $(srcdir)/d10v/local.mk $(srcdir)/erc32/local.mk $(srcdir)/example-synacor/local.mk $(srcdir)/frv/local.mk $(srcdir)/ft32/local.mk $(srcdir)/h8300/local.mk $(srcdir)/iq2000/local.mk $(srcdir)/lm32/local.mk $(srcdir)/m32c/local.mk $(srcdir)/m32r/local.mk $(srcdir)/m68hc11/local.mk $(srcdir)/mcore/local.mk $(srcdir)/microblaze/local.mk $(srcdir)/mips/local.mk $(srcdir)/mn10300/local.mk $(srcdir)/moxie/local.mk $(srcdir)/msp430/local.mk $(srcdir)/or1k/local.mk $(srcdir)/ppc/local.mk $(srcdir)/pru/local.mk $(srcdir)/riscv/local.mk $(srcdir)/rl78/local.mk $(srcdir)/rx/local.mk $(srcdir)/sh/local.mk $(srcdir)/v850/local.mk $(srcdir)/wi23/local.mk $(am__empty):
 
 $(top_builddir)/config.status: $(top_srcdir)/configure $(CONFIG_STATUS_DEPENDENCIES)
 	$(SHELL) ./config.status --recheck
@@ -3174,6 +3220,8 @@ sh/.gdbinit: $(top_builddir)/config.status $(top_srcdir)/common/gdbinit.in
 erc32/.gdbinit: $(top_builddir)/config.status $(top_srcdir)/common/gdbinit.in
 	cd $(top_builddir) && $(SHELL) ./config.status $@
 v850/.gdbinit: $(top_builddir)/config.status $(top_srcdir)/common/gdbinit.in
+	cd $(top_builddir) && $(SHELL) ./config.status $@
+wi23/.gdbinit: $(top_builddir)/config.status $(top_srcdir)/common/gdbinit.in
 	cd $(top_builddir) && $(SHELL) ./config.status $@
 example-synacor/.gdbinit: $(top_builddir)/config.status $(top_srcdir)/common/gdbinit.in
 	cd $(top_builddir) && $(SHELL) ./config.status $@
@@ -3653,6 +3701,19 @@ v850/libsim.a: $(v850_libsim_a_OBJECTS) $(v850_libsim_a_DEPENDENCIES) $(EXTRA_v8
 	$(AM_V_at)-rm -f v850/libsim.a
 	$(AM_V_AR)$(v850_libsim_a_AR) v850/libsim.a $(v850_libsim_a_OBJECTS) $(v850_libsim_a_LIBADD)
 	$(AM_V_at)$(RANLIB) v850/libsim.a
+wi23/$(am__dirstamp):
+	@$(MKDIR_P) wi23
+	@: > wi23/$(am__dirstamp)
+wi23/$(DEPDIR)/$(am__dirstamp):
+	@$(MKDIR_P) wi23/$(DEPDIR)
+	@: > wi23/$(DEPDIR)/$(am__dirstamp)
+wi23/modules.$(OBJEXT): wi23/$(am__dirstamp) \
+	wi23/$(DEPDIR)/$(am__dirstamp)
+
+wi23/libsim.a: $(wi23_libsim_a_OBJECTS) $(wi23_libsim_a_DEPENDENCIES) $(EXTRA_wi23_libsim_a_DEPENDENCIES) wi23/$(am__dirstamp)
+	$(AM_V_at)-rm -f wi23/libsim.a
+	$(AM_V_AR)$(wi23_libsim_a_AR) wi23/libsim.a $(wi23_libsim_a_OBJECTS) $(wi23_libsim_a_LIBADD)
+	$(AM_V_at)$(RANLIB) wi23/libsim.a
 
 clean-checkPROGRAMS:
 	@list='$(check_PROGRAMS)'; test -n "$$list" || exit 0; \
@@ -3892,6 +3953,10 @@ v850/run$(EXEEXT): $(v850_run_OBJECTS) $(v850_run_DEPENDENCIES) $(EXTRA_v850_run
 	@rm -f v850/run$(EXEEXT)
 	$(AM_V_CCLD)$(LINK) $(v850_run_OBJECTS) $(v850_run_LDADD) $(LIBS)
 
+wi23/run$(EXEEXT): $(wi23_run_OBJECTS) $(wi23_run_DEPENDENCIES) $(EXTRA_wi23_run_DEPENDENCIES) wi23/$(am__dirstamp)
+	@rm -f wi23/run$(EXEEXT)
+	$(AM_V_CCLD)$(LINK) $(wi23_run_OBJECTS) $(wi23_run_LDADD) $(LIBS)
+
 mostlyclean-compile:
 	-rm -f *.$(OBJEXT)
 	-rm -f aarch64/*.$(OBJEXT)
@@ -3928,6 +3993,7 @@ mostlyclean-compile:
 	-rm -f sh/*.$(OBJEXT)
 	-rm -f testsuite/common/*.$(OBJEXT)
 	-rm -f v850/*.$(OBJEXT)
+	-rm -f wi23/*.$(OBJEXT)
 
 distclean-compile:
 	-rm -f *.tab.c
@@ -4004,6 +4070,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@testsuite/common/$(DEPDIR)/bits64m63.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@testsuite/common/$(DEPDIR)/fpu-tst.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@v850/$(DEPDIR)/modules.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@wi23/$(DEPDIR)/modules.Po@am__quote@
 
 .c.o:
 @am__fastdepCC_TRUE@	$(AM_V_CC)depbase=`echo $@ | sed 's|[^/]*$$|$(DEPDIR)/&|;s|\.o$$||'`;\
@@ -4068,6 +4135,7 @@ clean-libtool:
 	-rm -rf sh/.libs sh/_libs
 	-rm -rf testsuite/common/.libs testsuite/common/_libs
 	-rm -rf v850/.libs v850/_libs
+	-rm -rf wi23/.libs wi23/_libs
 
 distclean-libtool:
 	-rm -f libtool config.lt
@@ -4680,6 +4748,8 @@ distclean-generic:
 	-rm -f testsuite/common/$(am__dirstamp)
 	-rm -f v850/$(DEPDIR)/$(am__dirstamp)
 	-rm -f v850/$(am__dirstamp)
+	-rm -f wi23/$(DEPDIR)/$(am__dirstamp)
+	-rm -f wi23/$(am__dirstamp)
 	-test -z "$(DISTCLEANFILES)" || rm -f $(DISTCLEANFILES)
 
 maintainer-clean-generic:
@@ -4693,7 +4763,7 @@ clean-am: clean-checkPROGRAMS clean-generic clean-libtool \
 
 distclean: distclean-recursive
 	-rm -f $(am__CONFIG_DISTCLEAN_FILES)
-	-rm -rf aarch64/$(DEPDIR) arm/$(DEPDIR) avr/$(DEPDIR) bfin/$(DEPDIR) bpf/$(DEPDIR) common/$(DEPDIR) cr16/$(DEPDIR) cris/$(DEPDIR) d10v/$(DEPDIR) erc32/$(DEPDIR) example-synacor/$(DEPDIR) frv/$(DEPDIR) ft32/$(DEPDIR) h8300/$(DEPDIR) igen/$(DEPDIR) iq2000/$(DEPDIR) lm32/$(DEPDIR) m32c/$(DEPDIR) m32r/$(DEPDIR) m68hc11/$(DEPDIR) mcore/$(DEPDIR) microblaze/$(DEPDIR) mips/$(DEPDIR) mn10300/$(DEPDIR) moxie/$(DEPDIR) msp430/$(DEPDIR) or1k/$(DEPDIR) pru/$(DEPDIR) riscv/$(DEPDIR) rl78/$(DEPDIR) rx/$(DEPDIR) sh/$(DEPDIR) testsuite/common/$(DEPDIR) v850/$(DEPDIR)
+	-rm -rf aarch64/$(DEPDIR) arm/$(DEPDIR) avr/$(DEPDIR) bfin/$(DEPDIR) bpf/$(DEPDIR) common/$(DEPDIR) cr16/$(DEPDIR) cris/$(DEPDIR) d10v/$(DEPDIR) erc32/$(DEPDIR) example-synacor/$(DEPDIR) frv/$(DEPDIR) ft32/$(DEPDIR) h8300/$(DEPDIR) igen/$(DEPDIR) iq2000/$(DEPDIR) lm32/$(DEPDIR) m32c/$(DEPDIR) m32r/$(DEPDIR) m68hc11/$(DEPDIR) mcore/$(DEPDIR) microblaze/$(DEPDIR) mips/$(DEPDIR) mn10300/$(DEPDIR) moxie/$(DEPDIR) msp430/$(DEPDIR) or1k/$(DEPDIR) pru/$(DEPDIR) riscv/$(DEPDIR) rl78/$(DEPDIR) rx/$(DEPDIR) sh/$(DEPDIR) testsuite/common/$(DEPDIR) v850/$(DEPDIR) wi23/$(DEPDIR)
 	-rm -f Makefile
 distclean-am: clean-am distclean-DEJAGNU distclean-compile \
 	distclean-generic distclean-hdr distclean-libtool \
@@ -4744,7 +4814,7 @@ installcheck-am:
 maintainer-clean: maintainer-clean-recursive
 	-rm -f $(am__CONFIG_DISTCLEAN_FILES)
 	-rm -rf $(top_srcdir)/autom4te.cache
-	-rm -rf aarch64/$(DEPDIR) arm/$(DEPDIR) avr/$(DEPDIR) bfin/$(DEPDIR) bpf/$(DEPDIR) common/$(DEPDIR) cr16/$(DEPDIR) cris/$(DEPDIR) d10v/$(DEPDIR) erc32/$(DEPDIR) example-synacor/$(DEPDIR) frv/$(DEPDIR) ft32/$(DEPDIR) h8300/$(DEPDIR) igen/$(DEPDIR) iq2000/$(DEPDIR) lm32/$(DEPDIR) m32c/$(DEPDIR) m32r/$(DEPDIR) m68hc11/$(DEPDIR) mcore/$(DEPDIR) microblaze/$(DEPDIR) mips/$(DEPDIR) mn10300/$(DEPDIR) moxie/$(DEPDIR) msp430/$(DEPDIR) or1k/$(DEPDIR) pru/$(DEPDIR) riscv/$(DEPDIR) rl78/$(DEPDIR) rx/$(DEPDIR) sh/$(DEPDIR) testsuite/common/$(DEPDIR) v850/$(DEPDIR)
+	-rm -rf aarch64/$(DEPDIR) arm/$(DEPDIR) avr/$(DEPDIR) bfin/$(DEPDIR) bpf/$(DEPDIR) common/$(DEPDIR) cr16/$(DEPDIR) cris/$(DEPDIR) d10v/$(DEPDIR) erc32/$(DEPDIR) example-synacor/$(DEPDIR) frv/$(DEPDIR) ft32/$(DEPDIR) h8300/$(DEPDIR) igen/$(DEPDIR) iq2000/$(DEPDIR) lm32/$(DEPDIR) m32c/$(DEPDIR) m32r/$(DEPDIR) m68hc11/$(DEPDIR) mcore/$(DEPDIR) microblaze/$(DEPDIR) mips/$(DEPDIR) mn10300/$(DEPDIR) moxie/$(DEPDIR) msp430/$(DEPDIR) or1k/$(DEPDIR) pru/$(DEPDIR) riscv/$(DEPDIR) rl78/$(DEPDIR) rx/$(DEPDIR) sh/$(DEPDIR) testsuite/common/$(DEPDIR) v850/$(DEPDIR) wi23/$(DEPDIR)
 	-rm -f Makefile
 maintainer-clean-am: distclean-am maintainer-clean-generic
 
@@ -5779,6 +5849,12 @@ testsuite/common/bits64m63.c: testsuite/common/bits-gen$(EXEEXT) testsuite/commo
 @SIM_ENABLE_ARCH_v850_TRUE@		-n engine.c    -e  v850/engine.c \
 @SIM_ENABLE_ARCH_v850_TRUE@		-n irun.c      -r  v850/irun.c
 @SIM_ENABLE_ARCH_v850_TRUE@	$(AM_V_at)touch $@
+@SIM_ENABLE_ARCH_wi23_TRUE@$(wi23_libsim_a_OBJECTS) $(wi23_libsim_a_LIBADD): wi23/hw-config.h
+
+@SIM_ENABLE_ARCH_wi23_TRUE@wi23/modules.o: wi23/modules.c
+
+@SIM_ENABLE_ARCH_wi23_TRUE@wi23/%.o: common/%.c ; $(SIM_COMPILE)
+@SIM_ENABLE_ARCH_wi23_TRUE@-@am__include@ wi23/$(DEPDIR)/*.Po
 
 all-recursive: $(SIM_ALL_RECURSIVE_DEPS)
 
