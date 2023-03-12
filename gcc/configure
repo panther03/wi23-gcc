@@ -4042,8 +4042,7 @@ case "${target}" in
     noconfigdirs="$noconfigdirs ld"
     ;;
   wi23-*-*)
-    noconfigdirs="$noconfigdirs gdb sim"
-    noconfigdirs="$noconfigdirs bfd binutils opcodes gas ld gprof"
+    noconfigdirs="$noconfigdirs target-libgcc starget-newib target-libgloss"
   ;;
   loongarch*-*-linux*)
     ;;

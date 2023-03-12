@@ -1710,7 +1710,7 @@ moxie-*-moxiebox*)
 	;;
 wi23-*-elf)
 	gas=yes
-	gnu_ld=no
+	gnu_ld=yes
 	tm_file="dbxelf.h elfos.h newlib-stdint.h ${tm_file}"
 	tmake_file="${tmake_file} wi23/t-wi23"
 	;;

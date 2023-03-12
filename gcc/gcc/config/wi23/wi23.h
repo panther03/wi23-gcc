@@ -251,7 +251,7 @@ enum reg_class
 
 /* A C type for declaring a variable that is used as the first
    argument of `FUNCTION_ARG' and other related values.  */
-#define CUMULATIVE_ARGS unsigned int
+//#define CUMULATIVE_ARGS unsigned int
 
 /* If defined, the maximum amount of space required for outgoing arguments
    will be computed and placed into the variable
@@ -307,7 +307,7 @@ typedef struct {
 /* A C expression whose value is RTL representing the location of the
    incoming return address at the beginning of any function, before
    the prologue.  */
-#define INCOMING_RETURN_ADDR_RTX	gen_rtx_REG (Pmode, LR_REGNUM)
+#define INCOMING_RETURN_ADDR_RTX	gen_rtx_REG (Pmode, RA_REGNUM)
 
 // FIXME cba to implement this just going to not implement it and hope gcc doesnt explode
 
@@ -324,8 +324,8 @@ typedef struct {
 /* Storage Layout */
 
 #define BITS_BIG_ENDIAN 0
-#define BYTES_BIG_ENDIAN ( ! TARGET_LITTLE_ENDIAN )
-#define WORDS_BIG_ENDIAN ( ! TARGET_LITTLE_ENDIAN )
+#define BYTES_BIG_ENDIAN 1
+#define WORDS_BIG_ENDIAN 1
 
 /* Alignment required for a function entry point, in bits.  */
 #define FUNCTION_BOUNDARY 32
@@ -373,7 +373,7 @@ typedef struct {
 /* Make arrays of chars word-aligned for the same reasons.  */
 #define DATA_ALIGNMENT(TYPE, ALIGN)		\
   (TREE_CODE (TYPE) == ARRAY_TYPE		\
-   && TYPE_MODE (TREE_TYPE (TYPE)) == SIMode	\
+   && TYPE_MODE (TREE_TYPE (TYPE)) == SImode	\
    && (ALIGN) < FASTEST_ALIGNMENT ? FASTEST_ALIGNMENT : (ALIGN))
      
 /* Set this nonzero if move instructions will actually fail to work
@@ -385,7 +385,7 @@ typedef struct {
 
 /* Trampolines for Nested Functions.  */
 // FIXME figure out how to actually calculate this
-// #define TRAMPOLINE_SIZE (2 + 6 + 4 + 2 + 6)
+#define TRAMPOLINE_SIZE (2 + 6 + 4 + 2 + 6)
 
 /* Alignment required for trampolines, in bits.  */
 #define TRAMPOLINE_ALIGNMENT 32
@@ -395,7 +395,7 @@ typedef struct {
 
 /* An alias for the machine mode used for memory references to
    functions being called, in `call' RTL expressions.  */
-#define FUNCTION_MODE SIMode
+#define FUNCTION_MODE SImode
 
 /* The register number of the stack pointer register, which must also
    be a fixed register according to `FIXED_REGISTERS'.  */
@@ -420,7 +420,7 @@ typedef struct {
 // FIXME -- need to implement this function for wi23
 #define INITIAL_ELIMINATION_OFFSET(FROM, TO, OFFSET)			\
   do {									\
-    (OFFSET) = moxie_initial_elimination_offset ((FROM), (TO));		\
+    (OFFSET) = 0; /*wi23_initial_elimination_offset((FROM), (TO));*/ \
   } while (0)
 
 /* A C expression that is nonzero if REGNO is the number of a hard
