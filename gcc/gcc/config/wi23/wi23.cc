@@ -81,4 +81,4 @@ wi23_initial_elimination_offset (int from, int to)
 
 struct gcc_target targetm = TARGET_INITIALIZER;
 
-#include "gt-wi23.h"
+//#include "gt-wi23.h"
