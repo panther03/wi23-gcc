@@ -200,7 +200,7 @@ enum reg_class
   0, 0, 0, 0, 0, 0, 0, 0,	\
   0, 0, 0, 0, 0, 0, 0, 1,	\
   /* fake */ \
-  1, 1, 1 }
+  1, 1}
 
 #define CALL_USED_REGISTERS		\
 { \
@@ -212,7 +212,7 @@ enum reg_class
   1, 1, 1, 1, 1, 1, 1, 1,	\
   1, 1, 1, 1, 0, 0, 0, 0,	\
   0, 0, 0, 0, 0, 0, 0, 1,	\
-  1, 1, 1 /* fake */ }
+  1, 1 /* fake */ }
 
 /* A C expression whose value is a register class containing hard
    register REGNO.  */
