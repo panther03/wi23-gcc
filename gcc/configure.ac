@@ -1288,7 +1288,7 @@ case "${target}" in
     ;;
   wi23-*-*)
     noconfigdirs="$noconfigdirs target-libgcc starget-newib target-libgloss"
-  ;;
+    ;;
   loongarch*-*-linux*)
     ;;
   loongarch*-*-*)
