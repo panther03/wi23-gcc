@@ -24,13 +24,22 @@
 
 ;; Nonzero if OP can be source of a simple move operation.
 
-(define_predicate "input_operand"
-  (ior (match_operand 0 "register_operand")
-       (match_operand 0 "memory_operand")
-       (and (match_code "const_int")
-	    (match_test "satisfies_constraint_I (op)
-			 || satisfies_constraint_J (op)
-       || satisfies_constraint_M (op)"))))
+(define_predicate "wi23_general_movsrc_operand"
+  (match_code "mem,const_int,reg,subreg,symbol_ref,label_ref,const")
+{
+  /* Any (MEM LABEL_REF) is OK.  That is a pc-relative load.  */
+  if (MEM_P (op) && GET_CODE (XEXP (op, 0)) == LABEL_REF)
+    return 1;
+
+  if (MEM_P (op)
+      && GET_CODE (XEXP (op, 0)) == PLUS
+      && GET_CODE (XEXP (XEXP (op, 0), 0)) == REG
+      && GET_CODE (XEXP (XEXP (op, 0), 1)) == CONST_INT
+      && IMM16_S (INTVAL (XEXP (XEXP (op, 0), 1))))
+    return 1;
+
+  return general_operand (op, mode);
+})
 
 (define_predicate "const0_operand"
   (and (match_code "const_int,const_wide_int")

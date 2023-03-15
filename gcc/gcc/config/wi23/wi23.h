@@ -482,4 +482,11 @@ typedef struct {
     builtin_define_std ("WI23");			\
   }
 
+#define ADDR_SPACE_PM 1
+
+#define REGISTER_TARGET_PRAGMAS() do { \
+  c_register_addr_space ("__flash", ADDR_SPACE_PM); \
+} while (0)
+
+extern int wi23_is_mem_pm(rtx o);
 #endif /* GCC_WI23_h */

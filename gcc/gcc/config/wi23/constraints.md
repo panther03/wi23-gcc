@@ -22,6 +22,29 @@
 ;; Constraints
 ;; -------------------------------------------------------------------------
 
+(define_memory_constraint "B"
+  "An offset address."
+  (and (match_code "mem")
+       (match_test "(!wi23_is_mem_pm(op))")
+       (match_test "(GET_CODE (XEXP (op, 0)) == PLUS)")))
+
+(define_memory_constraint "W"
+  "A register indirect memory operand."
+  (and (match_code "mem")
+       (match_test "!wi23_is_mem_pm(op)
+        && REG_P (XEXP (op, 0))
+		    && REGNO_OK_FOR_BASE_P (REGNO (XEXP (op, 0)))")))
+
+(define_memory_constraint "e"
+  "An offset address."
+  (and (match_code "mem")
+       (match_test "wi23_is_mem_pm(op) && (
+          (GET_CODE (XEXP (op, 0)) == SYMBOL_REF) ||
+          (GET_CODE (XEXP (op, 0)) == LABEL_REF) ||
+          (GET_CODE (XEXP (op, 0)) == CONST_INT) ||
+          (GET_CODE (XEXP (op, 0)) == CONST))"
+       )))
+
  (define_constraint "L"
    "An unsigned 5-bit constant (for shift counts)."
    (and (match_code "const_int")
