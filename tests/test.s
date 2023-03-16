@@ -19,4 +19,3 @@ myshort:
 	.size	mydouble, 8
 mydouble:
 	.zero	8
-	.ident	"GCC: (GNU) 12.2.0"

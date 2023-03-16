@@ -114,7 +114,7 @@ wi23_operand_lossage (const char *msgid, rtx op)
 /* The PRINT_OPERAND_ADDRESS worker.  */
 
 void
-ft32_print_operand_address (FILE * file, rtx x)
+wi23_print_operand_address (FILE * file, machine_mode, rtx x)
 {
   switch (GET_CODE (x))
     {
@@ -141,8 +141,7 @@ ft32_print_operand_address (FILE * file, rtx x)
                 && CONST_INT_P (XEXP (plus, 1)))
               {
                 output_addr_const (file, XEXP (plus, 0));
-                fprintf (file, "%s, %ld+", INTVAL (XEXP (plus, 1)),
-                         reg_names[REGNO (XEXP (x, 0))]);
+                fprintf (file, "%s, %ld+", reg_names[REGNO (XEXP (x, 0))], INTVAL (XEXP (plus, 1)));
               }
             else
               abort ();
@@ -360,6 +359,46 @@ wi23_initial_elimination_offset (int from, int to)
   return ret;
 }
 
+/* Helper function for `wi23_legitimate_address_p'.  */
+
+static bool
+wi23_reg_ok_for_base_p (const_rtx reg, bool strict_p)
+{
+  int regno = REGNO (reg);
+
+  if (strict_p)
+    return HARD_REGNO_OK_FOR_BASE_P (regno)
+	   || HARD_REGNO_OK_FOR_BASE_P (reg_renumber[regno]);
+  else    
+    return !HARD_REGISTER_NUM_P (regno)
+	   || HARD_REGNO_OK_FOR_BASE_P (regno);
+}
+
+/* Worker function for TARGET_LEGITIMATE_ADDRESS_P.  */
+
+static bool
+wi23_legitimate_address_p (machine_mode mode ATTRIBUTE_UNUSED,
+			    rtx x, bool strict_p,
+			    addr_space_t as)
+{
+  // TODO add support for instruction memory
+  gcc_assert (ADDR_SPACE_GENERIC_P (as));
+
+  if (GET_CODE(x) == PLUS
+      && REG_P (XEXP (x, 0))
+      && wi23_reg_ok_for_base_p (XEXP (x, 0), strict_p)
+      && CONST_INT_P (XEXP (x, 1))
+      && IN_RANGE (INTVAL (XEXP (x, 1)), -32768, 32767))
+    return true;
+  if (REG_P (x) && wi23_reg_ok_for_base_p (x, strict_p))
+    return true;
+  if (GET_CODE (x) == SYMBOL_REF
+      || GET_CODE (x) == LABEL_REF
+      || GET_CODE (x) == CONST)
+    return true;
+  return false;
+}
+
 // TODO: deal with varargs later
 
 
@@ -408,7 +447,7 @@ wi23_load_immediate (rtx dst, int32_t i, bool high)
 
   // if it fits into 16-bits, don't care if signed or not
   // FIXME: stupid way of doing this?
-  if (i & 0xFFFF0000 == 0)
+  if ((i & 0xFFFF0000) == 0)
   {
       if (high) sprintf (pattern, "slbi  %%0,%d", i);
       else sprintf (pattern, "lbi  %%0,%d", i);
@@ -443,24 +482,24 @@ wi23_load_immediate (rtx dst, int32_t i, bool high)
 #define TARGET_MUST_PASS_IN_STACK	must_pass_in_stack_var_size
 #undef  TARGET_PASS_BY_REFERENCE
 #define TARGET_PASS_BY_REFERENCE    hook_pass_by_reference_must_pass_in_stack
-#undef  TARGET_ARG_PARTIAL_BYTES
-#define TARGET_ARG_PARTIAL_BYTES        hook_bool_void_false
-#undef  TARGET_FUNCTION_ARG
-#define TARGET_FUNCTION_ARG		hook_bool_void_false
-#undef  TARGET_FUNCTION_ARG_ADVANCE
-#define TARGET_FUNCTION_ARG_ADVANCE	hook_bool_void_false
+//#undef  TARGET_ARG_PARTIAL_BYTES
+//#define TARGET_ARG_PARTIAL_BYTES        hook_bool_void_false
+//#undef  TARGET_FUNCTION_ARG
+//#define TARGET_FUNCTION_ARG		hook_bool_void_false
+//#undef  TARGET_FUNCTION_ARG_ADVANCE
+//#define TARGET_FUNCTION_ARG_ADVANCE	hook_bool_void_false
 
 #undef TARGET_LRA_P
 #define TARGET_LRA_P hook_bool_void_false
 
 #undef  TARGET_ADDR_SPACE_LEGITIMATE_ADDRESS_P
-#define TARGET_ADDR_SPACE_LEGITIMATE_ADDRESS_P	hook_bool_void_false
+#define TARGET_ADDR_SPACE_LEGITIMATE_ADDRESS_P	wi23_legitimate_address_p
 
-#undef  TARGET_SETUP_INCOMING_VARARGS
-#define TARGET_SETUP_INCOMING_VARARGS 	hook_bool_void_false
+//#undef  TARGET_SETUP_INCOMING_VARARGS
+//#define TARGET_SETUP_INCOMING_VARARGS 	hook_bool_void_false
 
-#undef	TARGET_FIXED_CONDITION_CODE_REGS
-#define	TARGET_FIXED_CONDITION_CODE_REGS hook_bool_void_false
+//#undef	TARGET_FIXED_CONDITION_CODE_REGS
+//#define	TARGET_FIXED_CONDITION_CODE_REGS hook_bool_void_false
 
 /* Define this to return an RTX representing the place where a
    function returns or receives a value of data type RET_TYPE, a tree
@@ -475,12 +514,12 @@ wi23_load_immediate (rtx dst, int32_t i, bool high)
 #undef TARGET_FRAME_POINTER_REQUIRED
 #define TARGET_FRAME_POINTER_REQUIRED hook_bool_void_true
 
-#undef TARGET_STATIC_CHAIN
-#define TARGET_STATIC_CHAIN hook_bool_void_false
-#undef TARGET_ASM_TRAMPOLINE_TEMPLATE
-#define TARGET_ASM_TRAMPOLINE_TEMPLATE hook_bool_void_false
-#undef TARGET_TRAMPOLINE_INIT
-#define TARGET_TRAMPOLINE_INIT hook_bool_void_false
+//#/undef TARGET_STATIC_CHAIN
+//#define TARGET_STATIC_CHAIN hook_bool_void_false
+//#undef TARGET_ASM_TRAMPOLINE_TEMPLATE
+//#define TARGET_ASM_TRAMPOLINE_TEMPLATE hook_bool_void_false
+//#undef TARGET_TRAMPOLINE_INIT
+//#define TARGET_TRAMPOLINE_INIT hook_bool_void_false
 
 #undef TARGET_OPTION_OVERRIDE
 #define TARGET_OPTION_OVERRIDE wi23_option_override
@@ -495,4 +534,4 @@ wi23_load_immediate (rtx dst, int32_t i, bool high)
 
 struct gcc_target targetm = TARGET_INITIALIZER;
 
-//#include "gt-wi23.h"
+#include "gt-wi23.h"

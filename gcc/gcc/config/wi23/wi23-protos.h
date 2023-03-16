@@ -17,4 +17,8 @@ You should have received a copy of the GNU General Public License
 along with GCC; see the file COPYING3.  If not see
 <http://www.gnu.org/licenses/>.  */
 
+extern void  wi23_expand_prologue (void);
+extern void  wi23_expand_epilogue (void);
 extern int   wi23_initial_elimination_offset (int, int);
+extern bool  wi23_offset_address_p (rtx);
+extern const char* wi23_load_immediate(rtx, int32_t i, bool high);
