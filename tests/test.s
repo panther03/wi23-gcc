@@ -19,3 +19,22 @@ myshort:
 	.size	mydouble, 8
 mydouble:
 	.zero	8
+	.text
+	.p2align	2
+	.global	main
+	.type	main, @function
+main:
+	lbi  r1,222
+	lbi  r0,111
+	jal 0
+stu ra, sp, -4
+stu fp, sp, -4
+jal foo
+	addi r1, r9, 0
+	addi r9, r1, 0
+	ld fp, sp, 0
+ld ra, sp, 4
+addi sp, sp, 8
+jr ra
+	.size	main, .-main
+	.ident	"GCC: (GNU) 12.2.0"

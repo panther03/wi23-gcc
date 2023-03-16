@@ -403,13 +403,13 @@ wi23_legitimate_address_p (machine_mode mode ATTRIBUTE_UNUSED,
 
 
 // TODO add floating point reg support for both of these functions
-/*static rtx
+static rtx
 wi23_function_arg (cumulative_args_t cum_v, const function_arg_info &arg)
 {
   CUMULATIVE_ARGS *cum = get_cumulative_args (cum_v);
 
   if (cum->num_gprs < 9)
-    return gen_rtx_REG (arg.mode, *cum);
+    return gen_rtx_REG (arg.mode, cum->num_gprs);
   else 
     return NULL_RTX;
 }
@@ -419,16 +419,16 @@ wi23_function_arg (cumulative_args_t cum_v, const function_arg_info &arg)
    : (unsigned) int_size_in_bytes (TYPE))
 
 static void
-moxie_function_arg_advance (cumulative_args_t cum_v,
+wi23_function_arg_advance (cumulative_args_t cum_v,
 			    const function_arg_info &arg)
 {
   CUMULATIVE_ARGS *cum = get_cumulative_args (cum_v);
 
+  // TODO: wtf was +3 here for in moxie??
   cum->num_gprs = (cum->num_gprs < RA_REGNUM
-	  ? *cum + ((3 + WI23_FUNCTION_ARG_SIZE (arg.mode, arg.type)) / 4)
-	  : *cum);
+	  ? cum->num_gprs + ((WI23_FUNCTION_ARG_SIZE (arg.mode, arg.type)) / 4)
+	  : cum->num_gprs);
 }
-*/
 
 /* Used by constraints.md to distinguish between GENERIC and PM
    memory addresses.  */
@@ -484,10 +484,10 @@ wi23_load_immediate (rtx dst, int32_t i, bool high)
 #define TARGET_PASS_BY_REFERENCE    hook_pass_by_reference_must_pass_in_stack
 //#undef  TARGET_ARG_PARTIAL_BYTES
 //#define TARGET_ARG_PARTIAL_BYTES        hook_bool_void_false
-//#undef  TARGET_FUNCTION_ARG
-//#define TARGET_FUNCTION_ARG		hook_bool_void_false
-//#undef  TARGET_FUNCTION_ARG_ADVANCE
-//#define TARGET_FUNCTION_ARG_ADVANCE	hook_bool_void_false
+#undef  TARGET_FUNCTION_ARG
+#define TARGET_FUNCTION_ARG		wi23_function_arg
+#undef  TARGET_FUNCTION_ARG_ADVANCE
+#define TARGET_FUNCTION_ARG_ADVANCE	wi23_function_arg_advance
 
 #undef TARGET_LRA_P
 #define TARGET_LRA_P hook_bool_void_false
