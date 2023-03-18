@@ -30,6 +30,6 @@ struct wi23_sim_cpu {
   unsigned_word pc;
 };
 
-#define MOXIE_SIM_CPU(cpu) ((struct moxie_sim_cpu *) CPU_ARCH_DATA (cpu))
+#define WI23_SIM_CPU(cpu) ((struct wi23_sim_cpu *) CPU_ARCH_DATA (cpu))
 
 #endif
