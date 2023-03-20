@@ -16,6 +16,7 @@
         "*.def": "cpp",
         "riscv-sim.h": "c",
         "riscv-opc.h": "c",
-        "disassemble.h": "c"
+        "disassemble.h": "c",
+        "valarray": "c"
     }
 }

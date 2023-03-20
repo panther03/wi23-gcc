@@ -1,67 +1,75 @@
 	.file	"test.c"
-	.text
-	.global	myint
-	.section	.bss,"aw",@nobits
-	.p2align	2
-	.type	myint, @object
-	.size	myint, 4
-myint:
-	.zero	4
-	.global	myshort
-	.p2align	1
-	.type	myshort, @object
-	.size	myshort, 2
-myshort:
-	.zero	2
-	.global	mydouble
-	.p2align	2
-	.type	mydouble, @object
-	.size	mydouble, 8
-mydouble:
-	.zero	8
-	.text
-	.p2align	2
-	.global	foo
+	.comm	myint,4,4
+	.comm	myshort,2,2
+	.comm	mydouble,8,4
+	.section .text
+	.align	4
+.proc	foo
+	.global foo
 	.type	foo, @function
-j main
 foo:
-	addi sp,sp,-8
-	st r0, fp,-4
-	st r1, fp,-8
-	ld r1, fp,-4
-	addi r1,r1,4
-	ld r2, r1,0
-	ld r1, fp,-4
-	addi r1,r1,8
-	ld r1, r1,0
-	add r2,r2,r1
-	ld r1, fp,-4
-	addi r1,r1,12
-	ld r1, r1,0
-	add r2,r2,r1
-	ld r1, fp,-8
-	add r1,r2,r1
-	addi r9, r1, 0
-	ld fp, sp, 0; ld ra, sp, 4; addi sp, sp, 8; jr ra;
+.LFB0:
+	.cfi_startproc
+	l.sw    	-4(r1),r2	 # SI store
+	.cfi_offset 2, -4
+	l.addi  	r2,r1,0 # addsi3
+	.cfi_def_cfa_register 2
+	l.addi	r1,r1,-12	# allocate frame
+	l.sw    	-8(r2),r3	 # SI store
+	l.sw    	-12(r2),r4	 # SI store
+	l.lwz   	r3,-8(r2)	 # SI load
+	l.addi  	r3,r3,4 # addsi3
+	l.lwz   	r4,0(r3)	 # SI load
+	l.lwz   	r3,-8(r2)	 # SI load
+	l.addi  	r3,r3,8 # addsi3
+	l.lwz   	r3,0(r3)	 # SI load
+	l.add   	r4,r4,r3 # addsi3
+	l.lwz   	r3,-8(r2)	 # SI load
+	l.addi  	r3,r3,12 # addsi3
+	l.lwz   	r3,0(r3)	 # SI load
+	l.add   	r4,r4,r3 # addsi3
+	l.lwz   	r3,-12(r2)	 # SI load
+	l.add   	r3,r4,r3 # addsi3
+	l.ori   	r11,r3,0	 # move reg to reg
+	l.ori	r1,r2,0	# deallocate frame
+	l.lwz   	r2,-4(r1)	 # SI load
+	l.jr    	r9	# return_internal
+	l.nop			# nop delay slot
+	.cfi_endproc
+.LFE0:
 	.size	foo, .-foo
-	.p2align	2
-	.global	main
+	.align	4
+.proc	main
+	.global main
 	.type	main, @function
 main:
-	addi sp,sp,-12
-	lbi  r1,1
-	st r1, fp,-12
-	lbi  r1,2
-	st r1, fp,-8
-	lbi  r1,3
-	st r1, fp,-4
-	addi r2,fp,-12
-	lbi  r1,222
-	addi r0, r2, 0
-	jal 0; stu ra, sp, -4; stu fp, sp, -4; jal foo;
-	addi r1, r9, 0
-	addi r9, r1, 0
-	ld fp, sp, 0; ld ra, sp, 4; addi sp, sp, 8; jr ra;
-	halt
+.LFB1:
+	.cfi_startproc
+	l.sw    	-8(r1),r2	 # SI store
+	.cfi_offset 2, -8
+	l.addi  	r2,r1,0 # addsi3
+	.cfi_def_cfa_register 2
+	l.sw    	-4(r1),r9	 # SI store
+	l.addi	r1,r1,-20	# allocate frame
+	.cfi_offset 9, -4
+	l.addi  	r3,r0,1	 # move immediate I
+	l.sw    	-20(r2),r3	 # SI store
+	l.addi  	r3,r0,2	 # move immediate I
+	l.sw    	-16(r2),r3	 # SI store
+	l.addi  	r3,r0,3	 # move immediate I
+	l.sw    	-12(r2),r3	 # SI store
+	l.addi  	r3,r2,-20 # addsi3
+	l.addi  	r4,r0,222	 # move immediate I
+	l.jal   	foo # call_value_internal
+	l.nop			# nop delay slot
+	l.ori   	r3,r11,0	 # move reg to reg
+	l.ori   	r11,r3,0	 # move reg to reg
+	l.ori	r1,r2,0	# deallocate frame
+	l.lwz   	r2,-8(r1)	 # SI load
+	l.lwz   	r9,-4(r1)	 # SI load
+	l.jr    	r9	# return_internal
+	l.nop			# nop delay slot
+	.cfi_endproc
+.LFE1:
 	.size	main, .-main
-	.ident	"GCC: (GNU) 12.2.0"
+	.ident	"GCC: (GNU) 5.2.0"

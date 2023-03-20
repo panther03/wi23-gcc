@@ -75,6 +75,13 @@
 (define_predicate "losum_add_operand"
   (match_code "symbol_ref,label_ref,const,unspec"))
 
+(define_predicate "ofs_operand"
+  (match_test "satisfies_constraint_B (op) && satisfies_constraint_W (op)"))
+
+(define_predicate "call_operand"
+ (match_test "satisfies_constraint_I (op)
+			 || (satisfies_constraint_B (op) && satisfies_constraint_W (op))"))
+
 ;; Return true for relocations that must use MOVHI+ORI
 ;;(define_predicate "losum_ior_operand"
 ;;  (and (match_code "unspec")
