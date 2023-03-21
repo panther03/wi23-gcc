@@ -186,6 +186,11 @@ wi23_print_operand (FILE *file, rtx x, int code)
 
   switch (code)
     {
+    case 'C': {
+      enum rtx_code c = GET_CODE (x);
+      fprintf (file, "%s", GET_RTX_NAME (c));
+      return;
+    }
     case 0:
       /* No code, print as usual.  */
       break;
@@ -488,7 +493,7 @@ wi23_expand_conditional_branch (rtx label, rtx_code code, rtx op0, rtx op1)
     op1 = force_reg (word_mode, op1);
   rtx condition = gen_rtx_fmt_ee (code, VOIDmode, op0, op1);
   emit_jump_insn (gen_rtx_SET (pc_rtx,
-		     gen_rtx_IF_THEN_ELSE (VOIDmode, condition, label, pc_rtx)));
+		     gen_rtx_IF_THEN_ELSE (VOIDmode, condition, gen_rtx_LABEL_REF (VOIDmode, label), pc_rtx)));
 }
 
 
