@@ -1,0 +1,1 @@
+../../gcc/configure --target=wi23-elf --enable-languages=c --disable-nls --disable-libssp --prefix="/opt/wi23-elf/"

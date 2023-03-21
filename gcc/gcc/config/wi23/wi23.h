@@ -41,12 +41,8 @@
 #define LIB_SPEC "%{!shared:%{!symbolic:-lc}}"
 
 #undef  LINK_SPEC
-#define LINK_SPEC "%{h*} %{v:-V} %{!mel:-EB} %{mel:-EL}\
+#define LINK_SPEC "%{h*} %{v:-V}\
 		   %{static:-Bstatic} %{shared:-shared} %{symbolic:-Bsymbolic}"
-
-#ifndef MULTILIB_DEFAULTS
-#define MULTILIB_DEFAULTS { "meb" }
-#endif
 
 /* Layout of Source Language Data Types */
 
@@ -226,8 +222,8 @@ enum reg_class
 
 /* The Overall Framework of an Assembler File */
 
-#undef  ASM_SPEC
-#define ASM_SPEC "%{!mel:-EB} %{mel:-EL}"
+//#undef  ASM_SPEC
+//#define ASM_SPEC ""
 #define ASM_COMMENT_START "//"
 #define ASM_APP_ON ""
 #define ASM_APP_OFF ""
