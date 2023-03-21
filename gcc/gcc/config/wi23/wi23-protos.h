@@ -22,3 +22,6 @@ extern void  wi23_expand_epilogue (void);
 extern int   wi23_initial_elimination_offset (int, int);
 extern bool  wi23_offset_address_p (rtx);
 extern const char* wi23_load_immediate(rtx, int32_t i, bool high);
+#ifdef RTX_CODE
+extern void wi23_expand_conditional_branch (rtx, enum rtx_code, rtx, rtx);
+#endif

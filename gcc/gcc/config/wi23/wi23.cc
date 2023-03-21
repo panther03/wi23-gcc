@@ -23,23 +23,38 @@
 #include "config.h"
 #include "system.h"
 #include "coretypes.h"
-#include "backend.h"
-#include "target.h"
+#include "tm.h"
 #include "rtl.h"
+#include "regs.h"
+#include "insn-config.h"
+#include "insn-attr.h"
+#include "recog.h"
+#include "output.h"
+#include "alias.h"
 #include "tree.h"
 #include "stringpool.h"
 #include "attribs.h"
-#include "df.h"
-#include "regs.h"
+#include "varasm.h"
+#include "stor-layout.h"
+#include "calls.h"
+#include "function.h"
+#include "explow.h"
 #include "memmodel.h"
 #include "emit-rtl.h"
-#include "diagnostic-core.h"
-#include "output.h"
-#include "stor-layout.h"
-#include "varasm.h"
-#include "calls.h"
+#include "reload.h"
+#include "tm_p.h"
+#include "target.h"
+#include "target-def.h"
+#include "basic-block.h"
 #include "expr.h"
+#include "optabs.h"
+#include "bitmap.h"
+#include "df.h"
+#include "diagnostic.h"
 #include "builtins.h"
+#include "predict.h"
+#include "tree-pass.h"
+#include "opts.h"
 
 /* This file should be included last.  */
 // ?????????? ^
@@ -463,10 +478,18 @@ wi23_load_immediate (rtx dst, int32_t i, bool high)
   return "";
 }
 
+/* Jump to LABEL if (CODE OP0 OP1) holds.  */
 
-
-
-
+void
+wi23_expand_conditional_branch (rtx label, rtx_code code, rtx op0, rtx op1)
+{
+  op0 = force_reg (word_mode, op0);
+  if (op1 != const0_rtx)
+    op1 = force_reg (word_mode, op1);
+  rtx condition = gen_rtx_fmt_ee (code, VOIDmode, op0, op1);
+  emit_jump_insn (gen_rtx_SET (pc_rtx,
+		     gen_rtx_IF_THEN_ELSE (VOIDmode, condition, label, pc_rtx)));
+}
 
 
 /* The Global `targetm' Variable. */
