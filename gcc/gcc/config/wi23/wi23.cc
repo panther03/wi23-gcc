@@ -464,7 +464,6 @@ const char *
 wi23_load_immediate (rtx dst, int32_t i, bool high)
 {
   char pattern[100];
-
   // if it fits into 16-bits, don't care if signed or not
   // FIXME: stupid way of doing this?
   if ((i & 0xFFFF0000) == 0)
@@ -489,9 +488,28 @@ void
 wi23_expand_conditional_branch (rtx label, rtx_code code, rtx op0, rtx op1)
 {
   op0 = force_reg (word_mode, op0);
-  if (op1 != const0_rtx)
+  rtx condition;
+  if (op1 != const0_rtx) {
+    rtx temp;
+    bool inverted = false;
     op1 = force_reg (word_mode, op1);
-  rtx condition = gen_rtx_fmt_ee (code, VOIDmode, op0, op1);
+    temp = gen_reg_rtx (word_mode);
+    if (code == GT || code == GE || code == NE) {
+      code = reverse_condition(code);
+      inverted = true;
+    }
+    emit_move_insn (temp, gen_rtx_fmt_ee (code, word_mode, op0, op1));
+    op0 = temp;
+    op1 = const0_rtx;
+    if (inverted) {
+      condition = gen_rtx_fmt_ee (NE, VOIDmode, op0, op1);  
+    } else {
+      condition = gen_rtx_fmt_ee (EQ, VOIDmode, op0, op1);  
+    }
+  } else {
+    condition = gen_rtx_fmt_ee (code, VOIDmode, op0, op1);
+  }
+  
   emit_jump_insn (gen_rtx_SET (pc_rtx,
 		     gen_rtx_IF_THEN_ELSE (VOIDmode, condition, gen_rtx_LABEL_REF (VOIDmode, label), pc_rtx)));
 }

@@ -2,9 +2,11 @@ int myint;
 short myshort;
 double mydouble;
 
-int test() {
+int sumUpTo(int n) {
   int i = 0;
-  while (i == 0) {
+  int sum = 0;
+  while (i < n) {
+    sum += i;
     i++;
   }
   return i;
