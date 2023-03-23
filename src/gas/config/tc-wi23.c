@@ -101,11 +101,11 @@ md_begin (void)
   const wi23_fnc_info_t *fncode;
 
   /* Insert names into hash table.  */
-  for (count = 0, fncode = wi23_shift_fnc; count++ < 3; fncode++)
+  for (count = 0, fncode = wi23_shift_fnc; count++ < 4; fncode++)
     str_hash_insert (fncode_hash_table, fncode->name, fncode, 0);
-  for (count = 0, fncode = wi23_arith_fnc; count++ < 3; fncode++)
+  for (count = 0, fncode = wi23_arith_fnc; count++ < 4; fncode++)
     str_hash_insert (fncode_hash_table, fncode->name, fncode, 0);
-  for (count = 0, fncode = wi23_float_fnc; count++ < 3; fncode++)
+  for (count = 0, fncode = wi23_float_fnc; count++ < 4; fncode++)
     str_hash_insert (fncode_hash_table, fncode->name, fncode, 0);
 
   //////////////////////////

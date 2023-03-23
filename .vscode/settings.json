@@ -17,6 +17,9 @@
         "riscv-sim.h": "c",
         "riscv-opc.h": "c",
         "disassemble.h": "c",
-        "valarray": "c"
+        "valarray": "c",
+        "future": "cpp",
+        "regex": "cpp",
+        "system_error": "cpp"
     }
 }

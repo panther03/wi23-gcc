@@ -18,5 +18,6 @@ int foo(int x[], int y) {
 int main()
 {
   int x[] = {1,2,3};
-  return foo (x, 222);
+  int y = 4;
+  return foo (x, 222) + x[0] << y;
 }

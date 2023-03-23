@@ -188,6 +188,15 @@ wi23_print_operand (FILE *file, rtx x, int code)
     {
     case 'C': {
       enum rtx_code c = GET_CODE (x);
+      // FIXME: remove this when we actually add leu and ltu
+      if (c == LTU) {
+        fprintf (file, "lt");  
+        return;
+      } 
+      if (c == LEU) {
+        fprintf (file, "le");  
+        return;
+      }
       fprintf (file, "%s", GET_RTX_NAME (c));
       return;
     }
@@ -489,12 +498,12 @@ wi23_expand_conditional_branch (rtx label, rtx_code code, rtx op0, rtx op1)
 {
   op0 = force_reg (word_mode, op0);
   rtx condition;
-  if (op1 != const0_rtx) {
+  if (op1 != const0_rtx || (op1 == const0_rtx && (code == GT) || (code == LE))) {
     rtx temp;
     bool inverted = false;
     op1 = force_reg (word_mode, op1);
     temp = gen_reg_rtx (word_mode);
-    if (code == GT || code == GE || code == NE) {
+    if (code == GT || code == GE || code == GTU || code == GEU || code == NE) {
       code = reverse_condition(code);
       inverted = true;
     }
@@ -513,6 +522,17 @@ wi23_expand_conditional_branch (rtx label, rtx_code code, rtx op0, rtx op1)
   emit_jump_insn (gen_rtx_SET (pc_rtx,
 		     gen_rtx_IF_THEN_ELSE (VOIDmode, condition, gen_rtx_LABEL_REF (VOIDmode, label), pc_rtx)));
 }
+
+static bool
+wi23_hard_regno_mode_ok (unsigned int regno, machine_mode mode)
+{
+  if ((GET_MODE_CLASS (mode) != MODE_FLOAT) && (REGNO_REG_CLASS(regno) == FLOAT_REGS)) {
+    return false;
+  }
+
+  return true;
+}
+
 
 
 /* The Global `targetm' Variable. */
@@ -577,6 +597,9 @@ wi23_expand_conditional_branch (rtx label, rtx_code code, rtx op0, rtx op1)
 
 #undef  TARGET_CONSTANT_ALIGNMENT
 #define TARGET_CONSTANT_ALIGNMENT constant_alignment_word_strings
+
+#undef TARGET_HARD_REGNO_MODE_OK
+#define TARGET_HARD_REGNO_MODE_OK wi23_hard_regno_mode_ok
 
 struct gcc_target targetm = TARGET_INITIALIZER;
 

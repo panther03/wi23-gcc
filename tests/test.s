@@ -1,102 +1,111 @@
 	.file	"test.c"
-	.option nopic
-	.attribute arch, "rv64i2p0_m2p0_a2p0_f2p0_d2p0_c2p0"
-	.attribute unaligned_access, 0
-	.attribute stack_align, 16
 	.text
-	.comm	myint,4,4
-	.comm	myshort,2,2
-	.comm	mydouble,8,8
-	.align	1
-	.globl	test
-	.type	test, @function
-test:
-	addi	sp,sp,-32
-	sd	s0,24(sp)
-	addi	s0,sp,32
-	sw	zero,-20(s0)
-	lw	a5,-20(s0)
-	sext.w	a5,a5
-	bnez	a5,.L2
-	lw	a5,-20(s0)
-	addiw	a5,a5,1
-	sw	a5,-20(s0)
+	.global	myint
+	.section	.bss,"aw",@nobits
+	.p2align	2
+	.type	myint, @object
+	.size	myint, 4
+myint:
+	.zero	4
+	.global	myshort
+	.p2align	1
+	.type	myshort, @object
+	.size	myshort, 2
+myshort:
+	.zero	2
+	.global	mydouble
+	.p2align	2
+	.type	mydouble, @object
+	.size	mydouble, 8
+mydouble:
+	.zero	8
+	.text
+	.p2align	2
+	.global	sumUpTo
+	.type	sumUpTo, @function
+sumUpTo:
+	addi sp,sp,-12
+	st r0, fp,-12
+	addi r1, r0, 0
+	st r1, fp,-4
+	addi r1, r0, 0
+	st r1, fp,-8
+	j .L2
+.L3:
+	ld r2, fp,-8
+	ld r1, fp,-4
+	add r1,r2,r1
+	st r1, fp,-8
+	ld r1, fp,-4
+	addi r1,r1,1
+	st r1, fp,-4
 .L2:
-	lw	a5,-20(s0)
-	mv	a0,a5
-	ld	s0,24(sp)
-	addi	sp,sp,32
-	jr	ra
-	.size	test, .-test
-	.align	1
-	.globl	foo
+	ld r2, fp,-4
+	ld r1, fp,-12
+	slt r1,r2,r1
+	beqz	r1,.L3
+	ld r1, fp,-4
+	addi r9, r1, 0
+	ld fp, sp, 0; ld ra, sp, 4; addi sp, sp, 8; jr ra;
+	.size	sumUpTo, .-sumUpTo
+	.p2align	2
+	.global	foo
 	.type	foo, @function
 foo:
-	addi	sp,sp,-48
-	sd	ra,40(sp)
-	sd	s0,32(sp)
-	sd	s1,24(sp)
-	addi	s0,sp,48
-	sd	a0,-40(s0)
-	mv	a5,a1
-	sw	a5,-44(s0)
-	ld	a5,-40(s0)
-	addi	a5,a5,4
-	lw	a4,0(a5)
-	ld	a5,-40(s0)
-	addi	a5,a5,8
-	lw	a5,0(a5)
-	addw	a5,a4,a5
-	sext.w	a4,a5
-	ld	a5,-40(s0)
-	addi	a5,a5,12
-	lw	a5,0(a5)
-	addw	a5,a4,a5
-	sext.w	a5,a5
-	lw	a4,-44(s0)
-	addw	a5,a4,a5
-	sext.w	s1,a5
-	ld	a5,-40(s0)
-	addi	a5,a5,12
-	lw	a4,0(a5)
-	lw	a5,-44(s0)
-	subw	a5,a4,a5
-	sext.w	a5,a5
-	mv	a0,a5
-	call	sumUpTo
-	mv	a5,a0
-	addw	a5,s1,a5
-	sext.w	a5,a5
-	mv	a0,a5
-	ld	ra,40(sp)
-	ld	s0,32(sp)
-	ld	s1,24(sp)
-	addi	sp,sp,48
-	jr	ra
+	stu r20, sp, -4
+	addi sp,sp,-8
+	st r0, fp,-4
+	st r1, fp,-8
+	ld r1, fp,-4
+	addi r1,r1,4
+	ld r2, r1,0
+	ld r1, fp,-4
+	addi r1,r1,8
+	ld r1, r1,0
+	add r2,r2,r1
+	ld r1, fp,-4
+	addi r1,r1,12
+	ld r1, r1,0
+	add r2,r2,r1
+	ld r1, fp,-8
+	add r20,r2,r1
+	ld r1, fp,-4
+	addi r1,r1,12
+	ld r2, r1,0
+	ld r1, fp,-8
+	sub r1,r1,r2
+	addi r0, r1, 0
+	jal 0; stu ra, sp, -4; stu fp, sp, -4; jal sumUpTo;
+	addi r1, r9, 0
+	add r1,r20,r1
+	addi r9, r1, 0
+	addi sp,sp,8
+	ld r20, sp, 0; addi sp, sp, 4;
+	ld fp, sp, 0; ld ra, sp, 4; addi sp, sp, 8; jr ra;
 	.size	foo, .-foo
-	.align	1
-	.globl	main
+	.p2align	2
+	.global	main
 	.type	main, @function
 main:
-	addi	sp,sp,-32
-	sd	ra,24(sp)
-	sd	s0,16(sp)
-	addi	s0,sp,32
-	li	a5,1
-	sw	a5,-32(s0)
-	li	a5,2
-	sw	a5,-28(s0)
-	li	a5,3
-	sw	a5,-24(s0)
-	addi	a5,s0,-32
-	li	a1,222
-	mv	a0,a5
-	call	foo
-	mv	a5,a0
-	mv	a0,a5
-	ld	ra,24(sp)
-	ld	s0,16(sp)
-	addi	sp,sp,32
-	jr	ra
+	addi sp,sp,-16
+	lbi  r1,1
+	st r1, fp,-16
+	lbi  r1,2
+	st r1, fp,-12
+	lbi  r1,3
+	st r1, fp,-8
+	lbi  r1,4
+	st r1, fp,-4
+	addi r2,fp,-16
+	lbi  r1,222
+	addi r0, r2, 0
+	jal 0; stu ra, sp, -4; stu fp, sp, -4; jal foo;
+	addi r2, r9, 0
+	ld r1, fp,-16
+	add r2,r2,r1
+	ld r1, fp,-4
+	andn r1,r2,r1
+	addi r9, r1, 0
+	ld fp, sp, 0; ld ra, sp, 4; addi sp, sp, 8; jr ra;
 	.size	main, .-main
-	.ident	"GCC: () 9.3.0"
+	.ident	"GCC: (GNU) 12.2.0"

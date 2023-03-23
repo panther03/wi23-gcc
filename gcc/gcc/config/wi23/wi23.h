@@ -422,8 +422,8 @@ typedef struct {
 /* A C expression that is nonzero if REGNO is the number of a hard
    register in which function arguments are sometimes passed.  */
 #define FUNCTION_ARG_REGNO_P(N)						\
-  (IN_RANGE ((N), GP_ARG_FIRST, GP_ARG_LAST)				\
-   || (IN_RANGE ((N), FP_ARG_FIRST, FP_ARG_LAST)))
+  (IN_RANGE ((N), GP_ARG_FIRST, GP_ARG_LAST))
+ //  || (IN_RANGE ((N), FP_ARG_FIRST, FP_ARG_LAST)))
 
 /* A macro whose definition is the name of the class to which a valid
    base register must belong.  A base register is one used in an
