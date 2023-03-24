@@ -76,6 +76,21 @@ static reloc_howto_type wi23_elf_howto_table [] =
 	 0x0000ffff,		/* dst_mask */
 	 false),		/* pcrel_offset */
 
+  /* A 16 bit absolute relocation.  */
+  HOWTO (R_WI23_16_HI,		/* type */
+	 17,			/* rightshift */
+	 4,			/* size */
+	 16,			/* bitsize */
+	 false,			/* pc_relative */
+	 0,			/* bitpos */
+	 complain_overflow_bitfield, /* complain_on_overflow */
+	 bfd_elf_generic_reloc,	/* special_function */
+	 "R_WI23_16_HI",		/* name */
+	 false,			/* partial_inplace */
+	 0x00000000,		/* src_mask */
+	 0xffff0000,		/* dst_mask */
+	 false),		/* pcrel_offset */
+
    /* A 16 bit PC-relative relocation.  */
   HOWTO (R_WI23_PCREL16_S,		/* type */
 	 0,			/* rightshift */
@@ -120,6 +135,7 @@ static const struct wi23_reloc_map wi23_reloc_map [] =
   { BFD_RELOC_NONE,	       R_WI23_NONE },
   { BFD_RELOC_32,	       R_WI23_32 },
   { BFD_RELOC_WI23_16_LO,          R_WI23_16_LO },
+  { BFD_RELOC_WI23_16_HI,          R_WI23_16_HI },
   { BFD_RELOC_WI23_PCREL16_LO,    R_WI23_PCREL16_S },
   { BFD_RELOC_WI23_PCREL26_S,        R_WI23_PCREL26_S },
 };

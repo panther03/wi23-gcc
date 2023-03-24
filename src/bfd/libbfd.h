@@ -1337,6 +1337,7 @@ static const char *const bfd_reloc_code_real_names[] = { "@@uninitialized@@",
   "BFD_RELOC_MOXIE_10_PCREL",
 
   "BFD_RELOC_WI23_16_LO",
+  "BFD_RELOC_WI23_16_HI",
   "BFD_RELOC_WI23_PCREL16_LO",
   "BFD_RELOC_WI23_PCREL26_S",
 

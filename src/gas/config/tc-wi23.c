@@ -372,6 +372,7 @@ md_assemble (char *str)
       {
         expressionS arg;
         int src;
+        int hi_reloc = 0;
 
         src = parse_register_operand (&op_end, RCLASS_GPR);
 
@@ -380,13 +381,20 @@ md_assemble (char *str)
           as_warn (_("expecting comma delimited register operands"));
         op_end++;
 
+
+        if (*(op_end) == '%' && *(op_end+1) == 'h' && *(op_end+2) == ':') {
+          op_end += 3;
+          hi_reloc = 1;
+        }
+          
+
         op_end = parse_exp_save_ilp (op_end, &arg);
         fix_new_exp (frag_now,
           (p - frag_now->fr_literal),
           2,
           &arg,
           0,
-          BFD_RELOC_WI23_16_LO);
+          hi_reloc ? BFD_RELOC_WI23_16_HI : BFD_RELOC_WI23_16_LO);
 
         iword |= (src << 21);
       }
@@ -546,6 +554,7 @@ md_apply_fix (fixS *fixP, valueT * valP, segT seg ATTRIBUTE_UNUSED)
       break;
     case BFD_RELOC_WI23_PCREL16_LO:
     case BFD_RELOC_WI23_16_LO:
+    case BFD_RELOC_WI23_16_HI:
       //printf("%d %x %x %x %x\n", fixP->fx_line,  buf[0], buf[1], buf[2],buf[3]);
       buf[2] = val >> 8;
       buf[3] = val >> 0;
@@ -613,8 +622,8 @@ tc_gen_reloc (asection *section ATTRIBUTE_UNUSED, fixS *fixP)
   switch (fixP->fx_r_type)
     {
     case BFD_RELOC_32:
-    // FIXME: should probably throw an error trying to reference a label for an immediate
     case BFD_RELOC_WI23_16_LO:
+    case BFD_RELOC_WI23_16_HI:
     case BFD_RELOC_WI23_PCREL16_LO:
     case BFD_RELOC_WI23_PCREL26_S:
       code = fixP->fx_r_type;

@@ -51,6 +51,32 @@ sumUpTo:
 	.p2align	2
 	.global	foo
 	.type	foo, @function
+main:
+	lbi r1, %h:foo
+	slbi r2, foo
+	addi sp,sp,-16
+	lbi  r1,1
+	st r1, fp,-16
+	lbi  r1,2
+	st r1, fp,-12
+	lbi  r1,3
+	st r1, fp,-8
+	lbi  r1,4
+	st r1, fp,-4
+	addi r2,fp,-16
+	lbi  r1,222
+	addi r0, r2, 0
+	jal 0; stu ra, sp, -4; stu fp, sp, -4; jal foo;
+	addi r2, r9, 0
+	ld r1, fp,-16
+	add r2,r2,r1
+	ld r1, fp,-4
+	andn r1,r2,r1
+	addi r9, r1, 0
+	ld fp, sp, 0; ld ra, sp, 4; addi sp, sp, 8; jr ra;
+	.size	main, .-main
+	.ident	"GCC: (GNU) 12.2.0"
+.org 0x0001ffffU
 foo:
 	stu r20, sp, -4
 	addi sp,sp,-8
@@ -86,26 +112,3 @@ foo:
 	.p2align	2
 	.global	main
 	.type	main, @function
-main:
-	addi sp,sp,-16
-	lbi  r1,1
-	st r1, fp,-16
-	lbi  r1,2
-	st r1, fp,-12
-	lbi  r1,3
-	st r1, fp,-8
-	lbi  r1,4
-	st r1, fp,-4
-	addi r2,fp,-16
-	lbi  r1,222
-	addi r0, r2, 0
-	jal 0; stu ra, sp, -4; stu fp, sp, -4; jal foo;
-	addi r2, r9, 0
-	ld r1, fp,-16
-	add r2,r2,r1
-	ld r1, fp,-4
-	andn r1,r2,r1
-	addi r9, r1, 0
-	ld fp, sp, 0; ld ra, sp, 4; addi sp, sp, 8; jr ra;
-	.size	main, .-main
-	.ident	"GCC: (GNU) 12.2.0"
