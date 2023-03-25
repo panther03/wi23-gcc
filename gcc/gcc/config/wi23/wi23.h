@@ -306,8 +306,9 @@ typedef struct {
 #define INCOMING_RETURN_ADDR_RTX	gen_rtx_REG (Pmode, RA_REGNUM)
 
 // FIXME cba to implement this just going to not implement it and hope gcc doesnt explode
+// it did
+// just going to uncomment it because cba to investigate
 
-/*
 // Describe how we implement __builtin_eh_return.  
 #define EH_RETURN_DATA_REGNO(N)	((N) < 4 ? (N+2) : INVALID_REGNUM)
 
@@ -315,7 +316,7 @@ typedef struct {
 #define EH_RETURN_HANDLER_RTX						\
   gen_frame_mem (Pmode,							\
 		 plus_constant (Pmode, frame_pointer_rtx, UNITS_PER_WORD))
-*/
+
 
 /* Storage Layout */
 

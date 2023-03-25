@@ -78,7 +78,7 @@ static reloc_howto_type wi23_elf_howto_table [] =
 
   /* A 16 bit absolute relocation.  */
   HOWTO (R_WI23_16_HI,		/* type */
-	 17,			/* rightshift */
+	 16,			/* rightshift */
 	 4,			/* size */
 	 16,			/* bitsize */
 	 false,			/* pc_relative */

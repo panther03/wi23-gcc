@@ -52,7 +52,7 @@ sumUpTo:
 	.global	foo
 	.type	foo, @function
 main:
-	lbi r1, %h:foo
+	lbi r1, $h:foo
 	slbi r2, foo
 	addi sp,sp,-16
 	lbi  r1,1

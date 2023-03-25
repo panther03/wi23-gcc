@@ -498,7 +498,7 @@ wi23_expand_conditional_branch (rtx label, rtx_code code, rtx op0, rtx op1)
 {
   op0 = force_reg (word_mode, op0);
   rtx condition;
-  if (op1 != const0_rtx || (op1 == const0_rtx && (code == GT) || (code == LE))) {
+  if (op1 != const0_rtx || ((op1 == const0_rtx) && ((code == GT) || (code == LE)))) {
     rtx temp;
     bool inverted = false;
     op1 = force_reg (word_mode, op1);
@@ -526,10 +526,16 @@ wi23_expand_conditional_branch (rtx label, rtx_code code, rtx op0, rtx op1)
 static bool
 wi23_hard_regno_mode_ok (unsigned int regno, machine_mode mode)
 {
+  
   if ((GET_MODE_CLASS (mode) != MODE_FLOAT) && (REGNO_REG_CLASS(regno) == FLOAT_REGS)) {
+    //printf("regno %d NOT OK\n", regno);  
     return false;
   }
 
+  if (regno < 64 && regno >= 32) {
+    printf("?????????????? why %d %d \n", regno, GET_MODE_CLASS(mode));
+  }
+  //printf("regno %d OK\n", regno);
   return true;
 }
 

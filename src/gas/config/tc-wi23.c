@@ -244,7 +244,7 @@ md_assemble (char *str)
 
   p = frag_more (4);
 
-  printf("insn: type = %x, name = %s\n", itype, op_start);
+  if (flag_debug) printf("insn: type = %x, name = %s\n", itype, op_start);
 
   *op_end = pend;
 
@@ -351,7 +351,7 @@ md_assemble (char *str)
         op_end = parse_exp_save_ilp (op_end, &arg);
         fix_new_exp (frag_now,
 		     (p - frag_now->fr_literal),
-		     2,
+		     4,
 		     &arg,
 		     0,
 		     BFD_RELOC_WI23_16_LO);
@@ -382,7 +382,7 @@ md_assemble (char *str)
         op_end++;
 
 
-        if (*(op_end) == '%' && *(op_end+1) == 'h' && *(op_end+2) == ':') {
+        if (*(op_end) == '$' && *(op_end+1) == 'h' && *(op_end+2) == ':') {
           op_end += 3;
           hi_reloc = 1;
         }
@@ -391,7 +391,7 @@ md_assemble (char *str)
         op_end = parse_exp_save_ilp (op_end, &arg);
         fix_new_exp (frag_now,
           (p - frag_now->fr_literal),
-          2,
+          4,
           &arg,
           0,
           hi_reloc ? BFD_RELOC_WI23_16_HI : BFD_RELOC_WI23_16_LO);
@@ -445,7 +445,7 @@ md_assemble (char *str)
         op_end = parse_exp_save_ilp (op_end, &arg);
         fix_new_exp (frag_now,
           (p - frag_now->fr_literal),
-          2,
+          4,
           &arg,
           0,
           BFD_RELOC_WI23_16_LO);
@@ -485,11 +485,11 @@ md_assemble (char *str)
       abort ();
   }
 
-  printf("instruction fragment: %x\n", iword);
+  if (flag_debug) printf("instruction fragment: %x\n", iword);
   md_number_to_chars (p, iword, 4);
   dwarf2_emit_insn (4);
 
-  printf("iword: iword = %x\n", iword);
+  if (flag_debug) printf("iword: iword = %x\n", iword);
 
   while (ISSPACE (*op_end))
     op_end++;
@@ -554,11 +554,13 @@ md_apply_fix (fixS *fixP, valueT * valP, segT seg ATTRIBUTE_UNUSED)
       break;
     case BFD_RELOC_WI23_PCREL16_LO:
     case BFD_RELOC_WI23_16_LO:
-    case BFD_RELOC_WI23_16_HI:
-      //printf("%d %x %x %x %x\n", fixP->fx_line,  buf[0], buf[1], buf[2],buf[3]);
       buf[2] = val >> 8;
       buf[3] = val >> 0;
-      //printf("%d %x %x %x %x\n", fixP->fx_line,  buf[0], buf[1], buf[2],buf[3]);
+      buf += 2;
+      break;
+    case BFD_RELOC_WI23_16_HI:
+      buf[2] = val >> 24;
+      buf[3] = val >> 16;
       buf += 2;
       break;
     case BFD_RELOC_8:
