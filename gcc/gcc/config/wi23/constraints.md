@@ -22,6 +22,9 @@
 ;; Constraints
 ;; -------------------------------------------------------------------------
 
+(define_register_constraint "f" "FLOAT_REGS"
+  "A floating-point register (if available).")
+
 (define_constraint "A"
   "An absolute address."
   (and (match_code "mem")

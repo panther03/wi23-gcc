@@ -532,10 +532,25 @@ wi23_hard_regno_mode_ok (unsigned int regno, machine_mode mode)
     return false;
   }
 
-  if (regno < 64 && regno >= 32) {
-    printf("?????????????? why %d %d \n", regno, GET_MODE_CLASS(mode));
-  }
+  //if (regno < 64 && regno >= 32) {
+  //  printf("?????????????? why %d %d \n", regno, GET_MODE_CLASS(mode));
+  //}
   //printf("regno %d OK\n", regno);
+  return true;
+}
+
+static bool
+wi23_can_change_mode_class (machine_mode from, machine_mode to,
+			    reg_class_t rclass)
+{
+  //printf("from: %d to: %d\n",from, to);
+  if (rclass == FLOAT_REGS) {
+    printf("AJAJDKSHD HOLY FUCK\n");
+    return false;
+  }
+  if (rclass > 1) {
+    printf("from: %d\n", rclass);
+  }
   return true;
 }
 
@@ -606,6 +621,9 @@ wi23_hard_regno_mode_ok (unsigned int regno, machine_mode mode)
 
 #undef TARGET_HARD_REGNO_MODE_OK
 #define TARGET_HARD_REGNO_MODE_OK wi23_hard_regno_mode_ok
+
+#undef TARGET_CAN_CHANGE_MODE_CLASS
+#define TARGET_CAN_CHANGE_MODE_CLASS wi23_can_change_mode_class
 
 struct gcc_target targetm = TARGET_INITIALIZER;
 

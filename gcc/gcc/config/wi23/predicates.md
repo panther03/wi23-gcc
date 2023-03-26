@@ -41,6 +41,10 @@
   return general_operand (op, mode);
 })
 
+(define_predicate "gpreg_operand"
+  (and (match_operand 0 "register_operand")
+       (match_test "REGNO_REG_CLASS(REGNO(op)) == GENERAL_REGS ")))
+
 (define_predicate "const0_operand"
   (and (match_code "const_int,const_wide_int")
        (match_test "op == CONST0_RTX (mode)")))
