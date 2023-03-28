@@ -248,7 +248,7 @@ convert_target_flags (unsigned int tflags)
 /* TODO: Split this up into finger trace levels than just insn.  */
 // TODO: trace floating point regs too
 #define WI23_TRACE_INSN(str) \
-  TRACE_INSN (scpu, "0x%08x, %s, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x", \
+  TRACE_INSN (scpu, "0x%08x: %s\nInteger Registers\t\tr0:0x%x, r1:0x%x, r2:0x%x, r3:0x%x, r4:0x%x, r5:0x%x, r6:0x%x, r7:0x%x, r8:0x%x, r9:0x%x, r10:0x%x, r11:0x%x, r12:0x%x, r13:0x%x, r14:0x%x, r15:0x%x\nFloating Point Registers\tt0:0x%x, t1:0x%x, t2:0x%x, t3:0x%x, t4:0x%x, t5:0x%x, t6:0x%x, t7:0x%x, t8:0x%x, t9:0x%x, t10:0x%x, t11:0x%x, t12:0x%x, t13:0x%x, t14:0x%x, t15:0x%x\n", \
 	      opc, str, cpu.asregs.regs[0], cpu.asregs.regs[1], \
 	      cpu.asregs.regs[2], cpu.asregs.regs[3], cpu.asregs.regs[4], \
 	      cpu.asregs.regs[5], cpu.asregs.regs[6], cpu.asregs.regs[7], \
@@ -277,6 +277,7 @@ sim_engine_run (SIM_DESC sd,
   /* Run instructions here. */
   do 
     {
+
       const wi23_opc_info_t* opcode; 
       const wi23_fnc_info_t* fncode;
 
@@ -287,6 +288,9 @@ sim_engine_run (SIM_DESC sd,
 
 
       opcode = &wi23_opc_info[XT(inst, 26, 6)];
+
+      printf("opcode: %x\n", opcode->itype);
+      fflush(stdout);
 
       // todo potential optimization if shit gets real slow: just switch directly on opcode? might be faster cause less branching
       switch (opcode->itype) {
@@ -303,72 +307,106 @@ sim_engine_run (SIM_DESC sd,
           unsigned src = cpu.asregs.regs[OP_RS(inst)];
           unsigned dst_reg = OP_RD_R(inst);
 
-          if (opcode->opcode == 0x1A) {
+          if (opcode->opcode == 0x1B) {
             fncode = &wi23_shift_fnc[XT(inst, 0, 2)];
             switch (fncode->fncode) {
               case 0x00: {
-                WI23_TRACE_INSN ("add");
                 cpu.asregs.regs[dst_reg] = src + trg;
+                WI23_TRACE_INSN ("add");
                 break;
               }
               case 0x01: {
-                WI23_TRACE_INSN ("sub");
                 cpu.asregs.regs[dst_reg] = src - trg;
+                WI23_TRACE_INSN ("sub");
                 break;
               }
               case 0x02: {
-                WI23_TRACE_INSN ("xor");
                 cpu.asregs.regs[dst_reg] = src ^ trg;
+                WI23_TRACE_INSN ("xor");
                 break;
               }
               default: {
-                WI23_TRACE_INSN ("andn");
                 cpu.asregs.regs[dst_reg] = src & ~trg;
+                WI23_TRACE_INSN ("andn");
                 break;
               }
             }
           } else {
             fncode = &wi23_arith_fnc[XT(inst, 0, 2)];
             switch (fncode->fncode) {
-              // todo implement rotates
               case 0x00: {
-                WI23_STOP();
+                cpu.asregs.regs[dst_reg] = (src << trg) | (src >> (32 - trg));
+                WI23_TRACE_INSN ("rol");
                 break;
               }
               case 0x01: {
-                WI23_TRACE_INSN ("sll");
                 cpu.asregs.regs[dst_reg] = src << trg;
+                WI23_TRACE_INSN ("sll");
                 break;
               }
               case 0x02: {
-                WI23_STOP();
+                cpu.asregs.regs[dst_reg] = (src >> trg) | (src << (32 - trg));
+                WI23_TRACE_INSN ("ror");
                 break;
               }
               default: {
-                WI23_TRACE_INSN ("srl");
                 cpu.asregs.regs[dst_reg] = src >> trg;
+                WI23_TRACE_INSN ("srl");
                 break;
               }
             }
           }
           break;
         }
-        case WI23_RF_I_DST:
+        case WI23_RF_I_DST: {
+          unsigned trg = cpu.asregs.regs[OP_RT_R(inst)];
+          unsigned src = cpu.asregs.regs[OP_RS(inst)];
+          unsigned dst_reg = OP_RD_R(inst);
+
+          switch (opcode->opcode){
+            case 0x1C: {
+              cpu.asregs.regs[dst_reg] = (src == trg);
+              WI23_TRACE_INSN ("seq");
+              break;
+            }
+            case 0x1D: {
+              cpu.asregs.regs[dst_reg] = (src < trg);
+              WI23_TRACE_INSN ("slt");
+              break;
+            }
+            case 0x1E: {
+              cpu.asregs.regs[dst_reg] = (src <= trg);
+              WI23_TRACE_INSN ("sle");
+              break;
+            }
+            default: {
+              WI23_STOP();
+              break;
+            }
+          }
+
+          break;
+
+        }
         case WI23_RF_F_DST:
         case WI23_RF_DS:
-          // only used for compare & set insns, TODO implement
+          unsigned src = cpu.asregs.regs[OP_RS(inst)];
+          unsigned dst_reg = OP_RD_R(inst);
+          // only used for compare & set insns
           // WI23_RF_DS is used for floating point conversion and btr insns
           // Also unimplemented currently
-          WI23_STOP();
+            WI23_STOP();
           break;
         case WI23_IF_DSI_Z: {
           unsigned immz = IMM_ZX(inst);
           unsigned src = cpu.asregs.regs[OP_RS(inst)];
           unsigned dst_reg = OP_RD_R(inst);
-          if (opcode->opcode == 0xA) {
+          if (opcode->opcode == 0x0A) {
             cpu.asregs.regs[dst_reg] = src ^ immz;
-          } else { // 0xB
+            WI23_TRACE_INSN ("xori");
+          } else  if (opcode->opcode == 0x0B){
             cpu.asregs.regs[dst_reg] = src & ~immz;
+            WI23_TRACE_INSN ("andni");
           }
           break;
         }
@@ -379,51 +417,84 @@ sim_engine_run (SIM_DESC sd,
           unsigned dst_reg = OP_RD_R(inst);
           switch (opcode->opcode) {
             case 0x03: {
-              WI23_TRACE_INSN ("ldcr");
               cpu.asregs.regs[dst_reg] = rlat_i(scpu, src + imms);
+              WI23_TRACE_INSN ("ldcr");
               break;
             }
             case 0x08: {
-              WI23_TRACE_INSN ("addi");
               cpu.asregs.regs[dst_reg] = src + imms;
+              WI23_TRACE_INSN ("addi");
               break;
             }
             case 0x09: {
-              WI23_TRACE_INSN ("subi");
               cpu.asregs.regs[dst_reg] = src - imms;
+              WI23_TRACE_INSN ("subi");
               break;
             }
             case 0x10: {
               unsigned dst = cpu.asregs.regs[dst_reg];
-              WI23_TRACE_INSN ("st");
               wlat(scpu, src + imms, dst);
+              WI23_TRACE_INSN ("st");
               break;
             }
             case 0x11: {
-              WI23_TRACE_INSN ("ld");
               cpu.asregs.regs[dst_reg] = rlat(scpu, src + imms);
+              WI23_TRACE_INSN ("ld");
               break;
             }
             case 0x13: {
               unsigned dst = cpu.asregs.regs[dst_reg];
-              WI23_TRACE_INSN ("stu");
               wlat(scpu, src + imms, dst);
               cpu.asregs.regs[dst_reg] = src + imms;
+              WI23_TRACE_INSN ("stu");
               break;
             }
           }
           break;
         }
-        case WI23_IF_DSI_5:
-          // idgaf rn but these are for immediate shifts
-          WI23_STOP();
+        case WI23_IF_DSI_5:{
+          unsigned int imms = IMM_SX(inst);
+          unsigned src = cpu.asregs.regs[OP_RS(inst)];
+          unsigned dst_reg = OP_RD_R(inst);
+
+          // Get the 5 leeast significant bits
+          imms = imms & 0x1F;
+
+
+          switch (opcode->opcode) {
+            case 0x14: {
+              cpu.asregs.regs[dst_reg] = (src << imms) | (src >> (32 - imms));
+              WI23_TRACE_INSN ("roli");
+              break;
+            }
+            case 0x15: {
+              cpu.asregs.regs[dst_reg] = src << imms;
+              WI23_TRACE_INSN ("slli");
+              break;
+            }
+            case 0x16: {
+              cpu.asregs.regs[dst_reg] = (src >> imms) | (src << (32 - imms));
+              WI23_TRACE_INSN ("rori");
+              break;
+            }
+            case 0x17: {
+              cpu.asregs.regs[dst_reg] = src >> imms;
+              WI23_TRACE_INSN ("srli");
+              break;
+            }
+            default: {
+              WI23_STOP();
+              break;
+            }
+          }
           break;
+      }
         case WI23_IF_SI_Z: {
           unsigned int immz = IMM_ZX(inst);
           unsigned src_reg = OP_RS(inst);
           // only one instruction for this - slbi
-          WI23_TRACE_INSN ("slbi");
           cpu.asregs.regs[src_reg] = (cpu.asregs.regs[src_reg] << 16) | immz;
+          WI23_TRACE_INSN ("slbi");
           break;
         }
         case WI23_IF_SI_S: {
@@ -431,20 +502,20 @@ sim_engine_run (SIM_DESC sd,
           unsigned src_reg = OP_RS(inst);
           switch (opcode->opcode) {
             case 0x05: {
-              WI23_TRACE_INSN("jr");
               pc = cpu.asregs.regs[src_reg] + imms;
+              WI23_TRACE_INSN("jr");
               break;
             }
             case 0x07: {
-              WI23_TRACE_INSN("jalr");
               cpu.asregs.regs[REGNUM_RA] = pc + 4;
               // - 4 to compensate for adding 4 at the end always
               pc = cpu.asregs.regs[src_reg] + imms - 4;
+              WI23_TRACE_INSN("jalr");
               break;
             }
             case 0x18: {
-              WI23_TRACE_INSN ("lbi");
               cpu.asregs.regs[src_reg] = imms;
+              WI23_TRACE_INSN ("lbi");
               break;
             }
           }
@@ -455,27 +526,27 @@ sim_engine_run (SIM_DESC sd,
           unsigned src  = cpu.asregs.regs[OP_RS(inst)];
           switch (opcode->opcode) {
             case 0x0C: {
-              WI23_TRACE_INSN("beqz");
               if (src == 0)
                 pc += imms - 4;
+              WI23_TRACE_INSN("beqz");
               break;
             }
             case 0x0D: {
-              WI23_TRACE_INSN("bnez");
               if (src != 0)
                 pc += imms - 4;
+              WI23_TRACE_INSN("bnez");
               break;
             }
             case 0x0E: {
-              WI23_TRACE_INSN("bltz");
               if (src < 0)
                 pc += imms - 4;
+              WI23_TRACE_INSN("bltz");
               break;
             }
             default:  { // 0x0F
-              WI23_TRACE_INSN("bgez");
               if (src >= 0)
                 pc += imms - 4;
+              WI23_TRACE_INSN("bgez");
               break;
             }
           }
@@ -485,22 +556,25 @@ sim_engine_run (SIM_DESC sd,
           signed int disp = D26(inst);
           switch (opcode->opcode) {
             case 0x04: {
-              WI23_TRACE_INSN("j");
               pc += disp - 4;
+              WI23_TRACE_INSN("j");
               break;
             }
             default: {
-              WI23_TRACE_INSN("jal");
               cpu.asregs.regs[REGNUM_RA] = pc + 4;
               pc += disp - 4;
+              WI23_TRACE_INSN("jal");
               break;
             }
           }
           break;
         }
         case WI23_OTHER:
-          // includes nop too which it probs shouldnt
-          sim_engine_halt (sd, scpu, NULL, pc, sim_stopped, SIM_SIGTRAP);
+          if(opcode->opcode == 0x01){
+              WI23_TRACE_INSN("nop");
+          }else {
+            sim_engine_halt (sd, scpu, NULL, pc, sim_stopped, SIM_SIGTRAP);
+          }
           break;
         default:
           WI23_STOP();
