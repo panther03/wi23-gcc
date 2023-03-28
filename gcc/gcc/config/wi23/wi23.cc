@@ -543,14 +543,12 @@ static bool
 wi23_can_change_mode_class (machine_mode from, machine_mode to,
 			    reg_class_t rclass)
 {
-  //printf("from: %d to: %d\n",from, to);
   if (rclass == FLOAT_REGS) {
-    printf("AJAJDKSHD HOLY FUCK\n");
     return false;
   }
-  if (rclass > 1) {
+  /*if (rclass > 1) {
     printf("from: %d\n", rclass);
-  }
+  }*/
   return true;
 }
 

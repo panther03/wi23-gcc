@@ -1076,10 +1076,10 @@ endif
 ifeq ($(CUSTOM_CRTIN),)
 # -x assembler-with-cpp is only needed on case-insensitive filesystem.
 crti$(objext): $(srcdir)/config/$(cpu_type)/crti.S
-	$(crt_compile) -c -x assembler-with-cpp $<
+	$(crt_compile) -P -c -x assembler-with-cpp $<
 
 crtn$(objext): $(srcdir)/config/$(cpu_type)/crtn.S
-	$(crt_compile) -c -x assembler-with-cpp $<
+	$(crt_compile) -P -c -x assembler-with-cpp $<
 endif
 
 # Build extra startfiles in the libgcc directory.
