@@ -266,7 +266,6 @@ extern int   __kernel_rem_pio2f __P((float*,float*,int,int,int,const __int32_t*)
    ints.  */
 
 #ifdef __IEEE_BIG_ENDIAN
-
 typedef union 
 {
   double value;

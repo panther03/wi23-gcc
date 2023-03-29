@@ -20,6 +20,20 @@
         "valarray": "c",
         "future": "cpp",
         "regex": "cpp",
-        "system_error": "cpp"
+        "system_error": "cpp",
+        "*.inc": "cpp",
+        "*.in": "cpp",
+        "optional": "cpp",
+        "expected": "cpp",
+        "ratio": "cpp",
+        "type_traits": "cpp",
+        "variant": "cpp",
+        "array": "cpp",
+        "functional": "cpp",
+        "tuple": "cpp",
+        "utility": "cpp",
+        "istream": "cpp",
+        "ostream": "cpp",
+        "numbers": "cpp"
     }
 }

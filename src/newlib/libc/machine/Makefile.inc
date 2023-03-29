@@ -160,6 +160,9 @@ endif
 if HAVE_LIBC_MACHINE_W65
 include %D%/w65/Makefile.inc
 endif
+if HAVE_LIBC_MACHINE_WI23
+include %D%/wi23/Makefile.inc
+endif
 if HAVE_LIBC_MACHINE_X86_64
 include %D%/x86_64/Makefile.inc
 endif

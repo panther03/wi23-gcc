@@ -1,3 +1,5 @@
+#AA AAAAAAAAAAAAAAAAa
+#! A! A! A!
 // calculate sum of 1 .. (switches) and put it in leds
 .text
 lbi r1, 0xC0

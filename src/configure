@@ -4108,7 +4108,7 @@ case "${target}" in
     noconfigdirs="$noconfigdirs ld"
     ;;
   wi23-*-*)
-    noconfigdirs="$noconfigdirs gdb gprof"
+    noconfigdirs="$noconfigdirs target-libbacktrace gdb gprof"
     ;;
   loongarch*-*-linux*)
     ;;
@@ -9249,9 +9249,9 @@ esac
 #
 # This was added primarily for the benefit for binutils-gdb who reuse
 # this configure script, but don't always have target tools available.
-if test ! -d ${srcdir}/gcc; then
-   skipdirs="${skipdirs} ${target_configdirs}"
-fi
+#if test ! -d ${srcdir}/gcc; then
+#   skipdirs="${skipdirs} ${target_configdirs}"
+#fi
 
 # Remove the entries in $skipdirs and $noconfigdirs from $configdirs,
 # $build_configdirs and $target_configdirs.

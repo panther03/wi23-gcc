@@ -368,6 +368,9 @@ case "${host_cpu}" in
   z8k)
 	machine_dir=z8k
 	;;
+  wi23*)
+    machine_dir=wi23
+	;;
   spu)
 	stdio_dir=
 	libm_machine_dir=spu

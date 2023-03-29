@@ -242,6 +242,10 @@ case "${target}" in
   nios2-*-*)
 	config_nios2=true
 	;;
+  wi23-*-*)
+	AC_CONFIG_FILES([wi23/Makefile])
+	subdirs="$subdirs wi23"
+	;;
 esac
 AC_SUBST(subdirs)
 

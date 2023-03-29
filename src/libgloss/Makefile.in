@@ -221,7 +221,8 @@ CONFIG_CLEAN_FILES = epiphany/Makefile i386/Makefile m32r/Makefile \
 	moxie/Makefile microblaze/Makefile mt/Makefile v850/Makefile \
 	visium/Makefile xc16x/Makefile xstormy16/Makefile \
 	m32c/Makefile msp430/Makefile rl78/Makefile rx/Makefile \
-	spu/Makefile tic6x/Makefile or1k/Makefile pru/Makefile
+	spu/Makefile tic6x/Makefile or1k/Makefile pru/Makefile \
+	wi23/Makefile
 CONFIG_CLEAN_VPATH_FILES =
 am__vpath_adj_setup = srcdirstrip=`echo "$(srcdir)" | sed 's|.|.|g'`;
 am__vpath_adj = case $$p in \
@@ -772,6 +773,7 @@ pdfdir = @pdfdir@
 prefix = @prefix@
 program_transform_name = @program_transform_name@
 psdir = @psdir@
+runstatedir = @runstatedir@
 sbindir = @sbindir@
 sharedstatedir = @sharedstatedir@
 srcdir = @srcdir@
@@ -1220,6 +1222,8 @@ tic6x/Makefile: $(top_builddir)/config.status $(top_srcdir)/tic6x/Makefile.in
 or1k/Makefile: $(top_builddir)/config.status $(top_srcdir)/or1k/Makefile.in
 	cd $(top_builddir) && $(SHELL) ./config.status $@
 pru/Makefile: $(top_builddir)/config.status $(top_srcdir)/pru/Makefile.in
+	cd $(top_builddir) && $(SHELL) ./config.status $@
+wi23/Makefile: $(top_builddir)/config.status $(top_srcdir)/wi23/Makefile.in
 	cd $(top_builddir) && $(SHELL) ./config.status $@
 install-multilibtoolLIBRARIES: $(multilibtool_LIBRARIES)
 	@$(NORMAL_INSTALL)

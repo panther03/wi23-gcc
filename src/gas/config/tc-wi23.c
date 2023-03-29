@@ -25,7 +25,7 @@
 
 const char comment_chars[]        = "//";
 const char line_separator_chars[] = ";";
-const char line_comment_chars[]   = "//";
+const char line_comment_chars[]   = "#";
 
 static int pending_reloc;
 static htab_t opcode_hash_table = NULL;

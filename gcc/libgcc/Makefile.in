@@ -83,7 +83,7 @@ AR = @AR@
 AR_FLAGS = rc
 
 CC = @CC@
-CFLAGS = @CFLAGS@
+CFLAGS = @CFLAGS@ -P
 RANLIB = @RANLIB@
 LN_S = @LN_S@
 
