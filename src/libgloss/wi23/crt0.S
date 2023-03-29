@@ -46,3 +46,8 @@ _start:
 
 .Lend:
 	.size	__start,(.Lend-__start)
+
+// TODO no fucking clue if this makes sense
+.globl	_exit
+_exit:
+	j _exit
