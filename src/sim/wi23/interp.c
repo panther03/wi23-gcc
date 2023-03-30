@@ -508,8 +508,7 @@ sim_engine_run (SIM_DESC sd,
             }
             case 0x07: {
               cpu.asregs.regs[REGNUM_RA] = pc + 4;
-              // - 4 to compensate for adding 4 at the end always
-              pc = cpu.asregs.regs[src_reg] + imms - 4;
+              pc = cpu.asregs.regs[src_reg] + imms;
               WI23_TRACE_INSN("jalr");
               break;
             }
@@ -527,25 +526,25 @@ sim_engine_run (SIM_DESC sd,
           switch (opcode->opcode) {
             case 0x0C: {
               if (src == 0)
-                pc += imms - 4;
+                pc += imms;
               WI23_TRACE_INSN("beqz");
               break;
             }
             case 0x0D: {
               if (src != 0)
-                pc += imms - 4;
+                pc += imms;
               WI23_TRACE_INSN("bnez");
               break;
             }
             case 0x0E: {
               if (src < 0)
-                pc += imms - 4;
+                pc += imms;
               WI23_TRACE_INSN("bltz");
               break;
             }
             default:  { // 0x0F
               if (src >= 0)
-                pc += imms - 4;
+                pc += imms;
               WI23_TRACE_INSN("bgez");
               break;
             }
@@ -556,13 +555,13 @@ sim_engine_run (SIM_DESC sd,
           signed int disp = D26(inst);
           switch (opcode->opcode) {
             case 0x04: {
-              pc += disp - 4;
+              pc += disp;
               WI23_TRACE_INSN("j");
               break;
             }
             default: {
               cpu.asregs.regs[REGNUM_RA] = pc + 4;
-              pc += disp - 4;
+              pc += disp;
               WI23_TRACE_INSN("jal");
               break;
             }
