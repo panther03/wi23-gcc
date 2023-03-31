@@ -130,8 +130,8 @@ const wi23_fnc_info_t wi23_shift_fnc[4] =
 
 const wi23_fnc_info_t wi23_float_fnc[4] =
   {
-    { 0x00, 0x3A, WI23_RF_F_FN_DST, "fadd" },
-    { 0x01, 0x3A, WI23_RF_F_FN_DST, "fsub" },
-    { 0x02, 0X3A, WI23_RF_F_FN_DST, "fmul" },
-    { 0x03, 0x3A, WI23_RF_F_FN_DST, "fdiv" }
+    { 0x00, 0x3B, WI23_RF_F_FN_DST, "fadd" },
+    { 0x01, 0x3B, WI23_RF_F_FN_DST, "fsub" },
+    { 0x02, 0X3B, WI23_RF_F_FN_DST, "fmul" },
+    { 0x03, 0x3B, WI23_RF_F_FN_DST, "fdiv" }
   };
