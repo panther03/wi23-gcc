@@ -389,7 +389,7 @@ sim_engine_run (SIM_DESC sd,
 
         }
         case WI23_RF_F_DST:
-        case WI23_RF_DS:
+        case WI23_RF_DS: {
           unsigned src = cpu.asregs.regs[OP_RS(inst)];
           unsigned dst_reg = OP_RD_R(inst);
           // only used for compare & set insns
@@ -397,6 +397,7 @@ sim_engine_run (SIM_DESC sd,
           // Also unimplemented currently
             WI23_STOP();
           break;
+        }
         case WI23_IF_DSI_Z: {
           unsigned immz = IMM_ZX(inst);
           unsigned src = cpu.asregs.regs[OP_RS(inst)];
