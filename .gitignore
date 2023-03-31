@@ -74,3 +74,6 @@ stamp-*
 /mpc*
 /gmp*
 /isl*
+
+/**a.out
+/tests/**.o
