@@ -400,6 +400,10 @@ sim_engine_run (SIM_DESC sd,
               WI23_TRACE_INSN ("sle");
               break;
             }
+            case 0x1F: {
+              WI23_TRACE_INSN ("sco -- UNIMPLEMENTED");
+              break;
+            }
             default: {
               WI23_STOP();
               break;
@@ -457,6 +461,10 @@ sim_engine_run (SIM_DESC sd,
             }
             case 0x24: {
               WI23_TRACE_INSN ("fclass -- UNIMPLEMENTED");
+              break;
+            }
+            case 0x19: {
+              WI23_TRACE_INSN ("btr -- UNIMPLEMENTED");
               break;
             }
             default : {
