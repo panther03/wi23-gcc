@@ -127,7 +127,7 @@ print_insn_wi23 (bfd_vma addr, struct disassemble_info * info)
 
 	case WI23_IF_DSI_Z:
     imm_us = IMM_ZX(iword);
-    fpr (stream, "%s\t%s, %s, %x", opcode->name,
+    fpr (stream, "%s\t%s, %s, 0x%x", opcode->name,
 	       ireg_names[OP_RD_I(iword)],
 	       ireg_names[OP_RS(iword)],
          imm_us);
@@ -153,7 +153,7 @@ print_insn_wi23 (bfd_vma addr, struct disassemble_info * info)
 	  break;
   case WI23_IF_SI_Z:
     imm_us = IMM_ZX(iword);
-    fpr (stream, "%s\t%s, %x", opcode->name,
+    fpr (stream, "%s\t%s, 0x%x", opcode->name,
 	       ireg_names[OP_RS(iword)],
          imm_us);
 	  break;
@@ -170,7 +170,7 @@ print_insn_wi23 (bfd_vma addr, struct disassemble_info * info)
 	  break;
   case WI23_IF_I:
     imm_us = IMM_ZX(iword);
-    fpr (stream, "%s\t%x", opcode->name, imm_us);
+    fpr (stream, "%s\t0x%x", opcode->name, imm_us);
 	  break;
 
   ///////////////
