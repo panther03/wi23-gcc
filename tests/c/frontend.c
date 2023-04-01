@@ -17,8 +17,6 @@ void __mulsi3() {
 
 int main() {
   vga_print_plain(0,0,"Hello World!");
-  float x = 2.0;
-  x *= 4.0;
   while(1) {
     char kb_val = poll_kb();
     if (kb_val = 0x20) {

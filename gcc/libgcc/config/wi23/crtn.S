@@ -25,7 +25,6 @@
 // fact return.  Users may put any desired instructions in those sections.
 // This file is the last thing linked into any executable.
 
-#define AAAA
 	.file		"crtn.S"
 	.section	".init"
 	ld fp, sp, 0; ld ra, sp, 4; addi sp, sp, 8; jr ra;

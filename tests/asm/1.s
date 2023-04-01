@@ -16,6 +16,10 @@ jal 0
 jal 0
 jal 0
 
+push r2
+pop r2
+spc
+
 main:
         slbi  r2,20664
         lbi  r2,-16677
