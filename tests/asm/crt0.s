@@ -14,7 +14,7 @@ _start:
     // TODO: copy initialized data over to data memory here
 	
 	spc; push ra; push fp; jal main;
-	jal _exit;
+	j _exit;
 
 // Stop the processor once we've quit the program.
 .globl	__exit

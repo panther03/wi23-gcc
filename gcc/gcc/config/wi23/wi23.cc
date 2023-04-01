@@ -477,15 +477,18 @@ wi23_load_immediate (rtx dst, int32_t i, bool high)
   // FIXME: stupid way of doing this?
   if ((i & 0xFFFF0000) == 0)
   {
-      if (high) sprintf (pattern, "slbi  %%0,%d", i);
-      else sprintf (pattern, "lbi  %%0,%d", i);
+      if (high) {
+        sprintf (pattern, "slbi  %%0,%d // low immediate high", i);
+      } else {
+        sprintf (pattern, "lbi  %%0,%d // low immediate", i);
+      }
       output_asm_insn (pattern, &dst);
   }
   else
   {
-      sprintf (pattern, "lbi  %%0,%d", i >> 16);
-      wi23_load_immediate (dst, i & 0xFFFF, true);
+      sprintf (pattern, "lbi  %%0,%d // high immediate", i >> 16);
       output_asm_insn (pattern, &dst);
+      wi23_load_immediate (dst, i & 0xFFFF, true);
    }
 
   return "";

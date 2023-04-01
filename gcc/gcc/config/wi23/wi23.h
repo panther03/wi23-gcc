@@ -73,7 +73,7 @@
 
    General-purpose
 
-   r0   - always 0
+   r0   - temporary
    r1   - argument 0
    r2   - argument 1
    r3   - argument 2
@@ -186,7 +186,7 @@ enum reg_class
 
 #define FIXED_REGISTERS		\
 { /* general */ \
-  1, 0, 0, 0, 0, 0, 0, 0,	\
+  0, 0, 0, 0, 0, 0, 0, 0,	\
   0, 0, 0, 0, 0, 0, 0, 0,	\
   0, 0, 0, 0, 0, 0, 0, 0,	\
   0, 0, 0, 0, 1, 1, 1, 1,	\

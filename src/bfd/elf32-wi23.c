@@ -285,7 +285,7 @@ wi23_elf_relocate_section (bfd *output_bfd,
 	  
 	  // lol idk anymore
 	  if (r_type == R_WI23_PCREL16_S || r_type == R_WI23_PCREL26_S) {
-		rel->r_offset -= 4;
+		rel->r_addend -= 4;
 	  }
 
       if (r_symndx < symtab_hdr->sh_info)
