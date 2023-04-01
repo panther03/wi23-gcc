@@ -289,7 +289,7 @@ sim_engine_run (SIM_DESC sd,
 
       opcode = &wi23_opc_info[XT(inst, 26, 6)];
 
-      printf("opcode: %x\n", opcode->itype);
+      printf("itype: %x\n", opcode->itype);
       fflush(stdout);
 
       // todo potential optimization if shit gets real slow: just switch directly on opcode? might be faster cause less branching
@@ -300,7 +300,28 @@ sim_engine_run (SIM_DESC sd,
         case WI23_RF_F_FN_DST:
           // TODO add support for floating point arithmetic
           fncode = &wi23_float_fnc[XT(inst, 0, 2)];
-          WI23_STOP(); // unsupported!
+          if(opcode->opcode == 0x3B){
+            switch (fncode->fncode) {
+              case 0x00: {
+                WI23_TRACE_INSN ("fadd -- UNIMPLEMENTED");
+                break;
+              }
+              case 0x01: {
+                WI23_TRACE_INSN ("fsub -- UNIMPLEMENTED");
+                break;
+              }
+              case 0x02: {
+                WI23_TRACE_INSN ("fmul -- UNIMPLEMENTED");
+                break;
+              }
+              case 0x03: {
+                WI23_TRACE_INSN ("fdiv -- UNIMPLEMENTED");
+                break;
+              }
+            }
+          }else{
+            WI23_STOP(); // unsupported!
+          }
           break;
         case WI23_RF_I_FN_DST:{
           unsigned trg = cpu.asregs.regs[OP_RT_R(inst)];
@@ -379,6 +400,10 @@ sim_engine_run (SIM_DESC sd,
               WI23_TRACE_INSN ("sle");
               break;
             }
+            case 0x1F: {
+              WI23_TRACE_INSN ("sco -- UNIMPLEMENTED");
+              break;
+            }
             default: {
               WI23_STOP();
               break;
@@ -388,14 +413,66 @@ sim_engine_run (SIM_DESC sd,
           break;
 
         }
-        case WI23_RF_F_DST:
+        case WI23_RF_F_DST: {
+          printf("opcode: %x\n", opcode->opcode);
+          fflush(stdout);
+          switch (opcode->opcode){
+            case 0x3C: {
+              WI23_TRACE_INSN ("feq -- UNIMPLEMENTED");
+              break;
+            }
+            case 0x3E: {
+              WI23_TRACE_INSN ("fle -- UNIMPLEMENTED");
+              break;
+            }
+            case 0x3F: {
+              WI23_TRACE_INSN ("flt -- UNIMPLEMENTED");
+              break;
+            }
+            default: {
+              WI23_STOP();
+              break;
+            }
+          }
+
+          break;
+        }
         case WI23_RF_DS: {
           unsigned src = cpu.asregs.regs[OP_RS(inst)];
           unsigned dst_reg = OP_RD_R(inst);
           // only used for compare & set insns
           // WI23_RF_DS is used for floating point conversion and btr insns
-          // Also unimplemented currently
-            WI23_STOP();
+          switch (opcode->opcode) {
+            case 0x20: {
+              WI23_TRACE_INSN ("icvtf -- UNIMPLEMENTED");
+              break;
+            }
+            case 0x21: {
+              WI23_TRACE_INSN ("fcvti -- UNIMPLEMENTED");
+              break;
+            }
+            case 0x22: {
+              WI23_TRACE_INSN ("imovf -- UNIMPLEMENTED");
+              break;
+            }
+            case 0x23: {
+              WI23_TRACE_INSN ("fmovi -- UNIMPLEMENTED");
+              break;
+            }
+            case 0x24: {
+              WI23_TRACE_INSN ("fclass -- UNIMPLEMENTED");
+              break;
+            }
+            case 0x19: {
+              WI23_TRACE_INSN ("btr -- UNIMPLEMENTED");
+              break;
+            }
+            default : {
+              WI23_STOP();
+              break;
+            }
+
+          }
           break;
         }
         case WI23_IF_DSI_Z: {
@@ -448,6 +525,14 @@ sim_engine_run (SIM_DESC sd,
               wlat(scpu, src + imms, dst);
               cpu.asregs.regs[dst_reg] = src + imms;
               WI23_TRACE_INSN ("stu");
+              break;
+            }
+            case 0x30: {
+              WI23_TRACE_INSN ("fst -- UNIMPLEMENTED");
+              break;
+            }
+            case 0x31: {
+              WI23_TRACE_INSN ("fld -- UNIMPLEMENTED");
               break;
             }
           }
