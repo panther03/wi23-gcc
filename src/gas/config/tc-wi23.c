@@ -103,7 +103,7 @@ md_begin (void)
   const wi23_opc_info_t *opcode;
 
   /* Insert names into hash table.  */
-  for (count = 0, opcode = wi23_opc_info; count++ < 63; opcode++) {
+  for (count = 0, opcode = wi23_opc_info; count++ < 64; opcode++) {
     str_hash_insert (opcode_hash_table, opcode->name, opcode, 0);
   }
 

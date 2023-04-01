@@ -108,6 +108,7 @@ const wi23_opc_info_t wi23_opc_info[64] =
 
     { 0x3B, WI23_RF_F_FN_DST,   "undefined3" }, // float arithmetic
     { 0x3C, WI23_RF_F_DST,      "feq" },
+    { 0x3D, WI23_ILLEGAL,       "illegal" },
     { 0x3E, WI23_RF_F_DST,      "fle" },
     { 0x3F, WI23_RF_F_DST,      "flt" }
   };
