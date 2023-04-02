@@ -29,8 +29,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-#AM_CPPFLAGS_%C% =
-
 
 
 
@@ -3087,6 +3085,7 @@ testsuite_common_CPPFLAGS = \
 @SIM_ENABLE_ARCH_v850_TRUE@v850_IGEN_TRACE = # -G omit-line-numbers # -G trace-rule-selection -G trace-rule-rejection -G trace-entries
 @SIM_ENABLE_ARCH_v850_TRUE@v850_IGEN_INSN = $(srcdir)/v850/v850.igen
 @SIM_ENABLE_ARCH_v850_TRUE@v850_IGEN_DC = $(srcdir)/v850/v850.dc
+@SIM_ENABLE_ARCH_wi23_TRUE@AM_CFLAGS_wi23 = -I/usr/include/SDL2 -D_REENTRANT
 @SIM_ENABLE_ARCH_wi23_TRUE@nodist_wi23_libsim_a_SOURCES = \
 @SIM_ENABLE_ARCH_wi23_TRUE@	wi23/modules.c
 
@@ -3103,7 +3102,8 @@ testsuite_common_CPPFLAGS = \
 @SIM_ENABLE_ARCH_wi23_TRUE@wi23_run_LDADD = \
 @SIM_ENABLE_ARCH_wi23_TRUE@	wi23/nrun.o \
 @SIM_ENABLE_ARCH_wi23_TRUE@	wi23/libsim.a \
-@SIM_ENABLE_ARCH_wi23_TRUE@	$(SIM_COMMON_LIBS)
+@SIM_ENABLE_ARCH_wi23_TRUE@	$(SIM_COMMON_LIBS) \
+@SIM_ENABLE_ARCH_wi23_TRUE@	-lSDL2 -lpthread
 
 all: $(BUILT_SOURCES) config.h
 	$(MAKE) $(AM_MAKEFLAGS) all-recursive

@@ -15,7 +15,7 @@
 ## You should have received a copy of the GNU General Public License
 ## along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-#AM_CPPFLAGS_%C% =
+AM_CFLAGS_%C% = -I/usr/include/SDL2 -D_REENTRANT
 
 nodist_%C%_libsim_a_SOURCES = \
 	%D%/modules.c
@@ -40,6 +40,7 @@ noinst_LIBRARIES += %D%/libsim.a
 %C%_run_LDADD = \
 	%D%/nrun.o \
 	%D%/libsim.a \
-	$(SIM_COMMON_LIBS)
+	$(SIM_COMMON_LIBS) \
+	-lSDL2 -lpthread
 
 noinst_PROGRAMS += %D%/run

@@ -23,5 +23,5 @@ wi23-elf-objdump -dr -S "${OBJECT_OUT}" > out/object-out.log
 wi23-elf-objdump -sdr "${ELF_OUT}" > out/exec-out.log
 if [[ ! $DEBUG ]]; then
     read -n 1 -p "Continue with simulation?"
-    wi23-elf-run -t "${ELF_OUT}" > out/trace.log 2>&1
+    wi23-elf-run "${ELF_OUT}" > out/trace.log 2>&1
 fi

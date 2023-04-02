@@ -19,6 +19,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 /* This must come before any other includes.  */
 #include "defs.h"
+#include <SDL2/SDL.h>
+#include <pthread.h>
 
 #include <fcntl.h>
 #include <signal.h>
@@ -46,6 +48,15 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 // because we are harvard architecture and have separate data/insn spaces
 #define RAM_BIAS 0x800000 
+
+SDL_Window* window = NULL;
+SDL_Surface* screenSurface = NULL;
+
+#define SCREEN_WIDTH 320
+#define SCREEN_HEIGHT 240
+
+bool shitty_y_counter_flag = false;
+
 
 // not sure where else to put this
 #define WI23_STOP() sim_engine_halt (sd, scpu, NULL, pc, sim_stopped, SIM_SIGILL);
@@ -148,8 +159,14 @@ static INLINE void
 wlat (sim_cpu *scpu, int32_t x, int32_t v)
 {
   address_word cia = CPU_PC_GET (scpu);
-	
-  sim_core_write_aligned_4 (scpu, cia, write_map, RAM_BIAS + x, v);
+  
+  printf("MY ADDRESS IS %x\n", x);
+
+  if (x == (0x6969)) {
+    shitty_y_counter_flag = !shitty_y_counter_flag;
+  } else {
+    sim_core_write_aligned_4 (scpu, cia, write_map, RAM_BIAS + x, v);
+  }  
 }
 
 /* Read 4 bytes from data memory.  */
@@ -261,18 +278,37 @@ convert_target_flags (unsigned int tflags)
 		  cpu.asregs.regs[26], cpu.asregs.regs[27], cpu.asregs.regs[28], \
 		  cpu.asregs.regs[29], cpu.asregs.regs[30], cpu.asregs.regs[31])
 
+static bool _gfx_done = false;
+
+static void *gfx_thread_update(void *arg) {
+  while (!_gfx_done) {
+    if (shitty_y_counter_flag) {
+      SDL_FillRect(screenSurface, NULL, SDL_MapRGB(screenSurface->format, 0xFF, 0x00, 0xFF));
+    } else {
+      SDL_FillRect(screenSurface, NULL, SDL_MapRGB(screenSurface->format, 0x00, 0xFF, 0x00));
+    }
+    SDL_UpdateWindowSurface(window);
+    SDL_Delay(16.666f);
+  }
+  return NULL;
+}
+
 void
 sim_engine_run (SIM_DESC sd,
 		int next_cpu_nr, /* ignore  */
 		int nr_cpus, /* ignore  */
 		int siggnal) /* ignore  */
 {
+  pthread_t gfx_thread;
+  void* gfx_thread_result;
   int32_t pc, opc;
   unsigned int inst;
   sim_cpu *scpu = STATE_CPU (sd, 0); /* FIXME <- nice fixme man bro didnt even put anything to fix */
   address_word cia = CPU_PC_GET (scpu);
 
   pc = cpu.asregs.pc;
+
+  pthread_create(&gfx_thread, NULL, gfx_thread_update, NULL);
 
   /* Run instructions here. */
   do 
@@ -478,7 +514,7 @@ sim_engine_run (SIM_DESC sd,
         case WI23_IF_DSI_Z: {
           unsigned immz = IMM_ZX(inst);
           unsigned src = cpu.asregs.regs[OP_RS(inst)];
-          unsigned dst_reg = OP_RD_R(inst);
+          unsigned dst_reg = OP_RD_I(inst);
           if (opcode->opcode == 0x0A) {
             cpu.asregs.regs[dst_reg] = src ^ immz;
             WI23_TRACE_INSN ("xori");
@@ -492,7 +528,7 @@ sim_engine_run (SIM_DESC sd,
           // TODO add the floading load/store suport here
           signed int imms = IMM_SX(inst);
           unsigned src = cpu.asregs.regs[OP_RS(inst)];
-          unsigned dst_reg = OP_RD_R(inst);
+          unsigned dst_reg = OP_RD_I(inst);
           switch (opcode->opcode) {
             case 0x03: {
               cpu.asregs.regs[dst_reg] = rlat_i(scpu, src + imms);
@@ -500,6 +536,7 @@ sim_engine_run (SIM_DESC sd,
               break;
             }
             case 0x08: {
+              printf("UHHHH %d <= %d, (%d+%d) %x\n", cpu.asregs.regs[dst_reg], src+imms, src, imms, dst_reg);
               cpu.asregs.regs[dst_reg] = src + imms;
               WI23_TRACE_INSN ("addi");
               break;
@@ -541,7 +578,7 @@ sim_engine_run (SIM_DESC sd,
         case WI23_IF_DSI_5:{
           unsigned int imms = IMM_SX(inst);
           unsigned src = cpu.asregs.regs[OP_RS(inst)];
-          unsigned dst_reg = OP_RD_R(inst);
+          unsigned dst_reg = OP_RD_I(inst);
 
           // Get the 5 leeast significant bits
           imms = imms & 0x1F;
@@ -670,8 +707,12 @@ sim_engine_run (SIM_DESC sd,
       cpu.asregs.pc = pc;
 
       if (sim_events_tick (sd))
-	      sim_events_process (sd);
-    } while (1);
+	      sim_events_process (sd);      
+      
+  } while (1);
+
+  _gfx_done = true;
+  pthread_join(gfx_thread, &gfx_thread_result);
 }
 
 static void
@@ -681,6 +722,9 @@ free_state (SIM_DESC sd)
     sim_module_uninstall (sd);
   sim_cpu_free_all (sd);
   sim_state_free (sd);
+
+  SDL_DestroyWindow(window);
+  SDL_Quit();
 }
 
 SIM_DESC
@@ -767,6 +811,24 @@ sim_create_inferior (SIM_DESC sd, struct bfd *prog_bfd,
 
   if (prog_bfd != NULL)
     cpu.asregs.pc = bfd_get_start_address (prog_bfd);
+
+  if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+    fprintf(stderr, "could not initialize sdl2: %s\n", SDL_GetError());
+    return SIM_RC_FAIL;
+  }
+  window = SDL_CreateWindow(
+			    "hello_sdl2",
+			    SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
+			    SCREEN_WIDTH, SCREEN_HEIGHT,
+			    SDL_WINDOW_SHOWN
+			    );
+  if (window == NULL) {
+    fprintf(stderr, "could not create window: %s\n", SDL_GetError());
+    return SIM_RC_FAIL;
+  }
+  screenSurface = SDL_GetWindowSurface(window);
+  SDL_FillRect(screenSurface, NULL, SDL_MapRGB(screenSurface->format, 0xFF, 0x00, 0xFF));
+  SDL_UpdateWindowSurface(window);
 
   return SIM_RC_OK;
 }
