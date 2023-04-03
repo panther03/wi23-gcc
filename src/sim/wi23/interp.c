@@ -54,6 +54,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 #define WI23_FIRST_FPR 32
 #define REGNUM_RA 30
 
+#define FP_OFFSET 16
+
 /* wi23 register names.  */
 static const char *reg_names[NUM_WI23_REGS] = { \
    /* general-purpose regs */ \
@@ -297,8 +299,15 @@ sim_engine_run (SIM_DESC sd,
         ///////////////
         // R-Format //
         //////////////
-        case WI23_RF_F_FN_DST:
+        case WI23_RF_F_FN_DST:{
           // TODO add support for floating point arithmetic
+          unsigned dst_reg;
+          float src, trg;
+          
+          dst_reg = OP_RD_R(inst);
+          trg = cpu.asregs.regs[OP_RT_R(inst) + FP_OFFSET];
+          src = cpu.asregs.regs[OP_RS(inst) + FP_OFFSET];
+          
           fncode = &wi23_float_fnc[XT(inst, 0, 2)];
           if(opcode->opcode == 0x3B){
             switch (fncode->fncode) {
@@ -323,6 +332,7 @@ sim_engine_run (SIM_DESC sd,
             WI23_STOP(); // unsupported!
           }
           break;
+        }
         case WI23_RF_I_FN_DST:{
           unsigned trg = cpu.asregs.regs[OP_RT_R(inst)];
           unsigned src = cpu.asregs.regs[OP_RS(inst)];
@@ -414,8 +424,10 @@ sim_engine_run (SIM_DESC sd,
 
         }
         case WI23_RF_F_DST: {
-          printf("opcode: %x\n", opcode->opcode);
-          fflush(stdout);
+          float trg = cpu.asregs.regs[OP_RT_R(inst) + FP_OFFSET];
+          float src = cpu.asregs.regs[OP_RS(inst) + FP_OFFSET];
+          unsigned dst_reg = OP_RD_R(inst);
+
           switch (opcode->opcode){
             case 0x3C: {
               WI23_TRACE_INSN ("feq -- UNIMPLEMENTED");
@@ -444,26 +456,38 @@ sim_engine_run (SIM_DESC sd,
           // WI23_RF_DS is used for floating point conversion and btr insns
           switch (opcode->opcode) {
             case 0x20: {
+              float src = cpu.asregs.regs[OP_RS(inst) + FP_OFFSET];
+              unsigned dst_reg = OP_RD_R(inst);
               WI23_TRACE_INSN ("icvtf -- UNIMPLEMENTED");
               break;
             }
             case 0x21: {
+              unsigned src = cpu.asregs.regs[OP_RS(inst)];
+              unsigned dst_reg = OP_RD_R(inst) + FP_OFFSET;
               WI23_TRACE_INSN ("fcvti -- UNIMPLEMENTED");
               break;
             }
             case 0x22: {
+              unsigned src = cpu.asregs.regs[OP_RS(inst) + FP_OFFSET];
+              unsigned dst_reg = OP_RD_R(inst);
               WI23_TRACE_INSN ("imovf -- UNIMPLEMENTED");
               break;
             }
             case 0x23: {
+              unsigned src = cpu.asregs.regs[OP_RS(inst)];
+              unsigned dst_reg = OP_RD_R(inst) + FP_OFFSET;
               WI23_TRACE_INSN ("fmovi -- UNIMPLEMENTED");
               break;
             }
             case 0x24: {
+              float src = cpu.asregs.regs[OP_RS(inst) + FP_OFFSET];
+              unsigned dst_reg = OP_RD_R(inst);
               WI23_TRACE_INSN ("fclass -- UNIMPLEMENTED");
               break;
             }
             case 0x19: {
+              unsigned src = cpu.asregs.regs[OP_RS(inst)];
+              unsigned dst_reg = OP_RD_R(inst);
               WI23_TRACE_INSN ("btr -- UNIMPLEMENTED");
               break;
             }
@@ -528,10 +552,16 @@ sim_engine_run (SIM_DESC sd,
               break;
             }
             case 0x30: {
+              // Convert the destination regsiter to a floating point register
+              dst_reg += FP_OFFSET;
+
               WI23_TRACE_INSN ("fst -- UNIMPLEMENTED");
               break;
             }
             case 0x31: {
+                // Convert the destination regsiter to a floating point register
+              dst_reg += FP_OFFSET;
+              
               WI23_TRACE_INSN ("fld -- UNIMPLEMENTED");
               break;
             }
