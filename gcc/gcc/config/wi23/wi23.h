@@ -22,7 +22,7 @@
 #define GCC_WI23_H
 
 #undef  STARTFILE_SPEC
-#define STARTFILE_SPEC "%{!mno-crt0:crt0%O%s} crti.o%s crtbegin.o%s"
+#define STARTFILE_SPEC ""
 
 /* Provide an ENDFILE_SPEC appropriate for svr4.  Here we tack on our own
    magical crtend.o file (see crtstuff.c) which provides part of the
@@ -31,14 +31,14 @@
    which is either `gcrtn.o' or `crtn.o'.  */
 
 #undef  ENDFILE_SPEC
-#define ENDFILE_SPEC "crtend.o%s crtn.o%s"
+#define ENDFILE_SPEC ""
 
 /* Provide a LIB_SPEC appropriate for svr4.  Here we tack on the default
    standard C library (unless we are building a shared library) and
    the simulator BSP code.  */
 
 #undef LIB_SPEC
-#define LIB_SPEC "%{!shared:%{!symbolic:-lc}}"
+#define LIB_SPEC ""
 
 #undef  LINK_SPEC
 #define LINK_SPEC "%{h*} %{v:-V}\
@@ -73,7 +73,7 @@
 
    General-purpose
 
-   r0   - always 0
+   r0   - temporary
    r1   - argument 0
    r2   - argument 1
    r3   - argument 2
@@ -186,7 +186,7 @@ enum reg_class
 
 #define FIXED_REGISTERS		\
 { /* general */ \
-  1, 0, 0, 0, 0, 0, 0, 0,	\
+  0, 0, 0, 0, 0, 0, 0, 0,	\
   0, 0, 0, 0, 0, 0, 0, 0,	\
   0, 0, 0, 0, 0, 0, 0, 0,	\
   0, 0, 0, 0, 1, 1, 1, 1,	\

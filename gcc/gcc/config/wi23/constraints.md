@@ -32,6 +32,12 @@
 	    (match_test "GET_CODE (XEXP (op, 0)) == LABEL_REF")
 	    (match_test "GET_CODE (XEXP (op, 0)) == CONST"))))
 
+(define_constraint "T"
+  "a symbol or smth idrk"
+  (and (match_test "satisfies_constraint_i(op)")
+    (ior (match_code "label_ref")
+    (match_code "symbol_ref"))))
+
 (define_memory_constraint "B"
   "An offset address."
   (and (match_code "mem")

@@ -478,7 +478,7 @@ sim_engine_run (SIM_DESC sd,
         case WI23_IF_DSI_Z: {
           unsigned immz = IMM_ZX(inst);
           unsigned src = cpu.asregs.regs[OP_RS(inst)];
-          unsigned dst_reg = OP_RD_R(inst);
+          unsigned dst_reg = OP_RD_I(inst);
           if (opcode->opcode == 0x0A) {
             cpu.asregs.regs[dst_reg] = src ^ immz;
             WI23_TRACE_INSN ("xori");
@@ -492,7 +492,7 @@ sim_engine_run (SIM_DESC sd,
           // TODO add the floading load/store suport here
           signed int imms = IMM_SX(inst);
           unsigned src = cpu.asregs.regs[OP_RS(inst)];
-          unsigned dst_reg = OP_RD_R(inst);
+          unsigned dst_reg = OP_RD_I(inst);
           switch (opcode->opcode) {
             case 0x03: {
               cpu.asregs.regs[dst_reg] = rlat_i(scpu, src + imms);
@@ -541,7 +541,7 @@ sim_engine_run (SIM_DESC sd,
         case WI23_IF_DSI_5:{
           unsigned int imms = IMM_SX(inst);
           unsigned src = cpu.asregs.regs[OP_RS(inst)];
-          unsigned dst_reg = OP_RD_R(inst);
+          unsigned dst_reg = OP_RD_I(inst);
 
           // Get the 5 leeast significant bits
           imms = imms & 0x1F;

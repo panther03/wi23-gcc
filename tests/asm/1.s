@@ -16,41 +16,56 @@ jal 0
 jal 0
 jal 0
 
+push r2
+pop r2
+spc
+
 main:
         slbi  r2,20664
         lbi  r2,-16677
         addi r1, r0, 0
         addi r0, r1, 0
         jal 0; stu ra, sp, -4; stu fp, sp, -4; jal vga_print_plain;
-        lbi r6,$h:PS2_KEY_AWAIT; slbi r6,PS2_KEY_AWAIT; ld r6, r6, 0;
+        lbi r6,$h:anothertest;
+        slbi r6,anothertest; ld r6, r6, 0;
 
 
 .loop:
 ld r2, r1, 1
-st r2, r4 // set r3 to r2
+st r2, r4,0
+// set r3 to r2
 // now r2 contains the state of the switches
 // calculate the sum
 beqz r2, .done
 .fac:
 addi r2, r2, -1
 fld f0, r0, test
-ld r3, r4
+ld r3, r4, 0
 add r3, r3, r2
 st r3, r4, 0
 bnez r2, .fac
+vga_print_plain:
 .done: 
-ld r3, r4
+ld r3, r4,0 
 st r3, r1, 0
 j .loop
 jal 0
+.org 0x00010000U
+anothertest:
+j anothertest
+
 .data
 test:
 .float 0f-314841971.693993751E-40 
 moretest:
 .ascii "HI!!!!!"
-
-PS2_KEY:
-        .long   45056
+        .global	PS2_KEY_AWAIT
+	.data
+	.p2align	2
+	.type	PS2_KEY_AWAIT, @object
+	.size	PS2_KEY_AWAIT, 4
+PS2_KEY_AWAIT:
+	.long	45060
         .global VGA_TEXT_BUFFER
         .section        .bss,"aw",@nobits
         .p2align        2
