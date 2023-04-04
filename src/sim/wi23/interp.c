@@ -826,6 +826,7 @@ sim_engine_run (SIM_DESC sd,
 
 
       // Wait for a key to be pressed to proceed to the next instruction
+      printf("\nPress any key to increment to the next instruction\n");
       getchar();
 
     } while (1);
