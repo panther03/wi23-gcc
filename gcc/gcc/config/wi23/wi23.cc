@@ -285,7 +285,7 @@ wi23_compute_frame (void)
 
   cfun->machine->local_vars_size += padding_locals;
 
-  cfun->machine->callee_saved_reg_size = 0;
+  cfun->machine->callee_saved_reg_size = 8;
 
   /* Save callee-saved registers.  */
   for (regno = 0; regno < FIRST_PSEUDO_REGISTER; regno++)
@@ -310,6 +310,10 @@ wi23_expand_prologue (void)
   if (flag_stack_usage_info)
     current_function_static_stack_size = cfun->machine->size_for_adjusting_sp;
 
+  insn = emit_insn (gen_movsi_push (gen_rtx_REG (Pmode, RA_REGNUM)));
+	RTX_FRAME_RELATED_P (insn) = 1;
+  insn = emit_insn (gen_movsi_push (gen_rtx_REG (Pmode, FP_REGNUM)));
+	RTX_FRAME_RELATED_P (insn) = 1;
   /* Save callee-saved registers.  */
   for (regno = 0; regno < FIRST_PSEUDO_REGISTER; regno++)
     {
@@ -360,6 +364,9 @@ wi23_expand_epilogue (void)
         emit_insn (gen_movsi_pop (preg));
       }
     }
+
+    emit_insn (gen_movsi_pop (gen_rtx_REG (Pmode, FP_REGNUM)));
+    emit_insn (gen_movsi_pop (gen_rtx_REG (Pmode, RA_REGNUM)));
   }
 
   emit_jump_insn (gen_returner ());

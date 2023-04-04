@@ -66,14 +66,14 @@ const wi23_opc_info_t wi23_opc_info[64] =
     { 0x17, WI23_IF_DSI_5,    "srli" },
 
     { 0x18, WI23_IF_SI_S,     "lbi" },
-    { 0x19, WI23_RF_DS,       "btr" },
-    { 0x1A, WI23_RF_I_FN_DST,   "undefined1" }, // shift
-    { 0x1B, WI23_RF_I_FN_DST,   "undefined2" }, // arithmetic
+    { 0x19, WI23_IF_DSI_Z,    "andi" },
+    { 0x1A, WI23_RF_I_FN_DST, "x" }, // shift
+    { 0x1B, WI23_RF_I_FN_DST, "x" }, // arithmetic
 
-    { 0x1C, WI23_RF_I_DST,      "seq" },
-    { 0x1D, WI23_RF_I_DST,      "slt" },
-    { 0x1E, WI23_RF_I_DST,      "sle" },
-    { 0x1F, WI23_RF_I_DST,      "sco" },
+    { 0x1C, WI23_RF_I_DST,     "seq" },
+    { 0x1D, WI23_RF_I_FN_DST, "x" }, // Less than
+    { 0x1E, WI23_RF_I_FN_DST, "x" }, // Less than or equal to
+    { 0x1F, WI23_RF_I_FN_DST, "x" }, // Logical operators (AND/OR)
 
     { 0x20, WI23_RF_DS,       "icvtf" },
     { 0x21, WI23_RF_DS,       "fcvti" },
@@ -86,7 +86,7 @@ const wi23_opc_info_t wi23_opc_info[64] =
     { 0x27, WI23_ILLEGAL,     "illegal" },
     { 0x28, WI23_ILLEGAL,     "illegal" },
     { 0x29, WI23_ILLEGAL,     "illegal" },
-    { 0x2A, WI23_ILLEGAL,     "illegal" },
+    { 0x2A, WI23_IF_DSI_S,     "xorsi" },
     { 0x2B, WI23_ILLEGAL,     "illegal" },
     { 0x2C, WI23_ILLEGAL,     "illegal" },
     { 0x2D, WI23_ILLEGAL,     "illegal" },
@@ -96,17 +96,17 @@ const wi23_opc_info_t wi23_opc_info[64] =
     { 0x30, WI23_IF_DSI_S,    "fst" },
     { 0x31, WI23_IF_DSI_S,    "fld" },
 
-    { 0x32, WI23_ILLEGAL,     "illegal" },
-    { 0x33, WI23_ILLEGAL,     "illegal" },
-    { 0x34, WI23_ILLEGAL,     "illegal" },
-    { 0x35, WI23_ILLEGAL,     "illegal" },
+    { 0x32, WI23_IF_DSI_S,     "stb" },
+    { 0x33, WI23_IF_DSI_S,     "ldb" },
+    { 0x34, WI23_IF_DSI_S,     "sth" },
+    { 0x35, WI23_IF_DSI_S,     "ldh" },
     { 0x36, WI23_ILLEGAL,     "illegal" },
-    { 0x37, WI23_ILLEGAL,     "illegal" },
-    { 0x38, WI23_ILLEGAL,     "illegal" },
+    { 0x37, WI23_IF_DSI_5,     "srai" },
+    { 0x38, WI23_IF_DSI_Z,     "ori" },
     { 0x39, WI23_ILLEGAL,     "illegal" },
-    { 0x3A, WI23_ILLEGAL,     "illegal" },
+    { 0x3A, WI23_RF_I_DST,     "sra" },
 
-    { 0x3B, WI23_RF_F_FN_DST,   "undefined3" }, // float arithmetic
+    { 0x3B, WI23_RF_F_FN_DST,   "x" }, // float arithmetic
     { 0x3C, WI23_RF_F_DST,      "feq" },
     { 0x3D, WI23_ILLEGAL,       "illegal" },
     { 0x3E, WI23_RF_F_DST,      "fle" },
@@ -122,17 +122,41 @@ const wi23_fnc_info_t wi23_arith_fnc[4] =
   };
 
 const wi23_fnc_info_t wi23_shift_fnc[4] =
-  {
-    { 0x00, 0x1A, WI23_RF_I_FN_DST, "rol" },
-    { 0x01, 0x1A, WI23_RF_I_FN_DST, "sll" },
-    { 0x02, 0X1A, WI23_RF_I_FN_DST, "ror" },
-    { 0x03, 0x1A, WI23_RF_I_FN_DST, "srl" }
-  };
+{
+  { 0x00, 0x1A, WI23_RF_I_FN_DST, "rol" },
+  { 0x01, 0x1A, WI23_RF_I_FN_DST, "sll" },
+  { 0x02, 0X1A, WI23_RF_I_FN_DST, "ror" },
+  { 0x03, 0x1A, WI23_RF_I_FN_DST, "srl" }
+};
+
+const wi23_fnc_info_t wi23_logic_fnc[4] =
+{
+  { 0x00, 0x1F, WI23_RF_I_FN_DST, "and" },
+  { 0x01, 0x1F, WI23_RF_I_FN_DST, "or" },
+  { 0x02, 0x1F, WI23_ILLEGAL, "illegal" },
+  { 0x03, 0x1F, WI23_RF_I_FN_DST, "illegal" }
+};
+
+const wi23_fnc_info_t wi23_cmplt_fnc[4] =
+{
+  { 0x00, 0x1D, WI23_RF_I_FN_DST, "slt" },
+  { 0x01, 0x1D, WI23_RF_I_FN_DST, "sltu" },
+  { 0x02, 0x1D, WI23_ILLEGAL, "illegal" },
+  { 0x03, 0x1D, WI23_ILLEGAL, "illegal" },
+};
+
+const wi23_fnc_info_t wi23_cmple_fnc[4] =
+{
+  { 0x00, 0x1E, WI23_RF_I_FN_DST, "sle" },
+  { 0x01, 0x1E, WI23_RF_I_FN_DST, "sleu" },
+  { 0x02, 0x1E, WI23_ILLEGAL, "illegal" },
+  { 0x03, 0x1E, WI23_ILLEGAL, "illegal" },
+};
 
 const wi23_fnc_info_t wi23_float_fnc[4] =
-  {
-    { 0x00, 0x3B, WI23_RF_F_FN_DST, "fadd" },
-    { 0x01, 0x3B, WI23_RF_F_FN_DST, "fsub" },
-    { 0x02, 0X3B, WI23_RF_F_FN_DST, "fmul" },
-    { 0x03, 0x3B, WI23_RF_F_FN_DST, "fdiv" }
-  };
+{
+  { 0x00, 0x3B, WI23_RF_F_FN_DST, "fadd" },
+  { 0x01, 0x3B, WI23_RF_F_FN_DST, "fsub" },
+  { 0x02, 0X3B, WI23_RF_F_FN_DST, "fmul" },
+  { 0x03, 0x3B, WI23_RF_F_FN_DST, "fdiv" }
+};

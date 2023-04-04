@@ -45,12 +45,16 @@ static htab_t regnames_hash_table = NULL;
 #define WI23_PSEUDO_POP     0x502
 #define WI23_PSEUDO_FPUSH    0x503
 #define WI23_PSEUDO_FPOP     0x504
+#define WI23_PSEUDO_RET     0x505
+//#define WI23_PSEUDO_CALL    0x506
 
 const wi23_opc_info_t wi23_pseudo_save_pc_op = { 0x00, WI23_PSEUDO_SAVE_PC, "spc" };
 const wi23_opc_info_t wi23_pseudo_push_op = { 0x00, WI23_PSEUDO_PUSH, "push" };
 const wi23_opc_info_t wi23_pseudo_pop_op = { 0x00, WI23_PSEUDO_POP, "pop" };
 const wi23_opc_info_t wi23_pseudo_fpush_op = { 0x00, WI23_PSEUDO_FPUSH, "fpush" };
 const wi23_opc_info_t wi23_pseudo_fpop_op = { 0x00, WI23_PSEUDO_FPOP, "fpop" };
+const wi23_opc_info_t wi23_pseudo_ret_op = { 0x00, WI23_PSEUDO_RET, "ret" };
+//const wi23_opc_info_t wi23_pseudo_call_op = { 0x00, WI23_PSEUDO_CALL, "call" };
 
 // Borrowed from tc-riscv.c
 
@@ -114,6 +118,7 @@ md_begin (void)
   str_hash_insert(opcode_hash_table, wi23_pseudo_pop_op.name,  &wi23_pseudo_pop_op, 0);
   str_hash_insert(opcode_hash_table, wi23_pseudo_fpush_op.name,  &wi23_pseudo_fpush_op, 0);
   str_hash_insert(opcode_hash_table, wi23_pseudo_fpop_op.name,  &wi23_pseudo_fpop_op, 0);
+  str_hash_insert(opcode_hash_table, wi23_pseudo_ret_op.name,  &wi23_pseudo_ret_op, 0);
 
   ///////////////////
   // FNCODE TABLE //
@@ -131,6 +136,12 @@ md_begin (void)
   for (count = 0, fncode = wi23_arith_fnc; count++ < 4; fncode++)
     str_hash_insert (fncode_hash_table, fncode->name, fncode, 0);
   for (count = 0, fncode = wi23_float_fnc; count++ < 4; fncode++)
+    str_hash_insert (fncode_hash_table, fncode->name, fncode, 0);
+  for (count = 0, fncode = wi23_logic_fnc; count++ < 4; fncode++)
+    str_hash_insert (fncode_hash_table, fncode->name, fncode, 0);
+  for (count = 0, fncode = wi23_cmple_fnc; count++ < 4; fncode++)
+    str_hash_insert (fncode_hash_table, fncode->name, fncode, 0);
+  for (count = 0, fncode = wi23_cmplt_fnc; count++ < 4; fncode++)
     str_hash_insert (fncode_hash_table, fncode->name, fncode, 0);
 
   //////////////////////////
@@ -273,7 +284,6 @@ md_assemble (char *str)
   if (flag_debug) printf("insn: type = %x, name = %s\n", itype, op_start);
 
   *op_end = pend;
-
 
   switch (itype)
   {
@@ -564,12 +574,26 @@ md_assemble (char *str)
       // Saving RA in the process
       iword = (0x06 << 26);
       break;
+    case WI23_PSEUDO_RET:
+      iword = (0x05 << 26) | (30 << 21);
+      break;
+    /*case WI23_PSEUDO_CALL:
+      iword = (0x07 << 26);
+      while (ISSPACE (*op_end)) op_end++;
+      {
+        int dst;
+
+        dst = parse_register_operand (&op_end, RCLASS_GPR);
+
+        iword |= (dst << 21);
+      }
+      break;*/
 
     ////////////
     // Other //
     //////////
     case WI23_OTHER:
-    iword = (opcode->opcode << 26);;
+    iword = (opcode->opcode << 26);
     break;
     default:
       abort ();

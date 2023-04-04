@@ -13,7 +13,7 @@ _start:
 
     // TODO: copy initialized data over to data memory here
 	
-	spc; push ra; push fp; jal main;
+	jal main;
 	j _exit;
 
 // Stop the processor once we've quit the program.
