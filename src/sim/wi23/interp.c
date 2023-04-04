@@ -329,18 +329,22 @@ sim_engine_run (SIM_DESC sd,
           if(opcode->opcode == 0x3B){
             switch (fncode->fncode) {
               case 0x00: {
+                cpu.asregs.regs[dst_reg + FP_OFFSET] = src + trg;
                 WI23_TRACE_INSN ("fadd -- UNIMPLEMENTED");
                 break;
               }
               case 0x01: {
+                cpu.asregs.regs[dst_reg + FP_OFFSET] = trg - src;
                 WI23_TRACE_INSN ("fsub -- UNIMPLEMENTED");
                 break;
               }
               case 0x02: {
+                cpu.asregs.regs[dst_reg + FP_OFFSET] = trg * src;
                 WI23_TRACE_INSN ("fmul -- UNIMPLEMENTED");
                 break;
               }
               case 0x03: {
+                cpu.asregs.regs[dst_reg + FP_OFFSET] = trg / src;
                 WI23_TRACE_INSN ("fdiv -- UNIMPLEMENTED");
                 break;
               }
@@ -478,12 +482,15 @@ sim_engine_run (SIM_DESC sd,
             case 0x20: {
               float src = cpu.asregs.regs[OP_RS(inst) + FP_OFFSET];
               unsigned dst_reg = OP_RD_R(inst);
+              
               WI23_TRACE_INSN ("icvtf -- UNIMPLEMENTED");
               break;
             }
             case 0x21: {
               unsigned src = cpu.asregs.regs[OP_RS(inst)];
               unsigned dst_reg = OP_RD_R(inst) + FP_OFFSET;
+
+              //cpu.asregs.regs[dst_reg + FP_OFFSET] = (float)src;
               WI23_TRACE_INSN ("fcvti -- UNIMPLEMENTED");
               break;
             }
