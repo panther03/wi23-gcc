@@ -823,6 +823,11 @@ sim_engine_run (SIM_DESC sd,
 
       if (sim_events_tick (sd))
 	      sim_events_process (sd);
+
+
+      // Wait for a key to be pressed to proceed to the next instruction
+      getchar();
+
     } while (1);
 }
 
