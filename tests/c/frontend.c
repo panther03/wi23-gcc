@@ -11,19 +11,10 @@ const int *VGA_TEXT_BUFFER = 0x00000000;
 const int *PS2_KEY         = 0x0000B000;
 int *PS2_KEY_AWAIT   = 0x0000B004;
 
-void __mulsi3() {
-	return;
-}
+//void __mulsi3() {
+//	return;
+//}
 
-int main() {
-  vga_print_plain(0,0,"Hello World!");
-  while(1) {
-    char kb_val = poll_kb();
-    if (kb_val == 0x20) {
-      vga_print_plain(0,1,"SPACEBAR Pressed!");
-    }
-  }
-}
 
 // Grab the keycode from the MM'd address that connects to the KB
 char poll_kb() {
@@ -31,7 +22,9 @@ char poll_kb() {
     // set flag down: we may grab a new char
     *PS2_KEY_AWAIT = 0;
     return *PS2_KEY;
-  } else return 0;
+  } else  {
+    return 0;
+  }
 }
 
 // Print to the MM'd data
@@ -61,4 +54,16 @@ void vga_print_plain(int x, int y, const char* msg_data) {
     // shift 16 bits next
     i += 2;
   }
+}
+
+__attribute__((section(".text")))
+int main() {
+  vga_print_plain(0,0,L"Hello World!");
+  /*while(1) {
+    char kb_val = poll_kb();
+    if (kb_val == 0x20) {
+      vga_print_plain(0,1,L"SPACEBAR Pressed!");
+    }
+  }*/
+  return 0;
 }

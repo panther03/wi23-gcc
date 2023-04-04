@@ -34,6 +34,7 @@
         "utility": "cpp",
         "istream": "cpp",
         "ostream": "cpp",
-        "numbers": "cpp"
+        "numbers": "cpp",
+        "sim-options.h": "c"
     }
 }

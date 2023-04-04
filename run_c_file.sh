@@ -16,11 +16,11 @@ if [[ $DEBUG ]]; then
     cd ../../
 fi
 
-wi23-elf-gcc $1 -c -g -o "${OBJECT_OUT}"
+wi23-elf-gcc -O2 $1 -c -g -o "${OBJECT_OUT}"
 wi23-elf-ld out/crt0.o -o "${ELF_OUT}" "${OBJECT_OUT}"
 wi23-elf-objdump -dr "out/crt0.o" > out/crt0-out.log
 wi23-elf-objdump -dr -S "${OBJECT_OUT}" > out/object-out.log
-wi23-elf-objdump -sdr "${ELF_OUT}" > out/exec-out.log
+wi23-elf-objdump -sdr -S "${ELF_OUT}" > out/exec-out.log
 if [[ ! $DEBUG ]]; then
     read -n 1 -p "Continue with simulation?"
     wi23-elf-run -t "${ELF_OUT}" > out/trace.log 2>&1
