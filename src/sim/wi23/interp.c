@@ -29,6 +29,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 #include "bfd.h"
 #include "libiberty.h"
 #include "sim/sim.h"
+#include <stdio.h>
+#include <math.h>
 
 #include "sim-main.h"
 #include "sim-base.h"
@@ -274,6 +276,8 @@ sim_engine_run (SIM_DESC sd,
   sim_cpu *scpu = STATE_CPU (sd, 0); /* FIXME <- nice fixme man bro didnt even put anything to fix */
   address_word cia = CPU_PC_GET (scpu);
 
+  char * dmem = malloc(pow(2, 32));
+
   pc = cpu.asregs.pc;
 
   /* Run instructions here. */
@@ -291,7 +295,7 @@ sim_engine_run (SIM_DESC sd,
 
       opcode = &wi23_opc_info[XT(inst, 26, 6)];
 
-      printf("itype: %x\n", opcode->itype);
+      printf("isntruction: %x\n", inst);
       fflush(stdout);
 
       // todo potential optimization if shit gets real slow: just switch directly on opcode? might be faster cause less branching
@@ -520,6 +524,7 @@ sim_engine_run (SIM_DESC sd,
           switch (opcode->opcode) {
             case 0x03: {
               cpu.asregs.regs[dst_reg] = rlat_i(scpu, src + imms);
+
               WI23_TRACE_INSN ("ldcr");
               break;
             }
@@ -535,18 +540,21 @@ sim_engine_run (SIM_DESC sd,
             }
             case 0x10: {
               unsigned dst = cpu.asregs.regs[dst_reg];
-              wlat(scpu, src + imms, dst);
+              //wlat(scpu, src + imms, dst);
+              dmem[src + imms] = dst;
               WI23_TRACE_INSN ("st");
               break;
             }
             case 0x11: {
-              cpu.asregs.regs[dst_reg] = rlat(scpu, src + imms);
+              //cpu.asregs.regs[dst_reg] = rlat(scpu, src + imms);
+              cpu.asregs.regs[dst_reg] = dmem[src + imms];
               WI23_TRACE_INSN ("ld");
               break;
             }
             case 0x13: {
               unsigned dst = cpu.asregs.regs[dst_reg];
-              wlat(scpu, src + imms, dst);
+              //wlat(scpu, src + imms, dst);
+              dmem[src+imms] = dst;
               cpu.asregs.regs[dst_reg] = src + imms;
               WI23_TRACE_INSN ("stu");
               break;
