@@ -386,7 +386,7 @@ sim_engine_run (SIM_DESC sd,
                 break;
               }
             }
-          } else {
+          } else if (opcode->opcode == 0x1A) {
             fncode = &wi23_arith_fnc[XT(inst, 0, 2)];
             switch (fncode->fncode) {
               case 0x00: {
@@ -407,6 +407,20 @@ sim_engine_run (SIM_DESC sd,
               default: {
                 cpu.asregs.regs[dst_reg] = src >> trg;
                 WI23_TRACE_INSN ("srl");
+                break;
+              }
+            }
+          } else if (opcode->opcode == 0x1F) {
+            fncode = &wi23_arith_fnc[XT(inst, 0, 2)];
+            switch (fncode->fncode) {
+              case 0x00: {
+                cpu.asregs.regs[dst_reg] = (src & trg);
+                WI23_TRACE_INSN ("and");
+                break;
+              }
+              case 0x01: {
+                cpu.asregs.regs[dst_reg] = src | trg;
+                WI23_TRACE_INSN ("or");
                 break;
               }
             }
@@ -446,10 +460,6 @@ sim_engine_run (SIM_DESC sd,
                 cpu.asregs.regs[dst_reg] = ((unsigned)src <= (unsigned)trg);
                 WI23_TRACE_INSN ("sleu");
               }
-            }
-            case 0x1F: {
-              WI23_TRACE_INSN ("sco -- UNIMPLEMENTED");
-              break;
             }
             case 0x3A: {
               cpu.asregs.regs[dst_reg] = ((int32_t)src >> trg);
@@ -530,12 +540,6 @@ sim_engine_run (SIM_DESC sd,
               WI23_TRACE_INSN ("fclass -- UNIMPLEMENTED");
               break;
             }
-            case 0x19: {
-              unsigned src = cpu.asregs.regs[OP_RS(inst)];
-              unsigned dst_reg = OP_RD_R(inst);
-              WI23_TRACE_INSN ("btr -- UNIMPLEMENTED");
-              break;
-            }
             default : {
               WI23_STOP();
               break;
@@ -554,7 +558,13 @@ sim_engine_run (SIM_DESC sd,
           } else  if (opcode->opcode == 0x0B){
             cpu.asregs.regs[dst_reg] = src & ~immz;
             WI23_TRACE_INSN ("andni");
-          }
+          } else  if (opcode->opcode == 0x19){
+            cpu.asregs.regs[dst_reg] = src & immz;
+            WI23_TRACE_INSN ("andi");
+          } else  if (opcode->opcode == 0x38){
+            cpu.asregs.regs[dst_reg] = src | immz;
+            WI23_TRACE_INSN ("ori");
+          } 
           break;
         }
         case WI23_IF_DSI_S: {
