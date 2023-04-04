@@ -2,6 +2,10 @@ int myint;
 short myshort;
 double mydouble;
 
+void __mulsi3() {
+  return;
+}
+
 int sumUpTo(int n) {
   int i = 0;
   int sum = 0;

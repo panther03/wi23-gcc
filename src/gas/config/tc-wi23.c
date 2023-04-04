@@ -35,6 +35,27 @@ static htab_t regnames_hash_table = NULL;
 #define VERY_BAD_CHECK_FOR_S_FREG(opcode) ((opcode->opcode == 0x20) || (opcode->opcode == 0x22) || (opcode->opcode == 0x24))
 #define VERY_BAD_CHECK_FOR_D_FREG(opcode) ((opcode->opcode == 0x21) || (opcode->opcode == 0x23))
 
+// This is a really scuffed way of handling pseudo-ops but it's how we're doing it.
+// Each pseudo op has its own itype, just like how normally instruction formats have
+// an itype defined in opcode/wi23.h 
+// The types here are matched against in the switch-case
+
+#define WI23_PSEUDO_SAVE_PC 0x500
+#define WI23_PSEUDO_PUSH    0x501
+#define WI23_PSEUDO_POP     0x502
+#define WI23_PSEUDO_FPUSH    0x503
+#define WI23_PSEUDO_FPOP     0x504
+#define WI23_PSEUDO_RET     0x505
+//#define WI23_PSEUDO_CALL    0x506
+
+const wi23_opc_info_t wi23_pseudo_save_pc_op = { 0x00, WI23_PSEUDO_SAVE_PC, "spc" };
+const wi23_opc_info_t wi23_pseudo_push_op = { 0x00, WI23_PSEUDO_PUSH, "push" };
+const wi23_opc_info_t wi23_pseudo_pop_op = { 0x00, WI23_PSEUDO_POP, "pop" };
+const wi23_opc_info_t wi23_pseudo_fpush_op = { 0x00, WI23_PSEUDO_FPUSH, "fpush" };
+const wi23_opc_info_t wi23_pseudo_fpop_op = { 0x00, WI23_PSEUDO_FPOP, "fpop" };
+const wi23_opc_info_t wi23_pseudo_ret_op = { 0x00, WI23_PSEUDO_RET, "ret" };
+//const wi23_opc_info_t wi23_pseudo_call_op = { 0x00, WI23_PSEUDO_CALL, "call" };
+
 // Borrowed from tc-riscv.c
 
 /* All WI-23 registers belong to one of these classes.  */
@@ -86,9 +107,18 @@ md_begin (void)
   const wi23_opc_info_t *opcode;
 
   /* Insert names into hash table.  */
-  for (count = 0, opcode = wi23_opc_info; count++ < 63; opcode++) {
+  for (count = 0, opcode = wi23_opc_info; count++ < 64; opcode++) {
     str_hash_insert (opcode_hash_table, opcode->name, opcode, 0);
   }
+
+  // put pseudo ops in here
+
+  str_hash_insert(opcode_hash_table, wi23_pseudo_save_pc_op.name, &wi23_pseudo_save_pc_op, 0);
+  str_hash_insert(opcode_hash_table, wi23_pseudo_push_op.name,  &wi23_pseudo_push_op, 0);
+  str_hash_insert(opcode_hash_table, wi23_pseudo_pop_op.name,  &wi23_pseudo_pop_op, 0);
+  str_hash_insert(opcode_hash_table, wi23_pseudo_fpush_op.name,  &wi23_pseudo_fpush_op, 0);
+  str_hash_insert(opcode_hash_table, wi23_pseudo_fpop_op.name,  &wi23_pseudo_fpop_op, 0);
+  str_hash_insert(opcode_hash_table, wi23_pseudo_ret_op.name,  &wi23_pseudo_ret_op, 0);
 
   ///////////////////
   // FNCODE TABLE //
@@ -106,6 +136,12 @@ md_begin (void)
   for (count = 0, fncode = wi23_arith_fnc; count++ < 4; fncode++)
     str_hash_insert (fncode_hash_table, fncode->name, fncode, 0);
   for (count = 0, fncode = wi23_float_fnc; count++ < 4; fncode++)
+    str_hash_insert (fncode_hash_table, fncode->name, fncode, 0);
+  for (count = 0, fncode = wi23_logic_fnc; count++ < 4; fncode++)
+    str_hash_insert (fncode_hash_table, fncode->name, fncode, 0);
+  for (count = 0, fncode = wi23_cmple_fnc; count++ < 4; fncode++)
+    str_hash_insert (fncode_hash_table, fncode->name, fncode, 0);
+  for (count = 0, fncode = wi23_cmplt_fnc; count++ < 4; fncode++)
     str_hash_insert (fncode_hash_table, fncode->name, fncode, 0);
 
   //////////////////////////
@@ -207,6 +243,7 @@ md_assemble (char *str)
   char pend;
 
   unsigned int iword = 0;
+  unsigned int next_iword = 0;
 
   int nlen = 0;
 
@@ -225,7 +262,7 @@ md_assemble (char *str)
   *op_end = 0;
 
   if (nlen == 0)
-    as_bad (_("can't find opcode "));
+    as_bad (_("can't find instruction "));
   opcode = (wi23_opc_info_t *) str_hash_find (opcode_hash_table, op_start);
 
   if (opcode == NULL)
@@ -234,7 +271,7 @@ md_assemble (char *str)
     fncode = (wi23_fnc_info_t *) str_hash_find (fncode_hash_table, op_start);
 
     if (fncode == NULL) {
-      as_bad (_("unknown opcode %s"), op_start);
+      as_bad (_("unknown instruction %s"), op_start);
       return;
     }
     itype = fncode->itype;
@@ -247,7 +284,6 @@ md_assemble (char *str)
   if (flag_debug) printf("insn: type = %x, name = %s\n", itype, op_start);
 
   *op_end = pend;
-
 
   switch (itype)
   {
@@ -475,11 +511,89 @@ md_assemble (char *str)
       }
       break;
 
+    /////////////////
+    // PSEUDO OPS //
+    ///////////////
+    case WI23_PSEUDO_POP: {
+      iword = (0x11 << 26) | (29 << 21) | (0x0004);
+      next_iword = (0x08 << 26) | (29 << 21) | (29 << 16) | (0x0004);
+      // Skip whitespace after opcode
+      while (ISSPACE (*op_end)) op_end++;
+      {
+        int dst;
+
+        dst = parse_register_operand (&op_end, RCLASS_GPR);
+
+        iword |= (dst << 16);
+      }
+      break;
+    }
+    case WI23_PSEUDO_PUSH: {
+      iword = (0x13 << 26) | (29 << 21) | (0xFFFC);
+      // Skip whitespace after opcode
+      while (ISSPACE (*op_end)) op_end++;
+      {
+        int dst;
+
+        dst = parse_register_operand (&op_end, RCLASS_GPR);
+
+        iword |= (dst << 16);
+      }
+      break;
+    }
+    case WI23_PSEUDO_FPOP: {
+      iword = (0x31 << 26) | (29 << 21) | (0x0004);
+      next_iword = (0x08 << 26) | (29 << 21) | (29 << 16) | (0x0004);
+      // Skip whitespace after opcode
+      while (ISSPACE (*op_end)) op_end++;
+      {
+        int dst;
+
+        dst = parse_register_operand (&op_end, RCLASS_FPR);
+
+        iword |= (dst << 16);
+      }
+      break;
+    }
+    case WI23_PSEUDO_FPUSH: {
+      iword = (0x30 << 26) | (29 << 21) | (0xFFFC);
+      // Skip whitespace after opcode
+      while (ISSPACE (*op_end)) op_end++;
+      {
+        int dst;
+
+        dst = parse_register_operand (&op_end, RCLASS_FPR);
+
+        iword |= (dst << 16);
+      }
+      break;
+    }
+    case WI23_PSEUDO_SAVE_PC:
+      // Just add the JAL opcode
+      // we jump-and-link to 0 + PC = next instruction
+      // Saving RA in the process
+      iword = (0x06 << 26);
+      break;
+    case WI23_PSEUDO_RET:
+      iword = (0x05 << 26) | (30 << 21);
+      break;
+    /*case WI23_PSEUDO_CALL:
+      iword = (0x07 << 26);
+      while (ISSPACE (*op_end)) op_end++;
+      {
+        int dst;
+
+        dst = parse_register_operand (&op_end, RCLASS_GPR);
+
+        iword |= (dst << 21);
+      }
+      break;*/
+
     ////////////
     // Other //
     //////////
     case WI23_OTHER:
-    iword = (opcode->opcode << 26);;
+    iword = (opcode->opcode << 26);
     break;
     default:
       abort ();
@@ -488,6 +602,11 @@ md_assemble (char *str)
   if (flag_debug) printf("instruction fragment: %x\n", iword);
   md_number_to_chars (p, iword, 4);
   dwarf2_emit_insn (4);
+  if (next_iword != 0) {
+    p = frag_more(4);
+    md_number_to_chars (p, next_iword, 4);
+    dwarf2_emit_insn(4);
+  }
 
   if (flag_debug) printf("iword: iword = %x\n", iword);
 

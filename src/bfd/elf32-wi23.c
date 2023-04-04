@@ -68,7 +68,7 @@ static reloc_howto_type wi23_elf_howto_table [] =
 	 16,			/* bitsize */
 	 false,			/* pc_relative */
 	 0,			/* bitpos */
-	 complain_overflow_bitfield, /* complain_on_overflow */
+	 complain_overflow_dont, /* complain_on_overflow */
 	 bfd_elf_generic_reloc,	/* special_function */
 	 "R_WI23_16_LO",		/* name */
 	 false,			/* partial_inplace */
@@ -83,12 +83,12 @@ static reloc_howto_type wi23_elf_howto_table [] =
 	 16,			/* bitsize */
 	 false,			/* pc_relative */
 	 0,			/* bitpos */
-	 complain_overflow_bitfield, /* complain_on_overflow */
+	 complain_overflow_dont, /* complain_on_overflow */
 	 bfd_elf_generic_reloc,	/* special_function */
 	 "R_WI23_16_HI",		/* name */
 	 false,			/* partial_inplace */
 	 0x00000000,		/* src_mask */
-	 0xffff0000,		/* dst_mask */
+	 0x0000ffff,		/* dst_mask */
 	 false),		/* pcrel_offset */
 
    /* A 16 bit PC-relative relocation.  */
@@ -282,6 +282,11 @@ wi23_elf_relocate_section (bfd *output_bfd,
       h      = NULL;
       sym    = NULL;
       sec    = NULL;
+	  
+	  // lol idk anymore
+	  if (r_type == R_WI23_PCREL16_S || r_type == R_WI23_PCREL26_S) {
+		rel->r_addend -= 4;
+	  }
 
       if (r_symndx < symtab_hdr->sh_info)
 	{

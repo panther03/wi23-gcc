@@ -285,7 +285,7 @@ wi23_compute_frame (void)
 
   cfun->machine->local_vars_size += padding_locals;
 
-  cfun->machine->callee_saved_reg_size = 0;
+  cfun->machine->callee_saved_reg_size = 8;
 
   /* Save callee-saved registers.  */
   for (regno = 0; regno < FIRST_PSEUDO_REGISTER; regno++)
@@ -310,6 +310,10 @@ wi23_expand_prologue (void)
   if (flag_stack_usage_info)
     current_function_static_stack_size = cfun->machine->size_for_adjusting_sp;
 
+  insn = emit_insn (gen_movsi_push (gen_rtx_REG (Pmode, RA_REGNUM)));
+	RTX_FRAME_RELATED_P (insn) = 1;
+  insn = emit_insn (gen_movsi_push (gen_rtx_REG (Pmode, FP_REGNUM)));
+	RTX_FRAME_RELATED_P (insn) = 1;
   /* Save callee-saved registers.  */
   for (regno = 0; regno < FIRST_PSEUDO_REGISTER; regno++)
     {
@@ -360,6 +364,9 @@ wi23_expand_epilogue (void)
         emit_insn (gen_movsi_pop (preg));
       }
     }
+
+    emit_insn (gen_movsi_pop (gen_rtx_REG (Pmode, FP_REGNUM)));
+    emit_insn (gen_movsi_pop (gen_rtx_REG (Pmode, RA_REGNUM)));
   }
 
   emit_jump_insn (gen_returner ());
@@ -477,15 +484,18 @@ wi23_load_immediate (rtx dst, int32_t i, bool high)
   // FIXME: stupid way of doing this?
   if ((i & 0xFFFF0000) == 0)
   {
-      if (high) sprintf (pattern, "slbi  %%0,%d", i);
-      else sprintf (pattern, "lbi  %%0,%d", i);
+      if (high) {
+        sprintf (pattern, "slbi  %%0,%d // low immediate high", i);
+      } else {
+        sprintf (pattern, "lbi  %%0,%d // low immediate", i);
+      }
       output_asm_insn (pattern, &dst);
   }
   else
   {
-      sprintf (pattern, "lbi  %%0,%d", i >> 16);
-      wi23_load_immediate (dst, i & 0xFFFF, true);
+      sprintf (pattern, "lbi  %%0,%d // high immediate", i >> 16);
       output_asm_insn (pattern, &dst);
+      wi23_load_immediate (dst, i & 0xFFFF, true);
    }
 
   return "";
