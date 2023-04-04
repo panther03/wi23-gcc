@@ -1,0 +1,199 @@
+
+out/frontend.elf:     file format elf32-wi23
+
+
+Disassembly of section .text:
+
+00000000 <__start>:
+   0:	63 a0 00 00 	lbi	sp, 0
+   4:	4b a0 10 00 	slbi	sp, 0x1000
+   8:	23 bc 00 00 	addi	fp, sp, 0
+   c:	18 00 00 00 	jal	10 <__start+0x10>
+  10:	4f be ff fc 	stu	ra, sp, -4
+  14:	4f bc ff fc 	stu	fp, sp, -4
+  18:	18 00 00 1c 	jal	38 <main>
+  1c:	10 00 00 00 	j	20 <__exit>
+
+00000020 <__exit>:
+  20:	00 00 00 00 	halt
+
+00000024 <__mulsi3>:
+  24:	04 00 00 00 	nop
+  28:	47 bc 00 00 	ld	fp, sp, 0
+  2c:	47 be 00 04 	ld	ra, sp, 4
+  30:	23 bd 00 08 	addi	sp, sp, 8
+  34:	17 c0 00 00 	jr	ra, 0
+
+00000038 <main>:
+  38:	23 bd ff fc 	addi	sp, sp, -4
+  3c:	60 40 00 00 	lbi	r2, 0
+  40:	48 40 02 d0 	slbi	r2, 0x2d0
+  44:	6c 21 08 02 	xor	r1,r1,r1
+  48:	6c 00 00 02 	xor	r0,r0,r0
+  4c:	18 00 00 00 	jal	50 <main+0x18>
+  50:	4f be ff fc 	stu	ra, sp, -4
+  54:	4f bc ff fc 	stu	fp, sp, -4
+  58:	18 00 01 98 	jal	1f4 <vga_print_plain>
+  5c:	18 00 00 00 	jal	60 <main+0x28>
+  60:	4f be ff fc 	stu	ra, sp, -4
+  64:	4f bc ff fc 	stu	fp, sp, -4
+  68:	18 00 00 40 	jal	ac <poll_kb>
+  6c:	43 89 ff ff 	st	r9, fp, -1
+  70:	47 80 ff ff 	ld	r0, fp, -1
+  74:	5c 00 00 18 	srli	r0, r0, 24
+  78:	5c 00 00 18 	srli	r0, r0, 24
+  7c:	60 20 00 20 	lbi	r1, 32
+  80:	70 01 00 00 	seq	r0,r0,r1
+  84:	34 00 ff d4 	bnez	r0, 1005c <_stack+0xf05c>
+  88:	60 40 00 00 	lbi	r2, 0
+  8c:	48 40 02 e0 	slbi	r2, 0x2e0
+  90:	60 20 00 01 	lbi	r1, 1
+  94:	6c 00 00 02 	xor	r0,r0,r0
+  98:	18 00 00 00 	jal	9c <main+0x64>
+  9c:	4f be ff fc 	stu	ra, sp, -4
+  a0:	4f bc ff fc 	stu	fp, sp, -4
+  a4:	18 00 01 4c 	jal	1f4 <vga_print_plain>
+  a8:	13 ff ff b0 	j	1005c <_stack+0xf05c>
+
+000000ac <poll_kb>:
+  ac:	60 00 00 00 	lbi	r0, 0
+  b0:	48 00 02 f8 	slbi	r0, 0x2f8
+  b4:	44 00 00 00 	ld	r0, r0, 0
+  b8:	44 00 00 00 	ld	r0, r0, 0
+  bc:	30 00 00 2c 	beqz	r0, ec <poll_kb+0x40>
+  c0:	60 00 00 00 	lbi	r0, 0
+  c4:	48 00 02 f8 	slbi	r0, 0x2f8
+  c8:	44 00 00 00 	ld	r0, r0, 0
+  cc:	6c 21 08 02 	xor	r1,r1,r1
+  d0:	40 01 00 00 	st	r1, r0, 0
+  d4:	60 00 00 00 	lbi	r0, 0
+  d8:	48 00 02 f4 	slbi	r0, 0x2f4
+  dc:	44 00 00 00 	ld	r0, r0, 0
+  e0:	44 00 00 00 	ld	r0, r0, 0
+  e4:	20 00 00 00 	addi	r0, r0, 0
+  e8:	10 00 00 04 	j	f0 <poll_kb+0x44>
+  ec:	6c 00 00 02 	xor	r0,r0,r0
+  f0:	20 09 00 00 	addi	r9, r0, 0
+  f4:	47 bc 00 00 	ld	fp, sp, 0
+  f8:	47 be 00 04 	ld	ra, sp, 4
+  fc:	23 bd 00 08 	addi	sp, sp, 8
+ 100:	17 c0 00 00 	jr	ra, 0
+
+00000104 <vga_print>:
+ 104:	23 bd ff e8 	addi	sp, sp, -24
+ 108:	43 80 ff f4 	st	r0, fp, -12
+ 10c:	43 81 ff f0 	st	r1, fp, -16
+ 110:	43 82 ff ec 	st	r2, fp, -20
+ 114:	43 83 ff e8 	st	r3, fp, -24
+ 118:	60 20 00 00 	lbi	r1, 0
+ 11c:	48 20 02 fc 	slbi	r1, 0x2fc
+ 120:	44 21 00 00 	ld	r1, r1, 0
+ 124:	47 80 ff f0 	ld	r0, fp, -16
+ 128:	5c 00 00 04 	srli	r0, r0, 4
+ 12c:	20 02 00 00 	addi	r2, r0, 0
+ 130:	47 80 ff f0 	ld	r0, fp, -16
+ 134:	5c 00 00 06 	srli	r0, r0, 6
+ 138:	6c 40 10 00 	add	r2,r2,r0
+ 13c:	47 80 ff f4 	ld	r0, fp, -12
+ 140:	6c 40 00 00 	add	r0,r2,r0
+ 144:	5c 00 00 02 	srli	r0, r0, 2
+ 148:	6c 20 00 00 	add	r0,r1,r0
+ 14c:	43 80 ff f8 	st	r0, fp, -8
+ 150:	6c 00 00 02 	xor	r0,r0,r0
+ 154:	43 80 ff fc 	st	r0, fp, -4
+ 158:	10 00 00 64 	j	1c0 <vga_print+0xbc>
+ 15c:	47 80 ff fc 	ld	r0, fp, -4
+ 160:	47 81 ff e8 	ld	r1, fp, -24
+ 164:	6c 20 00 00 	add	r0,r1,r0
+ 168:	44 00 00 00 	ld	r0, r0, 0
+ 16c:	47 81 ff fc 	ld	r1, fp, -4
+ 170:	20 21 00 01 	addi	r1, r1, 1
+ 174:	5c 21 00 02 	srli	r1, r1, 2
+ 178:	47 82 ff f8 	ld	r2, fp, -8
+ 17c:	6c 41 08 00 	add	r1,r2,r1
+ 180:	5c 00 00 18 	srli	r0, r0, 24
+ 184:	5c 00 00 18 	srli	r0, r0, 24
+ 188:	40 20 00 00 	st	r0, r1, 0
+ 18c:	47 80 ff fc 	ld	r0, fp, -4
+ 190:	5c 00 00 02 	srli	r0, r0, 2
+ 194:	47 81 ff ec 	ld	r1, fp, -20
+ 198:	6c 20 08 00 	add	r1,r1,r0
+ 19c:	47 80 ff fc 	ld	r0, fp, -4
+ 1a0:	5c 00 00 02 	srli	r0, r0, 2
+ 1a4:	47 82 ff f8 	ld	r2, fp, -8
+ 1a8:	6c 40 00 00 	add	r0,r2,r0
+ 1ac:	44 21 00 00 	ld	r1, r1, 0
+ 1b0:	40 01 00 00 	st	r1, r0, 0
+ 1b4:	47 80 ff fc 	ld	r0, fp, -4
+ 1b8:	20 00 00 02 	addi	r0, r0, 2
+ 1bc:	43 80 ff fc 	st	r0, fp, -4
+ 1c0:	47 80 ff fc 	ld	r0, fp, -4
+ 1c4:	47 81 ff e8 	ld	r1, fp, -24
+ 1c8:	6c 20 00 00 	add	r0,r1,r0
+ 1cc:	44 00 00 00 	ld	r0, r0, 0
+ 1d0:	5c 00 00 18 	srli	r0, r0, 24
+ 1d4:	5c 00 00 18 	srli	r0, r0, 24
+ 1d8:	34 00 ff 80 	bnez	r0, 1015c <_stack+0xf15c>
+ 1dc:	04 00 00 00 	nop
+ 1e0:	04 00 00 00 	nop
+ 1e4:	47 bc 00 00 	ld	fp, sp, 0
+ 1e8:	47 be 00 04 	ld	ra, sp, 4
+ 1ec:	23 bd 00 08 	addi	sp, sp, 8
+ 1f0:	17 c0 00 00 	jr	ra, 0
+
+000001f4 <vga_print_plain>:
+ 1f4:	23 bd ff ec 	addi	sp, sp, -20
+ 1f8:	43 80 ff f4 	st	r0, fp, -12
+ 1fc:	43 81 ff f0 	st	r1, fp, -16
+ 200:	43 82 ff ec 	st	r2, fp, -20
+ 204:	60 20 00 00 	lbi	r1, 0
+ 208:	48 20 02 fc 	slbi	r1, 0x2fc
+ 20c:	44 21 00 00 	ld	r1, r1, 0
+ 210:	47 80 ff f0 	ld	r0, fp, -16
+ 214:	5c 00 00 04 	srli	r0, r0, 4
+ 218:	20 02 00 00 	addi	r2, r0, 0
+ 21c:	47 80 ff f0 	ld	r0, fp, -16
+ 220:	5c 00 00 06 	srli	r0, r0, 6
+ 224:	6c 40 10 00 	add	r2,r2,r0
+ 228:	47 80 ff f4 	ld	r0, fp, -12
+ 22c:	6c 40 00 00 	add	r0,r2,r0
+ 230:	5c 00 00 02 	srli	r0, r0, 2
+ 234:	6c 20 00 00 	add	r0,r1,r0
+ 238:	43 80 ff f8 	st	r0, fp, -8
+ 23c:	6c 00 00 02 	xor	r0,r0,r0
+ 240:	43 80 ff fc 	st	r0, fp, -4
+ 244:	10 00 00 54 	j	29c <vga_print_plain+0xa8>
+ 248:	47 80 ff fc 	ld	r0, fp, -4
+ 24c:	47 81 ff ec 	ld	r1, fp, -20
+ 250:	6c 20 00 00 	add	r0,r1,r0
+ 254:	44 00 00 00 	ld	r0, r0, 0
+ 258:	47 81 ff fc 	ld	r1, fp, -4
+ 25c:	20 21 00 01 	addi	r1, r1, 1
+ 260:	5c 21 00 02 	srli	r1, r1, 2
+ 264:	47 82 ff f8 	ld	r2, fp, -8
+ 268:	6c 41 08 00 	add	r1,r2,r1
+ 26c:	5c 00 00 18 	srli	r0, r0, 24
+ 270:	5c 00 00 18 	srli	r0, r0, 24
+ 274:	40 20 00 00 	st	r0, r1, 0
+ 278:	47 80 ff fc 	ld	r0, fp, -4
+ 27c:	5c 00 00 02 	srli	r0, r0, 2
+ 280:	47 81 ff f8 	ld	r1, fp, -8
+ 284:	6c 20 00 00 	add	r0,r1,r0
+ 288:	60 20 00 0f 	lbi	r1, 15
+ 28c:	40 01 00 00 	st	r1, r0, 0
+ 290:	47 80 ff fc 	ld	r0, fp, -4
+ 294:	20 00 00 02 	addi	r0, r0, 2
+ 298:	43 80 ff fc 	st	r0, fp, -4
+ 29c:	47 80 ff fc 	ld	r0, fp, -4
+ 2a0:	47 81 ff ec 	ld	r1, fp, -20
+ 2a4:	6c 20 00 00 	add	r0,r1,r0
+ 2a8:	44 00 00 00 	ld	r0, r0, 0
+ 2ac:	5c 00 00 18 	srli	r0, r0, 24
+ 2b0:	5c 00 00 18 	srli	r0, r0, 24
+ 2b4:	34 00 ff 90 	bnez	r0, 10248 <_stack+0xf248>
+ 2b8:	04 00 00 00 	nop
+ 2bc:	04 00 00 00 	nop
+ 2c0:	47 bc 00 00 	ld	fp, sp, 0
+ 2c4:	47 be 00 04 	ld	ra, sp, 4
+ 2c8:	23 bd 00 08 	addi	sp, sp, 8
+ 2cc:	17 c0 00 00 	jr	ra, 0

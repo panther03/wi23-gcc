@@ -56,7 +56,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 #define WI23_FIRST_FPR 32
 #define REGNUM_RA 30
 
-#define FP_OFFSET 16
+#define FP_OFFSET 32
 
 /* wi23 register names.  */
 static const char *reg_names[NUM_WI23_REGS] = { \
@@ -265,6 +265,19 @@ convert_target_flags (unsigned int tflags)
 		  cpu.asregs.regs[26], cpu.asregs.regs[27], cpu.asregs.regs[28], \
 		  cpu.asregs.regs[29], cpu.asregs.regs[30], cpu.asregs.regs[31])
 
+
+void WI23_trace_insn_simple(char * inst, int32_t pc, int modified_reg){
+
+    printf("Instruction: %s\t\tPC: 0x%x\n", inst, pc);
+    if(modified_reg < FP_OFFSET){
+      printf("Modified Register: r%d=0x%x", modified_reg, cpu.asregs.regs[modified_reg]);
+    }else {
+      printf("Modified Register: f%d=%d", modified_reg-FP_OFFSET, cpu.asregs.regs[modified_reg]);
+    }
+    printf("\n\n");
+    fflush(stdout);
+}
+
 void
 sim_engine_run (SIM_DESC sd,
 		int next_cpu_nr, /* ignore  */
@@ -295,8 +308,8 @@ sim_engine_run (SIM_DESC sd,
 
       opcode = &wi23_opc_info[XT(inst, 26, 6)];
 
-      printf("isntruction: %x\n", inst);
-      fflush(stdout);
+      //printf("isntruction: %x\n", inst);
+      //fflush(stdout);
 
       // todo potential optimization if shit gets real slow: just switch directly on opcode? might be faster cause less branching
       switch (opcode->itype) {
@@ -347,12 +360,15 @@ sim_engine_run (SIM_DESC sd,
             switch (fncode->fncode) {
               case 0x00: {
                 cpu.asregs.regs[dst_reg] = src + trg;
-                WI23_TRACE_INSN ("add");
+                //WI23_TRACE_INSN ("add");
+                WI23_trace_insn_simple("add", pc, dst_reg);
+
                 break;
               }
               case 0x01: {
                 cpu.asregs.regs[dst_reg] = src - trg;
-                WI23_TRACE_INSN ("sub");
+                //WI23_TRACE_INSN ("sub");
+                WI23_trace_insn_simple("sub", pc, dst_reg);
                 break;
               }
               case 0x02: {
@@ -530,7 +546,9 @@ sim_engine_run (SIM_DESC sd,
             }
             case 0x08: {
               cpu.asregs.regs[dst_reg] = src + imms;
-              WI23_TRACE_INSN ("addi");
+              //WI23_TRACE_INSN ("addi");
+              WI23_trace_insn_simple("addi", pc, dst_reg);
+
               break;
             }
             case 0x09: {
@@ -543,7 +561,7 @@ sim_engine_run (SIM_DESC sd,
               //wlat(scpu, src + imms, dst);
               int32_t * addr = (int32_t *)(dmem + src + imms);
               *addr = dst;
-              
+
               WI23_TRACE_INSN ("st");
               break;
             }
