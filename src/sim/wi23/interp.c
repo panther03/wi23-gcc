@@ -451,6 +451,11 @@ sim_engine_run (SIM_DESC sd,
               WI23_TRACE_INSN ("sco -- UNIMPLEMENTED");
               break;
             }
+            case 0x3A: {
+              cpu.asregs.regs[dst_reg] = ((int32_t)src >> trg);
+              WI23_TRACE_INSN ("sra");
+              break;
+            }
             default: {
               WI23_STOP();
               break;
@@ -618,6 +623,55 @@ sim_engine_run (SIM_DESC sd,
               WI23_TRACE_INSN ("fld -- UNIMPLEMENTED");
               break;
             }
+            case 0x32: {
+              unsigned char * addr = (unsigned char *)(dmem + src + imms);
+              
+              *addr = (unsigned char)cpu.asregs.regs[dst_reg];
+
+              WI23_TRACE_INSN ("stb");
+              break;
+            }
+            case 0x33: {
+              unsigned char * addr = (unsigned char *)(dmem + src + imms);
+
+              cpu.asregs.regs[dst_reg] = (unsigned char)(*addr);
+
+              WI23_TRACE_INSN ("ldb");
+              break;
+            }
+            case 0x34: {
+              unsigned char * addr = (unsigned char *)(dmem + src + imms);
+              unsigned char * src_addr = (unsigned char*)(cpu.asregs.regs + dst_reg);
+
+              *addr = *src_addr;
+              addr++;
+              src_addr++;
+              *addr = *src_addr;
+              
+              WI23_TRACE_INSN ("sth");
+              break;
+            }
+            case 0x35: {
+              unsigned char * addr = (unsigned char *)(dmem + src + imms);
+              unsigned char * src_addr = (unsigned char*)(cpu.asregs.regs + dst_reg);
+
+              *src_addr = *addr;
+              addr++;
+              src_addr++;
+              *src_addr = *addr;
+              
+              
+              WI23_TRACE_INSN ("ldh");
+              break;
+            }
+            case 0x2A: {
+              cpu.asregs.regs[dst_reg] = src ^ imms;
+
+              WI23_TRACE_INSN ("xorsi");
+              break;
+            }
+            
+            
           }
           break;
         }
@@ -649,6 +703,11 @@ sim_engine_run (SIM_DESC sd,
             case 0x17: {
               cpu.asregs.regs[dst_reg] = src >> imms;
               WI23_TRACE_INSN ("srli");
+              break;
+            }
+            case 0x37: {
+              cpu.asregs.regs[dst_reg] = ((int32_t)src >> imms);
+              WI23_TRACE_INSN ("srai");
               break;
             }
             default: {
