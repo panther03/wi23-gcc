@@ -418,6 +418,8 @@ sim_engine_run (SIM_DESC sd,
           unsigned src = cpu.asregs.regs[OP_RS(inst)];
           unsigned dst_reg = OP_RD_R(inst);
 
+          fncode = &wi23_arith_fnc[XT(inst, 0, 2)];
+
           switch (opcode->opcode){
             case 0x1C: {
               cpu.asregs.regs[dst_reg] = (src == trg);
@@ -425,14 +427,25 @@ sim_engine_run (SIM_DESC sd,
               break;
             }
             case 0x1D: {
-              cpu.asregs.regs[dst_reg] = (src < trg);
-              WI23_TRACE_INSN ("slt");
+              if (fncode->fncode == 0x00){
+                cpu.asregs.regs[dst_reg] = (src < trg);
+                WI23_TRACE_INSN ("slt");
+              } else {
+                cpu.asregs.regs[dst_reg] = ((unsigned)src < (unsigned)trg);
+                WI23_TRACE_INSN ("sltu");
+              }
+
               break;
             }
             case 0x1E: {
-              cpu.asregs.regs[dst_reg] = (src <= trg);
-              WI23_TRACE_INSN ("sle");
-              break;
+              if (fncode->fncode == 0x00){
+                cpu.asregs.regs[dst_reg] = (src <= trg);
+                WI23_TRACE_INSN ("sle");
+                break;
+              } else {
+                cpu.asregs.regs[dst_reg] = ((unsigned)src <= (unsigned)trg);
+                WI23_TRACE_INSN ("sleu");
+              }
             }
             case 0x1F: {
               WI23_TRACE_INSN ("sco -- UNIMPLEMENTED");
