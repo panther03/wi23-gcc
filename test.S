@@ -1,7 +1,0 @@
-SUB r0, r0, r0
-ADDI r0, r0, 0x1
-ADDI r0, r0, 0x1
-ADDI r0, r0, 0x1
-ST r0, r1, 0x0
-ADDI r0, r0, 0x1
-LD r1, r1, 0x0
