@@ -5,7 +5,7 @@
 # To configure gcc - The C compiler
 ../../gcc/configure --target=wi23-elf --enable-languages=c --disable-nls --disable-libssp --prefix="$WI23_HOME"
 # To configure assembler, linker, simulator, etc. 
-../../src/configure --target=wi23-elf --disable-gdb --prefix="$WI23_HOME"
+../../src/configure --target=wi23-elf --disable-gdb --prefix="$WI23_HOME" --disable-target-newlib --disable-target-libgloss
 
 # to build the code (gcc or src) (run after configuring)
 make -jN # N = number of processors on system (use cat /proc/cpuinfo to determine)

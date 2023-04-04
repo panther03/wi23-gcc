@@ -32,4 +32,6 @@ struct wi23_sim_cpu {
 
 #define WI23_SIM_CPU(cpu) ((struct wi23_sim_cpu *) CPU_ARCH_DATA (cpu))
 
+void WI23_trace_insn_simple(char * inst, int32_t pc, int modified_reg);
+
 #endif
