@@ -541,21 +541,28 @@ sim_engine_run (SIM_DESC sd,
             case 0x10: {
               unsigned dst = cpu.asregs.regs[dst_reg];
               //wlat(scpu, src + imms, dst);
-              dmem[src + imms] = dst;
+              int32_t * addr = (int32_t *)(dmem + src + imms);
+              *addr = dst;
+              
               WI23_TRACE_INSN ("st");
               break;
             }
             case 0x11: {
               //cpu.asregs.regs[dst_reg] = rlat(scpu, src + imms);
-              cpu.asregs.regs[dst_reg] = dmem[src + imms];
+              int32_t * addr = (int32_t *)(dmem + src + imms);
+              cpu.asregs.regs[dst_reg] = *addr;
+
               WI23_TRACE_INSN ("ld");
               break;
             }
             case 0x13: {
               unsigned dst = cpu.asregs.regs[dst_reg];
               //wlat(scpu, src + imms, dst);
-              dmem[src+imms] = dst;
+              int32_t * addr = (int32_t *)(dmem + src + imms);
+              *addr = dst;
+
               cpu.asregs.regs[dst_reg] = src + imms;
+
               WI23_TRACE_INSN ("stu");
               break;
             }
