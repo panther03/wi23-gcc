@@ -36,9 +36,9 @@ srl r5, r6, r7
 and r0, r1, r3
 or  r1, r0, r3
 slt r0, r1, r3
-uslt r0, r1, r3
+sltu r0, r1, r3
 sle r0, r1, r3
-usle r0, r1, r3
+sleu r0, r1, r3
 seq r0, r1, r3
 icvtf r0, f1
 fcvti f0, r1
