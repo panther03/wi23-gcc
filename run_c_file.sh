@@ -11,7 +11,7 @@ wi23-elf-gcc -x assembler-with-cpp tests/asm/crt0.s -c -o out/crt0.o
 if [[ $DEBUG ]]; then
     mkdir -p out/debugging
     cd out/debugging/
-    wi23-elf-gcc "../../$1" -dap -S -o "${ASM_OUT}"    
+    wi23-elf-gcc -O2 "../../$1" -dap -S -o "${ASM_OUT}"    
     mv "${ASM_OUT}" ..
     cd ../../
 fi
