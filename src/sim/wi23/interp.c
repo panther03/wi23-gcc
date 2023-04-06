@@ -52,14 +52,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 // not sure where else to put this
 #define WI23_STOP() sim_engine_halt (sd, scpu, NULL, pc, sim_stopped, SIM_SIGILL);
 
-#define NUM_WI23_REGS 64
+#define NUM_WI23_REGS 32
 #define WI23_FIRST_FPR 32
 #define REGNUM_RA 30
 
 #define FP_OFFSET 32
 
 /* wi23 register names.  */
-static const char *reg_names[NUM_WI23_REGS] = { \
+static const char *reg_names[NUM_WI23_REGS*2] = { \
    /* general-purpose regs */ \
     "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7", \
     "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", \
@@ -87,6 +87,7 @@ struct wi23_regset
 {
   int32_t		 pc;
   int32_t	     regs[NUM_WI23_REGS]; /* primary registers */
+  float	     fregs[NUM_WI23_REGS]; /* primary registers */
   unsigned long long insts;                /* instruction counter */
 };
 
@@ -142,8 +143,10 @@ set_initial_gprs (void)
   cpu.asregs.pc = 0;
   
   /* Clean out the register contents.  */
-  for (i = 0; i < NUM_WI23_REGS; i++)
+  for (i = 0; i < NUM_WI23_REGS; i++){
     cpu.asregs.regs[i] = 0;
+    cpu.asregs.fregs[i] = 0;
+  }
 }
 
 /* Write a 4 byte value to data memory.  */
@@ -252,18 +255,19 @@ convert_target_flags (unsigned int tflags)
 /* TODO: Split this up into finger trace levels than just insn.  */
 // TODO: trace floating point regs too
 #define WI23_TRACE_INSN(str) \
-  TRACE_INSN (scpu, "0x%08x: %s\nInteger Registers\t\tr0:0x%x, r1:0x%x, r2:0x%x, r3:0x%x, r4:0x%x, r5:0x%x, r6:0x%x, r7:0x%x, r8:0x%x, r9:0x%x, r10:0x%x, r11:0x%x, r12:0x%x, r13:0x%x, r14:0x%x, r15:0x%x\nFloating Point Registers\tt0:0x%x, t1:0x%x, t2:0x%x, t3:0x%x, t4:0x%x, t5:0x%x, t6:0x%x, t7:0x%x, t8:0x%x, t9:0x%x, t10:0x%x, t11:0x%x, t12:0x%x, t13:0x%x, t14:0x%x, t15:0x%x\n", \
+  TRACE_INSN (scpu, "0x%08x: %s\nInteger Registers\t\tr0:0x%x, r1:0x%x, r2:0x%x, r3:0x%x, r4:0x%x, r5:0x%x, r6:0x%x, r7:0x%x, r8:0x%x, r9:0x%x, r10:0x%x, r11:0x%x, r12:0x%x, r13:0x%x, r14:0x%x, r15:0x%x\n\
+  t0:0x%f, t1:0x%f, t2:0x%f, t3:0x%f, t4:0x%f, t5:0x%f, t6:0x%f, t7:0x%f, t8:0x%f, t9:0x%f, t10:0x%f, t11:0x%f, t12:0x%f, t13:0x%f, t14:0x%f, t15:0x%f\n", \
 	      opc, str, cpu.asregs.regs[0], cpu.asregs.regs[1], \
 	      cpu.asregs.regs[2], cpu.asregs.regs[3], cpu.asregs.regs[4], \
 	      cpu.asregs.regs[5], cpu.asregs.regs[6], cpu.asregs.regs[7], \
 	      cpu.asregs.regs[8], cpu.asregs.regs[9], cpu.asregs.regs[10], \
 	      cpu.asregs.regs[11], cpu.asregs.regs[12], cpu.asregs.regs[13], \
-	      cpu.asregs.regs[14], cpu.asregs.regs[15], cpu.asregs.regs[16], \
-		  cpu.asregs.regs[17], cpu.asregs.regs[18], cpu.asregs.regs[19], \
-		  cpu.asregs.regs[20], cpu.asregs.regs[21], cpu.asregs.regs[22], \
-		  cpu.asregs.regs[23], cpu.asregs.regs[24], cpu.asregs.regs[25], \
-		  cpu.asregs.regs[26], cpu.asregs.regs[27], cpu.asregs.regs[28], \
-		  cpu.asregs.regs[29], cpu.asregs.regs[30], cpu.asregs.regs[31])
+	      cpu.asregs.regs[14], cpu.asregs.regs[15], cpu.asregs.fregs[0], \
+		  cpu.asregs.fregs[1], cpu.asregs.fregs[2], cpu.asregs.fregs[3], \
+		  cpu.asregs.fregs[4], cpu.asregs.fregs[5], cpu.asregs.fregs[6], \
+		  cpu.asregs.fregs[7], cpu.asregs.fregs[8], cpu.asregs.fregs[9], \
+		  cpu.asregs.fregs[10], cpu.asregs.fregs[11], cpu.asregs.fregs[12], \
+		  cpu.asregs.fregs[13], cpu.asregs.fregs[14], cpu.asregs.fregs[15])
 
 
 void WI23_trace_insn_simple(char * inst, int32_t pc, int modified_reg){
@@ -272,7 +276,7 @@ void WI23_trace_insn_simple(char * inst, int32_t pc, int modified_reg){
     if(modified_reg < FP_OFFSET){
       printf("Modified Register: r%d=0x%x", modified_reg, cpu.asregs.regs[modified_reg]);
     }else {
-      printf("Modified Register: f%d=%d", modified_reg-FP_OFFSET, cpu.asregs.regs[modified_reg]);
+      printf("Modified Register: f%d=%f", modified_reg-FP_OFFSET, cpu.asregs.fregs[modified_reg-FP_OFFSET]);
     }
     printf("\n\n");
     fflush(stdout);
@@ -322,30 +326,30 @@ sim_engine_run (SIM_DESC sd,
           float src, trg;
           
           dst_reg = OP_RD_R(inst);
-          trg = cpu.asregs.regs[OP_RT_R(inst) + FP_OFFSET];
-          src = cpu.asregs.regs[OP_RS(inst) + FP_OFFSET];
+          trg = cpu.asregs.fregs[OP_RT_R(inst)];
+          src = cpu.asregs.fregs[OP_RS(inst)];
           
           fncode = &wi23_float_fnc[XT(inst, 0, 2)];
           if(opcode->opcode == 0x3B){
             switch (fncode->fncode) {
               case 0x00: {
-                cpu.asregs.regs[dst_reg + FP_OFFSET] = src + trg;
-                WI23_TRACE_INSN ("fadd -- UNIMPLEMENTED");
+                cpu.asregs.fregs[dst_reg] = src + trg;
+                WI23_TRACE_INSN ("fadd");
                 break;
               }
               case 0x01: {
-                cpu.asregs.regs[dst_reg + FP_OFFSET] = trg - src;
-                WI23_TRACE_INSN ("fsub -- UNIMPLEMENTED");
+                cpu.asregs.fregs[dst_reg] = trg - src;
+                WI23_TRACE_INSN ("fsub");
                 break;
               }
               case 0x02: {
-                cpu.asregs.regs[dst_reg + FP_OFFSET] = trg * src;
-                WI23_TRACE_INSN ("fmul -- UNIMPLEMENTED");
+                cpu.asregs.fregs[dst_reg] = trg * src;
+                WI23_TRACE_INSN ("fmul");
                 break;
               }
               case 0x03: {
-                cpu.asregs.regs[dst_reg + FP_OFFSET] = trg / src;
-                WI23_TRACE_INSN ("fdiv -- UNIMPLEMENTED");
+                cpu.asregs.fregs[dst_reg] = trg / src;
+                WI23_TRACE_INSN ("fdiv");
                 break;
               }
             }
@@ -386,7 +390,7 @@ sim_engine_run (SIM_DESC sd,
                 break;
               }
             }
-          } else {
+          } else if (opcode->opcode == 0x1A) {
             fncode = &wi23_arith_fnc[XT(inst, 0, 2)];
             switch (fncode->fncode) {
               case 0x00: {
@@ -407,6 +411,20 @@ sim_engine_run (SIM_DESC sd,
               default: {
                 cpu.asregs.regs[dst_reg] = src >> trg;
                 WI23_TRACE_INSN ("srl");
+                break;
+              }
+            }
+          } else if (opcode->opcode == 0x1F) {
+            fncode = &wi23_arith_fnc[XT(inst, 0, 2)];
+            switch (fncode->fncode) {
+              case 0x00: {
+                cpu.asregs.regs[dst_reg] = (src & trg);
+                WI23_TRACE_INSN ("and");
+                break;
+              }
+              case 0x01: {
+                cpu.asregs.regs[dst_reg] = src | trg;
+                WI23_TRACE_INSN ("or");
                 break;
               }
             }
@@ -447,8 +465,9 @@ sim_engine_run (SIM_DESC sd,
                 WI23_TRACE_INSN ("sleu");
               }
             }
-            case 0x1F: {
-              WI23_TRACE_INSN ("sco -- UNIMPLEMENTED");
+            case 0x3A: {
+              cpu.asregs.regs[dst_reg] = ((int32_t)src >> trg);
+              WI23_TRACE_INSN ("sra");
               break;
             }
             default: {
@@ -461,20 +480,23 @@ sim_engine_run (SIM_DESC sd,
 
         }
         case WI23_RF_F_DST: {
-          float trg = cpu.asregs.regs[OP_RT_R(inst) + FP_OFFSET];
-          float src = cpu.asregs.regs[OP_RS(inst) + FP_OFFSET];
+          float trg = cpu.asregs.regs[OP_RT_R(inst)];
+          float src = cpu.asregs.regs[OP_RS(inst)];
           unsigned dst_reg = OP_RD_R(inst);
 
           switch (opcode->opcode){
             case 0x3C: {
+              cpu.asregs.fregs[dst_reg] = (float)(trg == src);
               WI23_TRACE_INSN ("feq -- UNIMPLEMENTED");
               break;
             }
             case 0x3E: {
+              cpu.asregs.fregs[dst_reg] = (float)(src <= trg);
               WI23_TRACE_INSN ("fle -- UNIMPLEMENTED");
               break;
             }
             case 0x3F: {
+              cpu.asregs.fregs[dst_reg] = (float)(src < trg);
               WI23_TRACE_INSN ("flt -- UNIMPLEMENTED");
               break;
             }
@@ -493,42 +515,48 @@ sim_engine_run (SIM_DESC sd,
           // WI23_RF_DS is used for floating point conversion and btr insns
           switch (opcode->opcode) {
             case 0x20: {
-              float src = cpu.asregs.regs[OP_RS(inst) + FP_OFFSET];
+              float src = cpu.asregs.fregs[OP_RS(inst)];
               unsigned dst_reg = OP_RD_R(inst);
               
-              WI23_TRACE_INSN ("icvtf -- UNIMPLEMENTED");
+              cpu.asregs.regs[dst_reg] = (int)src;
+              WI23_TRACE_INSN ("icvtf");
               break;
             }
             case 0x21: {
               unsigned src = cpu.asregs.regs[OP_RS(inst)];
-              unsigned dst_reg = OP_RD_R(inst) + FP_OFFSET;
+              unsigned dst_reg = OP_RD_R(inst);
 
-              //cpu.asregs.regs[dst_reg + FP_OFFSET] = (float)src;
-              WI23_TRACE_INSN ("fcvti -- UNIMPLEMENTED");
+              cpu.asregs.fregs[dst_reg] = (float)src;
+              WI23_TRACE_INSN ("fcvti");
               break;
             }
             case 0x22: {
-              unsigned src = cpu.asregs.regs[OP_RS(inst) + FP_OFFSET];
+              float src = cpu.asregs.regs[OP_RS(inst)];
               unsigned dst_reg = OP_RD_R(inst);
-              WI23_TRACE_INSN ("imovf -- UNIMPLEMENTED");
+
+              
+              memcpy((cpu.asregs.regs + dst_reg), &src, sizeof(src));
+
+              WI23_TRACE_INSN ("imovf");
               break;
             }
             case 0x23: {
-              unsigned src = cpu.asregs.regs[OP_RS(inst)];
-              unsigned dst_reg = OP_RD_R(inst) + FP_OFFSET;
-              WI23_TRACE_INSN ("fmovi -- UNIMPLEMENTED");
+              int32_t src = cpu.asregs.regs[OP_RS(inst)];
+              unsigned dst_reg = OP_RD_R(inst);
+
+
+              memcpy((cpu.asregs.fregs + dst_reg), &src, sizeof(src));
+
+              WI23_TRACE_INSN ("fmovi");
               break;
             }
             case 0x24: {
-              float src = cpu.asregs.regs[OP_RS(inst) + FP_OFFSET];
+              float src = cpu.asregs.fregs[OP_RS(inst)];
               unsigned dst_reg = OP_RD_R(inst);
+
+              
+
               WI23_TRACE_INSN ("fclass -- UNIMPLEMENTED");
-              break;
-            }
-            case 0x19: {
-              unsigned src = cpu.asregs.regs[OP_RS(inst)];
-              unsigned dst_reg = OP_RD_R(inst);
-              WI23_TRACE_INSN ("btr -- UNIMPLEMENTED");
               break;
             }
             default : {
@@ -549,7 +577,13 @@ sim_engine_run (SIM_DESC sd,
           } else  if (opcode->opcode == 0x0B){
             cpu.asregs.regs[dst_reg] = src & ~immz;
             WI23_TRACE_INSN ("andni");
-          }
+          } else  if (opcode->opcode == 0x19){
+            cpu.asregs.regs[dst_reg] = src & immz;
+            WI23_TRACE_INSN ("andi");
+          } else  if (opcode->opcode == 0x38){
+            cpu.asregs.regs[dst_reg] = src | immz;
+            WI23_TRACE_INSN ("ori");
+          } 
           break;
         }
         case WI23_IF_DSI_S: {
@@ -605,19 +639,68 @@ sim_engine_run (SIM_DESC sd,
               break;
             }
             case 0x30: {
-              // Convert the destination regsiter to a floating point register
-              dst_reg += FP_OFFSET;
+              float * addr = (float *)(dmem + src + imms);
+              *addr = cpu.asregs.fregs[OP_RS(inst)];
 
-              WI23_TRACE_INSN ("fst -- UNIMPLEMENTED");
+              WI23_TRACE_INSN ("fst");
               break;
             }
             case 0x31: {
-                // Convert the destination regsiter to a floating point register
-              dst_reg += FP_OFFSET;
-              
-              WI23_TRACE_INSN ("fld -- UNIMPLEMENTED");
+              float * addr = (float *)(dmem + src + imms);
+              cpu.asregs.fregs[dst_reg] = *addr;
+
+              WI23_TRACE_INSN ("fld");
               break;
             }
+            case 0x32: {
+              unsigned char * addr = (unsigned char *)(dmem + src + imms);
+              
+              *addr = (unsigned char)cpu.asregs.regs[dst_reg];
+
+              WI23_TRACE_INSN ("stb");
+              break;
+            }
+            case 0x33: {
+              unsigned char * addr = (unsigned char *)(dmem + src + imms);
+
+              cpu.asregs.regs[dst_reg] = (unsigned char)(*addr);
+
+              WI23_TRACE_INSN ("ldb");
+              break;
+            }
+            case 0x34: {
+              unsigned char * addr = (unsigned char *)(dmem + src + imms);
+              unsigned char * src_addr = (unsigned char*)(cpu.asregs.regs + dst_reg);
+
+              *addr = *src_addr;
+              addr++;
+              src_addr++;
+              *addr = *src_addr;
+              
+              WI23_TRACE_INSN ("sth");
+              break;
+            }
+            case 0x35: {
+              unsigned char * addr = (unsigned char *)(dmem + src + imms);
+              unsigned char * src_addr = (unsigned char*)(cpu.asregs.regs + dst_reg);
+
+              *src_addr = *addr;
+              addr++;
+              src_addr++;
+              *src_addr = *addr;
+              
+              
+              WI23_TRACE_INSN ("ldh");
+              break;
+            }
+            case 0x2A: {
+              cpu.asregs.regs[dst_reg] = src ^ imms;
+
+              WI23_TRACE_INSN ("xorsi");
+              break;
+            }
+            
+            
           }
           break;
         }
@@ -649,6 +732,11 @@ sim_engine_run (SIM_DESC sd,
             case 0x17: {
               cpu.asregs.regs[dst_reg] = src >> imms;
               WI23_TRACE_INSN ("srli");
+              break;
+            }
+            case 0x37: {
+              cpu.asregs.regs[dst_reg] = ((int32_t)src >> imms);
+              WI23_TRACE_INSN ("srai");
               break;
             }
             default: {
@@ -754,6 +842,12 @@ sim_engine_run (SIM_DESC sd,
 
       if (sim_events_tick (sd))
 	      sim_events_process (sd);
+
+
+      // Wait for a key to be pressed to proceed to the next instruction
+      printf("\nPress any key to increment to the next instruction\n");
+      getchar();
+
     } while (1);
 }
 
