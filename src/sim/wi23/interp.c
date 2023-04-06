@@ -176,7 +176,7 @@ rlat_i (sim_cpu *scpu, int32_t x)
 {
   address_word cia = CPU_PC_GET (scpu);
   
-  return (sim_core_read_aligned_4 (scpu, cia, read_map, RAM_BIAS));
+  return (sim_core_read_aligned_4 (scpu, cia, read_map, x));
 }
 
 static int
@@ -255,19 +255,13 @@ convert_target_flags (unsigned int tflags)
 /* TODO: Split this up into finger trace levels than just insn.  */
 // TODO: trace floating point regs too
 #define WI23_TRACE_INSN(str) \
-  TRACE_INSN (scpu, "0x%08x: %s\nInteger Registers\t\tr0:0x%x, r1:0x%x, r2:0x%x, r3:0x%x, r4:0x%x, r5:0x%x, r6:0x%x, r7:0x%x, r8:0x%x, r9:0x%x, r10:0x%x, r11:0x%x, r12:0x%x, r13:0x%x, r14:0x%x, r15:0x%x\n\
-  t0:0x%f, t1:0x%f, t2:0x%f, t3:0x%f, t4:0x%f, t5:0x%f, t6:0x%f, t7:0x%f, t8:0x%f, t9:0x%f, t10:0x%f, t11:0x%f, t12:0x%f, t13:0x%f, t14:0x%f, t15:0x%f\n", \
+  TRACE_INSN (scpu, "0x%08x: %s\nInteger Registers\t\tr0:0x%x, r1:0x%x, r2:0x%x, r3:0x%x, r4:0x%x, r5:0x%x, r6:0x%x, r7:0x%x, r8:0x%x, r9:0x%x\n\
+  Special: fp:0x%x, sp:0x%x, ra:0x%x", \
 	      opc, str, cpu.asregs.regs[0], cpu.asregs.regs[1], \
 	      cpu.asregs.regs[2], cpu.asregs.regs[3], cpu.asregs.regs[4], \
 	      cpu.asregs.regs[5], cpu.asregs.regs[6], cpu.asregs.regs[7], \
-	      cpu.asregs.regs[8], cpu.asregs.regs[9], cpu.asregs.regs[10], \
-	      cpu.asregs.regs[11], cpu.asregs.regs[12], cpu.asregs.regs[13], \
-	      cpu.asregs.regs[14], cpu.asregs.regs[15], cpu.asregs.fregs[0], \
-		  cpu.asregs.fregs[1], cpu.asregs.fregs[2], cpu.asregs.fregs[3], \
-		  cpu.asregs.fregs[4], cpu.asregs.fregs[5], cpu.asregs.fregs[6], \
-		  cpu.asregs.fregs[7], cpu.asregs.fregs[8], cpu.asregs.fregs[9], \
-		  cpu.asregs.fregs[10], cpu.asregs.fregs[11], cpu.asregs.fregs[12], \
-		  cpu.asregs.fregs[13], cpu.asregs.fregs[14], cpu.asregs.fregs[15])
+	      cpu.asregs.regs[8], cpu.asregs.regs[9], \
+        cpu.asregs.regs[28], cpu.asregs.regs[29], cpu.asregs.regs[30])
 
 
 void WI23_trace_insn_simple(char * inst, int32_t pc, int modified_reg){
@@ -312,8 +306,8 @@ sim_engine_run (SIM_DESC sd,
 
       opcode = &wi23_opc_info[XT(inst, 26, 6)];
 
-      //printf("isntruction: %x\n", inst);
-      //fflush(stdout);
+      printf("isntruction: %x\n", inst);
+      fflush(stdout);
 
       // todo potential optimization if shit gets real slow: just switch directly on opcode? might be faster cause less branching
       switch (opcode->itype) {
@@ -329,9 +323,8 @@ sim_engine_run (SIM_DESC sd,
           trg = cpu.asregs.fregs[OP_RT_R(inst)];
           src = cpu.asregs.fregs[OP_RS(inst)];
           
-          fncode = &wi23_float_fnc[XT(inst, 0, 2)];
           if(opcode->opcode == 0x3B){
-            switch (fncode->fncode) {
+            switch (XT(inst, 0, 2)) {
               case 0x00: {
                 cpu.asregs.fregs[dst_reg] = src + trg;
                 WI23_TRACE_INSN ("fadd");
@@ -364,19 +357,18 @@ sim_engine_run (SIM_DESC sd,
           unsigned dst_reg = OP_RD_R(inst);
 
           if (opcode->opcode == 0x1B) {
-            fncode = &wi23_shift_fnc[XT(inst, 0, 2)];
-            switch (fncode->fncode) {
+            switch (XT(inst, 0, 2)) {
               case 0x00: {
                 cpu.asregs.regs[dst_reg] = src + trg;
-                //WI23_TRACE_INSN ("add");
-                WI23_trace_insn_simple("add", pc, dst_reg);
+                WI23_TRACE_INSN ("add");
+                //WI23_trace_insn_simple("add", pc, dst_reg);
 
                 break;
               }
               case 0x01: {
                 cpu.asregs.regs[dst_reg] = src - trg;
-                //WI23_TRACE_INSN ("sub");
-                WI23_trace_insn_simple("sub", pc, dst_reg);
+                WI23_TRACE_INSN ("sub");
+                //WI23_trace_insn_simple("sub", pc, dst_reg);
                 break;
               }
               case 0x02: {
@@ -391,8 +383,7 @@ sim_engine_run (SIM_DESC sd,
               }
             }
           } else if (opcode->opcode == 0x1A) {
-            fncode = &wi23_arith_fnc[XT(inst, 0, 2)];
-            switch (fncode->fncode) {
+            switch (XT(inst, 0, 2)) {
               case 0x00: {
                 cpu.asregs.regs[dst_reg] = (src << trg) | (src >> (32 - trg));
                 WI23_TRACE_INSN ("rol");
@@ -414,19 +405,29 @@ sim_engine_run (SIM_DESC sd,
                 break;
               }
             }
+          } else if (opcode->opcode == 0x1D) {
+            if (XT(inst, 0, 2) == 0x00){
+              cpu.asregs.regs[dst_reg] = (src < trg);
+              WI23_TRACE_INSN ("slt");
+            } else {
+              cpu.asregs.regs[dst_reg] = ((unsigned)src < (unsigned)trg);
+              WI23_TRACE_INSN ("sltu");
+            }
+          } else if (opcode->opcode == 0x1E) {
+            if (XT(inst, 0, 2) == 0x00){
+              cpu.asregs.regs[dst_reg] = (src <= trg);
+              WI23_TRACE_INSN ("sle");
+            } else {
+              cpu.asregs.regs[dst_reg] = ((unsigned)src <= (unsigned)trg);
+              WI23_TRACE_INSN ("sleu");
+            }
           } else if (opcode->opcode == 0x1F) {
-            fncode = &wi23_arith_fnc[XT(inst, 0, 2)];
-            switch (fncode->fncode) {
-              case 0x00: {
-                cpu.asregs.regs[dst_reg] = (src & trg);
-                WI23_TRACE_INSN ("and");
-                break;
-              }
-              case 0x01: {
-                cpu.asregs.regs[dst_reg] = src | trg;
-                WI23_TRACE_INSN ("or");
-                break;
-              }
+            if (XT(inst, 0, 2) == 0x00){
+              cpu.asregs.regs[dst_reg] = (src & trg);
+              WI23_TRACE_INSN ("and");
+            } else {
+              cpu.asregs.regs[dst_reg] = src | trg;
+              WI23_TRACE_INSN ("or");
             }
           }
           break;
@@ -436,34 +437,11 @@ sim_engine_run (SIM_DESC sd,
           unsigned src = cpu.asregs.regs[OP_RS(inst)];
           unsigned dst_reg = OP_RD_R(inst);
 
-          fncode = &wi23_arith_fnc[XT(inst, 0, 2)];
-
           switch (opcode->opcode){
             case 0x1C: {
               cpu.asregs.regs[dst_reg] = (src == trg);
               WI23_TRACE_INSN ("seq");
               break;
-            }
-            case 0x1D: {
-              if (fncode->fncode == 0x00){
-                cpu.asregs.regs[dst_reg] = (src < trg);
-                WI23_TRACE_INSN ("slt");
-              } else {
-                cpu.asregs.regs[dst_reg] = ((unsigned)src < (unsigned)trg);
-                WI23_TRACE_INSN ("sltu");
-              }
-
-              break;
-            }
-            case 0x1E: {
-              if (fncode->fncode == 0x00){
-                cpu.asregs.regs[dst_reg] = (src <= trg);
-                WI23_TRACE_INSN ("sle");
-                break;
-              } else {
-                cpu.asregs.regs[dst_reg] = ((unsigned)src <= (unsigned)trg);
-                WI23_TRACE_INSN ("sleu");
-              }
             }
             case 0x3A: {
               cpu.asregs.regs[dst_reg] = ((int32_t)src >> trg);
@@ -600,8 +578,8 @@ sim_engine_run (SIM_DESC sd,
             }
             case 0x08: {
               cpu.asregs.regs[dst_reg] = src + imms;
-              //WI23_TRACE_INSN ("addi");
-              WI23_trace_insn_simple("addi", pc, dst_reg);
+              WI23_TRACE_INSN ("addi");
+              //WI23_trace_insn_simple("addi", pc, dst_reg);
 
               break;
             }
@@ -633,7 +611,7 @@ sim_engine_run (SIM_DESC sd,
               int32_t * addr = (int32_t *)(dmem + src + imms);
               *addr = dst;
 
-              cpu.asregs.regs[dst_reg] = src + imms;
+              cpu.asregs.regs[OP_RS(inst)] = src + imms;
 
               WI23_TRACE_INSN ("stu");
               break;
@@ -758,14 +736,16 @@ sim_engine_run (SIM_DESC sd,
           signed int imms = IMM_SX(inst);
           unsigned src_reg = OP_RS(inst);
           switch (opcode->opcode) {
+            // -4 for these two because we're about to increment
+            // by 4 later
             case 0x05: {
-              pc = cpu.asregs.regs[src_reg] + imms;
+              pc = cpu.asregs.regs[src_reg] + imms - 4;
               WI23_TRACE_INSN("jr");
               break;
             }
             case 0x07: {
               cpu.asregs.regs[REGNUM_RA] = pc + 4;
-              pc = cpu.asregs.regs[src_reg] + imms;
+              pc = cpu.asregs.regs[src_reg] + imms - 4;
               WI23_TRACE_INSN("jalr");
               break;
             }
@@ -845,7 +825,7 @@ sim_engine_run (SIM_DESC sd,
 
 
       // Wait for a key to be pressed to proceed to the next instruction
-      printf("\nPress any key to increment to the next instruction\n");
+      //printf("\nPress any key to increment to the next instruction\n");
       getchar();
 
     } while (1);

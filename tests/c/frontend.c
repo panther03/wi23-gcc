@@ -7,9 +7,9 @@ Aidan McEllistrem
 #include "frontend.h"
 
 // In-hardware MM addresses
-const int *VGA_TEXT_BUFFER = 0x00000000;
-const int *PS2_KEY         = 0x0000B000;
-int *PS2_KEY_AWAIT   = 0x0000B004;
+const int *VGA_TEXT_BUFFER = 0xFFFF0000;
+const int *PS2_KEY         = 0xFFFFB000;
+int *PS2_KEY_AWAIT   = 0xFFFFB004;
 
 //void __mulsi3() {
 //	return;

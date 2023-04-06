@@ -16,6 +16,7 @@ if [[ $DEBUG ]]; then
     cd ../../
 fi
 
+#-T tests/script.ld
 wi23-elf-gcc -O2 $1 -c -g -o "${OBJECT_OUT}"
 wi23-elf-ld out/crt0.o -o "${ELF_OUT}" "${OBJECT_OUT}"
 wi23-elf-objdump -dr "out/crt0.o" > out/crt0-out.log
