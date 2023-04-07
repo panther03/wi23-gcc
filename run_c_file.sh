@@ -5,6 +5,7 @@ mkdir -p out/
 
 OBJECT_OUT="out/$(basename $1 .c).o"
 ELF_OUT="out/$(basename $1 .c).elf"
+HEX_OUT="out/$(basename $1 .c).hex"
 ASM_OUT="$(basename $1 .c).S"
 
 wi23-elf-gcc -x assembler-with-cpp tests/asm/crt0.s -c -o out/crt0.o 
@@ -22,6 +23,7 @@ wi23-elf-ld out/crt0.o -o "${ELF_OUT}" "${OBJECT_OUT}"
 wi23-elf-objdump -dr "out/crt0.o" > out/crt0-out.log
 wi23-elf-objdump -dr -S "${OBJECT_OUT}" > out/object-out.log
 wi23-elf-objdump -sdr -S "${ELF_OUT}" > out/exec-out.log
+wi23-elf-objcopy --verilog-data-width 4 "${ELF_OUT}"  -O verilog  "${HEX_OUT}"
 if [[ ! $DEBUG ]]; then
     read -n 1 -p "Continue with simulation?"
     wi23-elf-run -t "${ELF_OUT}" > out/trace.log 2>&1
