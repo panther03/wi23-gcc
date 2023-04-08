@@ -560,7 +560,7 @@ sim_engine_run (SIM_DESC sd,
           } else  if (opcode->opcode == 0x19){
             cpu.asregs.regs[dst_reg] = src & immz;
             WI23_TRACE_INSN ("andi");
-          } else  if (opcode->opcode == 0x38){
+          } else  if (opcode->opcode == 0x39){
             cpu.asregs.regs[dst_reg] = src | immz;
             WI23_TRACE_INSN ("ori");
           } 
@@ -573,7 +573,7 @@ sim_engine_run (SIM_DESC sd,
           unsigned dst_reg = OP_RD_I(inst);
           switch (opcode->opcode) {
             case 0x03: {
-              cpu.asregs.regs[dst_reg] = bswap_32(rlat_i(scpu, src + imms));
+              cpu.asregs.regs[dst_reg] = rlat_i(scpu, src + imms);
 
               WI23_TRACE_INSN ("ldcr");
               break;
