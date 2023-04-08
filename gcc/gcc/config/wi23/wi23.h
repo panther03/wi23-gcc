@@ -22,7 +22,7 @@
 #define GCC_WI23_H
 
 #undef  STARTFILE_SPEC
-#define STARTFILE_SPEC ""
+#define STARTFILE_SPEC "crt0.o%s"
 
 /* Provide an ENDFILE_SPEC appropriate for svr4.  Here we tack on our own
    magical crtend.o file (see crtstuff.c) which provides part of the

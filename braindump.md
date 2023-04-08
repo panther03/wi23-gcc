@@ -7,5 +7,6 @@ planning to use this file to document issues that come up during development/tes
 - (DONE) Subword insns
 - the current store absolute clobbers the store value and thus needs to be a define_expand
 - compiler needs to be aware of lbi sign extension
+- Dedicaated zero extend and sign extend insns?
 
 elf32wi23.sh has the stack address

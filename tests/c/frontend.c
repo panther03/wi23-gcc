@@ -4,7 +4,7 @@ Aidan McEllistrem
 3/30/23
 */
 
-#include "frontend.h"
+//#include "frontend.h"
 
 // In-hardware MM addresses
 const int *VGA_TEXT_BUFFER = 0xFFFFE000;
@@ -44,7 +44,7 @@ void vga_print_plain(int x, int y, const char* msg_data) {
   int* buff_addr = VGA_TEXT_BUFFER + (y << 4) + (y << 6) + x;
   int i = 0;
   // assume string is NULL-terminated
-  while (*(msg_data + i) != 0) {
+  while (*(msg_data + i) < 0x40) {
     // set text data
     // upper byte = 0x20 => green background, black text
     *(buff_addr + i) = *(msg_data + i) | (0x2000);
@@ -54,7 +54,7 @@ void vga_print_plain(int x, int y, const char* msg_data) {
 
 __attribute__((section(".text")))
 int main() {
-  vga_print_plain(0,0,L"Hello World!");
+  vga_print_plain(0,0,"Hello World!");
   while(1) {
     continue;
   }

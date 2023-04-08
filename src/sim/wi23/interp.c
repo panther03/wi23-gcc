@@ -42,6 +42,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 #include "wi23-sim.h"
 #include "opcode/wi23.h"
 
+#include <byteswap.h>
+
 /* Extract the signed 10-bit offset from a 16-bit branch
    instruction.  */
 #define INST2OFFSET(o) ((((signed short)((o & ((1<<10)-1))<<6))>>6)<<1)
@@ -571,7 +573,7 @@ sim_engine_run (SIM_DESC sd,
           unsigned dst_reg = OP_RD_I(inst);
           switch (opcode->opcode) {
             case 0x03: {
-              cpu.asregs.regs[dst_reg] = rlat_i(scpu, src + imms);
+              cpu.asregs.regs[dst_reg] = bswap_32(rlat_i(scpu, src + imms));
 
               WI23_TRACE_INSN ("ldcr");
               break;

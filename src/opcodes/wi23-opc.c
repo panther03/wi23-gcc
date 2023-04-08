@@ -102,8 +102,8 @@ const wi23_opc_info_t wi23_opc_info[64] =
     { 0x35, WI23_IF_DSI_S,     "ldh" },
     { 0x36, WI23_ILLEGAL,     "illegal" },
     { 0x37, WI23_IF_DSI_5,     "srai" },
-    { 0x38, WI23_IF_DSI_Z,     "ori" },
-    { 0x39, WI23_ILLEGAL,     "illegal" },
+    { 0x38, WI23_ILLEGAL,     "illegal" },
+    { 0x39, WI23_IF_DSI_Z,      "ori" },
     { 0x3A, WI23_RF_I_DST,     "sra" },
 
     { 0x3B, WI23_RF_F_FN_DST,   "x" }, // float arithmetic
