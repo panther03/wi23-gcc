@@ -294,17 +294,6 @@ convert_target_flags (unsigned int tflags)
   return hflags;
 }*/
 
-/* TODO: Split this up into finger trace levels than just insn.  */
-// TODO: trace floating point regs too
-#define WI23_TRACE_INSN(str) \
-  TRACE_INSN (scpu, "0x%08x: %s\nInteger Registers\t\tr0:0x%x, r1:0x%x, r2:0x%x, r3:0x%x, r4:0x%x, r5:0x%x, r6:0x%x, r7:0x%x, r8:0x%x, r9:0x%x\n\
-  Special: fp:0x%x, sp:0x%x, ra:0x%x", \
-	      opc, str, cpu.asregs.regs[0], cpu.asregs.regs[1], \
-	      cpu.asregs.regs[2], cpu.asregs.regs[3], cpu.asregs.regs[4], \
-	      cpu.asregs.regs[5], cpu.asregs.regs[6], cpu.asregs.regs[7], \
-	      cpu.asregs.regs[8], cpu.asregs.regs[9], \
-        cpu.asregs.regs[28], cpu.asregs.regs[29], cpu.asregs.regs[30])
-
 void wi23_trace_insn(sim_cpu* scpu, const char* iname, uint32_t pc, int regno, uint32_t memaddr, uint32_t memval, mem_action_t memact) {
   char regval_str[11] = "0xXXXXXXXX";
   char regno_str[4] = "XX";
@@ -337,7 +326,7 @@ void wi23_trace_insn(sim_cpu* scpu, const char* iname, uint32_t pc, int regno, u
 
   switch (memact) {
     case LOAD:
-      TRACE_INSN(scpu, "PC: @0x%04X Inst: %s  RegWrite: %s RegValue: %s LoadAddr: 0x%08X LoadValue: 0x%08X StoreAddr: 0xXXXXXXXX StoreValue: 0xXXXXXXXX",\
+      TRACE_INSN(scpu, "PC: @0x%04X Inst: %s RegWrite: %s RegValue: %s LoadAddr: 0x%08X LoadValue: 0x%08X StoreAddr: 0xXXXXXXXX StoreValue: 0xXXXXXXXX",\
         pc,\
         iname,\
         regno_str,\
@@ -347,7 +336,7 @@ void wi23_trace_insn(sim_cpu* scpu, const char* iname, uint32_t pc, int regno, u
       );
       break;
     case STORE:
-      TRACE_INSN(scpu, "PC: @0x%04X Inst: %s  RegWrite: %s RegValue: %s LoadAddr: 0xXXXXXXXX LoadValue: 0xXXXXXXXX StoreAddr: 0x%08X StoreValue: 0x%08X",\
+      TRACE_INSN(scpu, "PC: @0x%04X Inst: %s RegWrite: %s RegValue: %s LoadAddr: 0xXXXXXXXX LoadValue: 0xXXXXXXXX StoreAddr: 0x%08X StoreValue: 0x%08X",\
         pc,\
         iname,\
         regno_str,\
@@ -357,7 +346,7 @@ void wi23_trace_insn(sim_cpu* scpu, const char* iname, uint32_t pc, int regno, u
       );
       break;
     default: // NONE
-      TRACE_INSN(scpu, "PC: @0x%04X Inst: %s  RegWrite: %s RegValue: %s LoadAddr: 0xXXXXXXXX LoadValue: 0xXXXXXXXX StoreAddr: 0xXXXXXXXX StoreValue: 0xXXXXXXXX",
+      TRACE_INSN(scpu, "PC: @0x%04X Inst: %s RegWrite: %s RegValue: %s LoadAddr: 0xXXXXXXXX LoadValue: 0xXXXXXXXX StoreAddr: 0xXXXXXXXX StoreValue: 0xXXXXXXXX",
         pc,\
         iname,\
         regno_str,\
@@ -382,10 +371,12 @@ sim_engine_run (SIM_DESC sd,
   unsigned int inst;
   sim_cpu *scpu = STATE_CPU (sd, 0); /* FIXME <- nice fixme man bro didnt even put anything to fix */
   address_word cia = CPU_PC_GET (scpu);
+  const bool _debug = DEBUG_P(scpu, 0);
 
   //char * dmem = malloc(pow(2, 32));
 
   pc = cpu.asregs.pc;
+
 
   /* Run instructions here. */
   do 
@@ -402,8 +393,9 @@ sim_engine_run (SIM_DESC sd,
 
       opcode = &wi23_opc_info[XT(inst, 26, 6)];
 
-      printf("isntruction: %x\n", inst);
-      fflush(stdout);
+      if (_debug) {
+        sim_debug_printf(scpu, "Insn: %x; Regs: fp:0x%x, sp:0x%x, ra:0x%x\n", inst, cpu.asregs.regs[28], cpu.asregs.regs[29], cpu.asregs.regs[30]);
+      }
 
       // todo potential optimization if shit gets real slow: just switch directly on opcode? might be faster cause less branching
       switch (opcode->itype) {
@@ -906,8 +898,9 @@ sim_engine_run (SIM_DESC sd,
 
       // Wait for a key to be pressed to proceed to the next instruction
       //printf("\nPress any key to increment to the next instruction\n");
-      getchar();
-
+      if (_debug) {
+        getchar();
+      }
     } while (1);
 }
 

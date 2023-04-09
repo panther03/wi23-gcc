@@ -24,5 +24,5 @@ wi23-elf-objdump -sdr -S "${ELF_OUT}" > out/exec-out.log
 wi23-elf-objcopy --verilog-data-width 4 "${ELF_OUT}"  -O verilog  "${HEX_OUT}"
 if [[ ! $DEBUG ]]; then
     read -n 1 -p "Continue with simulation?"
-    wi23-elf-run -t "${ELF_OUT}" > out/trace.log 2>&1
+    wi23-elf-run -D -t "${ELF_OUT}" > out/trace.log 2>&1
 fi
