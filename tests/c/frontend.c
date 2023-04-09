@@ -4,18 +4,16 @@ Aidan McEllistrem
 3/30/23
 */
 
-#include "frontend.h"
+//#include "frontend.h"
 
 // In-hardware MM addresses
-const int *VGA_TEXT_BUFFER = 0x00000000;
-const int *PS2_KEY         = 0x0000B000;
-int *PS2_KEY_AWAIT   = 0x0000B004;
+const int *VGA_TEXT_BUFFER = 0xFFFFE000;
 
 //void __mulsi3() {
 //	return;
 //}
 
-
+/*
 // Grab the keycode from the MM'd address that connects to the KB
 char poll_kb() {
   if(*PS2_KEY_AWAIT) {
@@ -40,30 +38,25 @@ void vga_print(int x, int y, const int* color_data, const char* msg_data) {
     // shift 16 bits next
     i += 2;
   }
-}
+}*/
 
 void vga_print_plain(int x, int y, const char* msg_data) {
   int* buff_addr = VGA_TEXT_BUFFER + (y << 4) + (y << 6) + x;
   int i = 0;
   // assume string is NULL-terminated
-  while (*(msg_data + i) != 0) {
-    // set low bytes (text data)
-    *(buff_addr + i + 1) = *(msg_data + i);
-    // set to white
-    *(buff_addr + i) = 0x0F;
-    // shift 16 bits next
-    i += 2;
+  while (*(msg_data + i) < 0x40) {
+    // set text data
+    // upper byte = 0x20 => green background, black text
+    *(buff_addr + i) = *(msg_data + i) | (0x2000);
+    i += 1;
   }
 }
 
 __attribute__((section(".text")))
 int main() {
-  vga_print_plain(0,0,L"Hello World!");
-  /*while(1) {
-    char kb_val = poll_kb();
-    if (kb_val == 0x20) {
-      vga_print_plain(0,1,L"SPACEBAR Pressed!");
-    }
-  }*/
+  vga_print_plain(0,0,"Hello World!");
+  while(1) {
+    continue;
+  }
   return 0;
 }

@@ -1094,7 +1094,7 @@ moxie-*-elf | moxie-*-moxiebox* | moxie-*-uclinux* | moxie-*-rtems*)
 	;;
 wi23-*-elf)
 	tmake_file="$tmake_file wi23/t-wi23 t-softfp-sfdf t-softfp-excl t-softfp"
-	extra_parts="$extra_parts crti.o crtn.o crtbegin.o crtend.o"
+	extra_parts="$extra_parts crti.o crtn.o crt0.o crtbegin.o crtend.o"
 	;;
 msp430-*-elf*)
 	tmake_file="$tm_file t-crtstuff t-fdpbit msp430/t-msp430"

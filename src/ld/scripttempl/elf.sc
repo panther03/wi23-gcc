@@ -700,6 +700,10 @@ cat <<EOF
   ${RELOCATING+${OTHER_BSS_END_SYMBOLS}}
   ${NOINIT}
   ${RELOCATING+. = ALIGN(${ALIGNMENT});}
+
+  /* TODO: a real linker script would be the right way to do this but i'm super fucking lazy */
+  __data_load_start = LOADADDR(.rodata);
+  __data_load_end = __data_load_start + SIZEOF(.data) + SIZEOF(.rodata);
 EOF
 
 LARGE_DATA_ADDR=". = SEGMENT_START(\"ldata-segment\", ${LARGE_DATA_ADDR-.});"

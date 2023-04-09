@@ -515,7 +515,7 @@ md_assemble (char *str)
     // PSEUDO OPS //
     ///////////////
     case WI23_PSEUDO_POP: {
-      iword = (0x11 << 26) | (29 << 21) | (0x0004);
+      iword = (0x11 << 26) | (29 << 21);
       next_iword = (0x08 << 26) | (29 << 21) | (29 << 16) | (0x0004);
       // Skip whitespace after opcode
       while (ISSPACE (*op_end)) op_end++;
@@ -542,7 +542,7 @@ md_assemble (char *str)
       break;
     }
     case WI23_PSEUDO_FPOP: {
-      iword = (0x31 << 26) | (29 << 21) | (0x0004);
+      iword = (0x31 << 26) | (29 << 21);
       next_iword = (0x08 << 26) | (29 << 21) | (29 << 16) | (0x0004);
       // Skip whitespace after opcode
       while (ISSPACE (*op_end)) op_end++;
