@@ -46,6 +46,7 @@ static htab_t regnames_hash_table = NULL;
 #define WI23_PSEUDO_FPUSH    0x503
 #define WI23_PSEUDO_FPOP     0x504
 #define WI23_PSEUDO_RET     0x505
+#define WI23_PSEUDO_FMOVF     0x506
 //#define WI23_PSEUDO_CALL    0x506
 
 const wi23_opc_info_t wi23_pseudo_save_pc_op = { 0x00, WI23_PSEUDO_SAVE_PC, "spc" };
@@ -54,6 +55,7 @@ const wi23_opc_info_t wi23_pseudo_pop_op = { 0x00, WI23_PSEUDO_POP, "pop" };
 const wi23_opc_info_t wi23_pseudo_fpush_op = { 0x00, WI23_PSEUDO_FPUSH, "fpush" };
 const wi23_opc_info_t wi23_pseudo_fpop_op = { 0x00, WI23_PSEUDO_FPOP, "fpop" };
 const wi23_opc_info_t wi23_pseudo_ret_op = { 0x00, WI23_PSEUDO_RET, "ret" };
+const wi23_opc_info_t wi23_pseudo_fmovf_op = { 0x00, WI23_PSEUDO_FMOVF, "fmovf" };
 //const wi23_opc_info_t wi23_pseudo_call_op = { 0x00, WI23_PSEUDO_CALL, "call" };
 
 // Borrowed from tc-riscv.c
@@ -119,6 +121,7 @@ md_begin (void)
   str_hash_insert(opcode_hash_table, wi23_pseudo_fpush_op.name,  &wi23_pseudo_fpush_op, 0);
   str_hash_insert(opcode_hash_table, wi23_pseudo_fpop_op.name,  &wi23_pseudo_fpop_op, 0);
   str_hash_insert(opcode_hash_table, wi23_pseudo_ret_op.name,  &wi23_pseudo_ret_op, 0);
+  str_hash_insert(opcode_hash_table, wi23_pseudo_fmovf_op.name,  &wi23_pseudo_fmovf_op, 0);
 
   ///////////////////
   // FNCODE TABLE //
@@ -574,6 +577,26 @@ md_assemble (char *str)
       // Saving RA in the process
       iword = (0x06 << 26);
       break;
+    case WI23_PSEUDO_FMOVF: {
+      iword = (0x22 << 26) | (31 << 11);
+      next_iword = (0x23 << 26) | (31 << 21);
+      // Skip whitespace after opcode
+      while (ISSPACE (*op_end)) op_end++;
+      {
+        int dst;
+        int trg;
+
+        dst = parse_register_operand (&op_end, RCLASS_FPR);
+        if (*op_end != ',')
+          as_warn (_("expecting comma delimited register operands"));
+        op_end++;
+        trg = parse_register_operand (&op_end, RCLASS_FPR);
+
+        iword |= (dst << 21);
+        next_iword |= (trg << 11);
+      }
+      break;
+    }
     case WI23_PSEUDO_RET:
       iword = (0x05 << 26) | (30 << 21);
       break;
@@ -602,6 +625,7 @@ md_assemble (char *str)
   if (flag_debug) printf("instruction fragment: %x\n", iword);
   md_number_to_chars (p, iword, 4);
   dwarf2_emit_insn (4);
+
   if (next_iword != 0) {
     p = frag_more(4);
     md_number_to_chars (p, next_iword, 4);

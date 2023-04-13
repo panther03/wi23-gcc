@@ -73,15 +73,15 @@
 
    General-purpose
 
-   r0   - temporary
-   r1   - argument 0
-   r2   - argument 1
-   r3   - argument 2
-   r4   - argument 3
-   r5   - argument 4
-   r6   - argument 5
-   r7   - argument 6
-   r8   - argument 7
+   r0   - argument 0
+   r1   - argument 1
+   r2   - argument 2
+   r3   - argument 3
+   r4   - argument 4
+   r5   - argument 5
+   r6   - argument 6
+   r7   - argument 7
+   r8   - argument 8
    r9   - return value
    r10  - temporary
    r11  - temporary
@@ -104,19 +104,19 @@
    fp   - frame pointer
    sp   - stack pointer
    ra   - return address
-   csr  - status register
+   tmp  - temporary register - called INVALID because compiler should never try to allocate this
 
    Floating-point
 
-   f0   - reserved (???)
-   f1   - argument 0
-   f2   - argument 1
-   f3   - argument 2
-   f4   - argument 3
-   f5   - argument 4
-   f6   - argument 5
-   f7   - argument 6
-   f8   - argument 7
+   f0   - argument 0
+   f1   - argument 1
+   f2   - argument 2
+   f3   - argument 3
+   f4   - argument 4
+   f5   - argument 5
+   f6   - argument 6
+   f7   - argument 7
+   f8   - argument 8
    f9   - return value
    f10  - temporary
    f11  - temporary
@@ -139,7 +139,7 @@
    f28  - callee saved
    f29  - callee saved
    f30  - callee saved
-   fcsr - floating point status register
+   ftmp - temporary register - called INVALID because compiler should never try to allocate this
    
 */
 
@@ -148,12 +148,12 @@
     "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7", \
     "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", \
     "r16", "r17", "r18", "r19", "r20", "r21", "r22", "r23", \
-    "r24", "r25", "r26", "gp", "fp", "sp", "ra", "csr", \
+    "r24", "r25", "r26", "gp", "fp", "sp", "ra", "INVALID", \
    /* floating-point regs */ \
     "f0", "f1", "f2", "f3", "f4", "f5", "f6", "f7", \
     "f8", "f9", "f10", "f11", "f12", "f13", "f14", "f15", \
     "f16", "f17", "f18", "f19", "f20", "f21", "f22", "f23", \
-    "f24", "f25", "f26", "f27", "f28", "f29", "f30", "fcsr", \
+    "f24", "f25", "f26", "f27", "f28", "f29", "f30", "INVALID", \
    /* fake regs   still not entirely clear on what these do lol */ \
     "?ap", "?fp" };
 
@@ -423,8 +423,8 @@ typedef struct {
 /* A C expression that is nonzero if REGNO is the number of a hard
    register in which function arguments are sometimes passed.  */
 #define FUNCTION_ARG_REGNO_P(N)						\
-  (IN_RANGE ((N), GP_ARG_FIRST, GP_ARG_LAST))
- //  || (IN_RANGE ((N), FP_ARG_FIRST, FP_ARG_LAST)))
+  (IN_RANGE ((N), GP_ARG_FIRST, GP_ARG_LAST)) \
+   || (IN_RANGE ((N), FP_ARG_FIRST, FP_ARG_LAST))
 
 /* A macro whose definition is the name of the class to which a valid
    base register must belong.  A base register is one used in an

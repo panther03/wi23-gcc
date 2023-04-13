@@ -24,4 +24,5 @@ extern bool  wi23_offset_address_p (rtx);
 extern const char* wi23_load_immediate(rtx, int32_t i, bool high);
 #ifdef RTX_CODE
 extern void wi23_expand_conditional_branch (rtx, enum rtx_code, rtx, rtx);
+//extern void wi23_absolute_loadstore(rtx*, machine_mode);
 #endif

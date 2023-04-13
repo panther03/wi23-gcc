@@ -1,4 +1,4 @@
-LIB2ADD = $(srcdir)/config/wi23/ashrsi3.c
+LIB2FUNCS_EXCLUDE += _mulsf3 _addsf3 _subsf3
 
 crt0.o: $(srcdir)/config/wi23/crt0.S
 	$(CC) -x assembler-with-cpp $< -c -o $@

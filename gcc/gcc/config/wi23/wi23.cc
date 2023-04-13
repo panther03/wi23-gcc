@@ -55,6 +55,7 @@
 #include "predict.h"
 #include "tree-pass.h"
 #include "opts.h"
+#include "tm-constrs.h"
 
 /* This file should be included last.  */
 // ?????????? ^
@@ -83,35 +84,43 @@ wi23_return_in_memory (const_tree type, const_tree fntype ATTRIBUTE_UNUSED)
    If the precise function being called is known, FUNC is its
    FUNCTION_DECL; otherwise, FUNC is 0.  
 
-   We always return values in register r9 for wi23.  */
+   We always return values in registers r9 & f9 for wi23.  */
 
 static rtx
 wi23_function_value (const_tree valtype, 
 		      const_tree fntype_or_decl ATTRIBUTE_UNUSED,
 		      bool outgoing ATTRIBUTE_UNUSED)
 {
-  return gen_rtx_REG (TYPE_MODE (valtype), RET_VAL_REGNUM);
+  if ((TYPE_MODE (valtype)) == SFmode) {
+    return gen_rtx_REG (TYPE_MODE (valtype), FP_RET_VAL_REGNUM);
+  } else {
+    return gen_rtx_REG (TYPE_MODE (valtype), RET_VAL_REGNUM);
+  }
 }
 
 /* Define how to find the value returned by a library function.
 
-   We always return values in register r9 for wi23.  */
+   We always return values in registers r9 & f9 for wi23.  */
 
 static rtx
 wi23_libcall_value (machine_mode mode,
                      const_rtx fun ATTRIBUTE_UNUSED)
 {
-  return gen_rtx_REG (mode, RET_VAL_REGNUM);
+  if (mode == SFmode) {
+    return gen_rtx_REG (mode, FP_RET_VAL_REGNUM);
+  } else {
+    return gen_rtx_REG (mode, RET_VAL_REGNUM);
+  }
 }
 
 /* Handle TARGET_FUNCTION_VALUE_REGNO_P.
 
-   We always return values in register r9 for wi23.  */
+   We always return values in registers r9 & f9 for wi23.  */
 
 static bool
 wi23_function_value_regno_p (const unsigned int regno)
 {
-  return (regno == RET_VAL_REGNUM);
+  return (regno == RET_VAL_REGNUM) || (regno == FP_RET_VAL_REGNUM);
 }
 
 /* Emit an error message when we're in an asm, and a fatal error for
@@ -188,13 +197,12 @@ wi23_print_operand (FILE *file, rtx x, int code)
     {
     case 'C': {
       enum rtx_code c = GET_CODE (x);
-      // FIXME: remove this when we actually add leu and ltu
       if (c == LTU) {
-        fprintf (file, "lt");  
+        fprintf (file, "ltu");  
         return;
       } 
       if (c == LEU) {
-        fprintf (file, "le");  
+        fprintf (file, "leu");  
         return;
       }
       fprintf (file, "%s", GET_RTX_NAME (c));
@@ -444,10 +452,18 @@ wi23_function_arg (cumulative_args_t cum_v, const function_arg_info &arg)
 {
   CUMULATIVE_ARGS *cum = get_cumulative_args (cum_v);
 
-  if (cum->num_gprs < 9)
-    return gen_rtx_REG (arg.mode, cum->num_gprs);
-  else 
-    return NULL_RTX;
+  if (arg.mode == SFmode) {
+    if (cum->num_fprs < 9)
+      return gen_rtx_REG (arg.mode, FP_ARG_FIRST + cum->num_fprs);
+    else 
+      return NULL_RTX;
+  } else {
+    if (cum->num_gprs < 9)
+      return gen_rtx_REG (arg.mode, cum->num_gprs);
+    else 
+      return NULL_RTX;
+  }
+
 }
 
 #define WI23_FUNCTION_ARG_SIZE(MODE, TYPE)	\
@@ -459,11 +475,24 @@ wi23_function_arg_advance (cumulative_args_t cum_v,
 			    const function_arg_info &arg)
 {
   CUMULATIVE_ARGS *cum = get_cumulative_args (cum_v);
+  HOST_WIDE_INT param_size = arg.promoted_size_in_bytes() ;
+  gcc_assert (param_size >= 0);
 
-  // TODO: wtf was +3 here for in moxie??
-  cum->num_gprs = (cum->num_gprs < RA_REGNUM
-	  ? cum->num_gprs + ((WI23_FUNCTION_ARG_SIZE (arg.mode, arg.type)) / 4)
-	  : cum->num_gprs);
+  /* Convert to words (round up).  */
+  param_size = (UNITS_PER_WORD - 1 + param_size) / UNITS_PER_WORD;
+
+  if (arg.mode == SFmode) {
+    if (cum->num_fprs + param_size > 9)
+      cum->num_fprs = 9;
+    else
+      cum->num_fprs += param_size;
+  } else {
+    if (cum->num_gprs + param_size > 9)
+      cum->num_gprs = 9;
+    else
+      cum->num_gprs += param_size;
+  }
+
 }
 
 /* Used by constraints.md to distinguish between GENERIC and PM
@@ -482,7 +511,7 @@ wi23_load_immediate (rtx dst, int32_t i, bool high)
   char pattern[100];
   // if it fits into 16-bits, don't care if signed or not
   // FIXME: stupid way of doing this?
-  if ((i & 0xFFFF0000) == 0)
+  if ((i & 0xFFFF8000) == 0 || high)
   {
       if (high) {
         sprintf (pattern, "slbi  %%0,%d // low immediate high", i);
@@ -553,16 +582,30 @@ static bool
 wi23_can_change_mode_class (machine_mode from, machine_mode to,
 			    reg_class_t rclass)
 {
-  if (rclass == FLOAT_REGS) {
-    return false;
-  }
-  /*if (rclass > 1) {
-    printf("from: %d\n", rclass);
-  }*/
-  return true;
+  return !reg_classes_intersect_p (FLOAT_REGS, rclass);
 }
 
+/*void wi23_absolute_loadstore(rtx *operands, machine_mode m) {
+  if (satisfies_constraint_A(operands[0]) && REG_P(operands[1])) {
+    printf("Uhhhh ummm uhhh uhhhh\n");
+    // Store
+    rtx temp = gen_reg_rtx(SImode);
+    emit_move_insn (temp, XEXP(operands[0],0));
+    operands[0] = gen_rtx_MEM(m,gen_rtx_PLUS(SImode, temp, gen_rtx_CONST_INT(SImode, 0)));
+    debug_rtx(operands[0]);
+  } else if (satisfies_constraint_A(operands[1]) && REG_P(operands[0])) {
+    printf("Uhhhh ummm uhhh uhhhh\n");
+    // Load
+    rtx temp = gen_reg_rtx(SImode);
+    emit_move_insn (temp, XEXP(operands[1],0));
+    operands[1] = gen_rtx_MEM(m,gen_rtx_PLUS(SImode, temp, gen_rtx_CONST_INT(SImode, 0)));
+    debug_rtx(operands[1]);
+  }
+}*/
 
+bool wi23_cannot_force_const_mem(machine_mode m, rtx r) {
+  return false;
+}
 
 /* The Global `targetm' Variable. */
 
@@ -584,8 +627,8 @@ wi23_can_change_mode_class (machine_mode from, machine_mode to,
 #undef  TARGET_FUNCTION_ARG_ADVANCE
 #define TARGET_FUNCTION_ARG_ADVANCE	wi23_function_arg_advance
 
-#undef TARGET_LRA_P
-#define TARGET_LRA_P hook_bool_void_false
+//#undef TARGET_LRA_P
+//#define TARGET_LRA_P hook_bool_void_false
 
 #undef  TARGET_ADDR_SPACE_LEGITIMATE_ADDRESS_P
 #define TARGET_ADDR_SPACE_LEGITIMATE_ADDRESS_P	wi23_legitimate_address_p
@@ -630,8 +673,11 @@ wi23_can_change_mode_class (machine_mode from, machine_mode to,
 #undef TARGET_HARD_REGNO_MODE_OK
 #define TARGET_HARD_REGNO_MODE_OK wi23_hard_regno_mode_ok
 
-#undef TARGET_CAN_CHANGE_MODE_CLASS
-#define TARGET_CAN_CHANGE_MODE_CLASS wi23_can_change_mode_class
+//#undef TARGET_CAN_CHANGE_MODE_CLASS
+//#define TARGET_CAN_CHANGE_MODE_CLASS wi23_can_change_mode_class
+
+#undef  TARGET_CANNOT_FORCE_CONST_MEM
+#define TARGET_CANNOT_FORCE_CONST_MEM wi23_cannot_force_const_mem
 
 struct gcc_target targetm = TARGET_INITIALIZER;
 

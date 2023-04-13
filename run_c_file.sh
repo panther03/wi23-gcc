@@ -11,13 +11,19 @@ ASM_OUT="$(basename $1 .c).S"
 if [[ $DEBUG ]]; then
     mkdir -p out/debugging
     cd out/debugging/
-    wi23-elf-gcc -O2 "../../$1" -dap -S -o "${ASM_OUT}"    
+    /opt/or1k-elf/bin/or1k-elf-gcc  -mhard-float -dap "../../$1" -S -o "or1k-${ASM_OUT}" 
+    exit 1
+    #wi23-elf-gcc -O2 "../../$1" -dap -S -o "${ASM_OUT}"    
+    moxie-elf-gcc -O2 "../../$1" -S -o "moxie-${ASM_OUT}" 
     mv "${ASM_OUT}" ..
+    mv "moxie-${ASM_OUT}" ..
+    mv "or1k-${ASM_OUT}" ..
     cd ../../
 fi
 
 #-T tests/script.ld
-wi23-elf-gcc -O2 $1 -c -g -o "${OBJECT_OUT}"
+wi23-elf-gcc -fno-builtin $1 -c -g -o "${OBJECT_OUT}"
+echo "wi23-elf-gcc -fno-builtin $1 -c -g ${OBJECT_OUT}"
 wi23-elf-gcc -o "${ELF_OUT}" "${OBJECT_OUT}"
 wi23-elf-objdump -dr -S "${OBJECT_OUT}" > out/object-out.log
 wi23-elf-objdump -sdr -S "${ELF_OUT}" > out/exec-out.log
