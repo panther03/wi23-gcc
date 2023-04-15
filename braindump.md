@@ -5,8 +5,9 @@ planning to use this file to document issues that come up during development/tes
 - (NOPE) To indicate that calls clobber $ra you need to use a parallel condition
 - (DONE) Should we make return and call simpler? Like corresponding to the actual instructions?
 - (DONE) Subword insns
-- the current store absolute clobbers the store value and thus needs to be a define_expand
+- (DONE) the current store absolute clobbers the store value and thus needs to be a define_expand
 - (DONE) compiler needs to be aware of lbi sign extension
 - Dedicated zero extend and sign extend insns?
+- Pick an ISA and re-do the stack using that ISA as the reference.
 
 elf32wi23.sh has the stack address

@@ -293,7 +293,7 @@ wi23_compute_frame (void)
 
   cfun->machine->local_vars_size += padding_locals;
 
-  cfun->machine->callee_saved_reg_size = 8;
+  cfun->machine->callee_saved_reg_size = 0;
 
   /* Save callee-saved registers.  */
   for (regno = 0; regno < FIRST_PSEUDO_REGISTER; regno++)
@@ -328,7 +328,12 @@ wi23_expand_prologue (void)
       if (df_regs_ever_live_p (regno)
 	  && !call_used_or_fixed_reg_p (regno))
 	{
-	  insn = emit_insn (gen_movsi_push (gen_rtx_REG (Pmode, regno)));
+    if (regno >= FP_ARG_FIRST) {
+      insn = emit_insn (gen_movsi_fpush (gen_rtx_REG (SFmode, regno)));
+    } else {
+      insn = emit_insn (gen_movsi_push (gen_rtx_REG (Pmode, regno)));
+    }
+	  
 	  RTX_FRAME_RELATED_P (insn) = 1;
 	}
     }
@@ -368,10 +373,16 @@ wi23_expand_epilogue (void)
       if (!call_used_or_fixed_reg_p (regno)
         && df_regs_ever_live_p (regno))
       {
-        rtx preg = gen_rtx_REG (Pmode, regno);
-        emit_insn (gen_movsi_pop (preg));
+        if (regno >= FP_ARG_FIRST) {
+          rtx preg = gen_rtx_REG (SFmode, regno);
+          emit_insn (gen_movsi_fpop (preg));
+        } else {
+          rtx preg = gen_rtx_REG (Pmode, regno);
+          emit_insn (gen_movsi_pop (preg));
+        }
       }
     }
+
 
     emit_insn (gen_movsi_pop (gen_rtx_REG (Pmode, FP_REGNUM)));
     emit_insn (gen_movsi_pop (gen_rtx_REG (Pmode, RA_REGNUM)));
@@ -396,7 +407,7 @@ wi23_initial_elimination_offset (int from, int to)
       ret = -cfun->machine->callee_saved_reg_size;
     }
   else if ((from) == AP_REGNUM && (to) == FP_REGNUM)
-    ret = 0x00;
+    ret = 0;
   else
     abort ();
 
@@ -607,6 +618,12 @@ bool wi23_cannot_force_const_mem(machine_mode m, rtx r) {
   return false;
 }
 
+static HOST_WIDE_INT
+epiphany_starting_frame_offset (void)
+{
+  return -8;
+}
+
 /* The Global `targetm' Variable. */
 
 /* Initialize the GCC target structure.  */
@@ -678,6 +695,9 @@ bool wi23_cannot_force_const_mem(machine_mode m, rtx r) {
 
 #undef  TARGET_CANNOT_FORCE_CONST_MEM
 #define TARGET_CANNOT_FORCE_CONST_MEM wi23_cannot_force_const_mem
+
+//#undef TARGET_STARTING_FRAME_OFFSET
+//#define TARGET_STARTING_FRAME_OFFSET epiphany_starting_frame_offset
 
 struct gcc_target targetm = TARGET_INITIALIZER;
 

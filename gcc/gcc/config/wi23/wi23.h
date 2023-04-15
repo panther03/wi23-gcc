@@ -284,12 +284,12 @@ typedef struct {
 
 /* Define this if it is the responsibility of the caller to allocate
    the area reserved for arguments passed in registers.  */
-#define REG_PARM_STACK_SPACE(FNDECL) 0 // FIXME: changed this from moxie??
+#define REG_PARM_STACK_SPACE(FNDECL) (6 * UNITS_PER_WORD) // FIXME: changed this from moxie??
 
 /* Offset from the argument pointer register to the first argument's
    address.  On some machines it may depend on the data type of the
    function.  */
-#define FIRST_PARM_OFFSET(F) 0
+#define FIRST_PARM_OFFSET(F) 12
 
 /* Define this macro to nonzero value if the addresses of local variable slots
    are at negative offsets from the frame pointer.  */

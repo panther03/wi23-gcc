@@ -810,8 +810,8 @@ sim_engine_run (SIM_DESC sd,
             // -4 for these two because we're about to increment
             // by 4 later
             case 0x05: {
-              pc = cpu.asregs.regs[src_reg] + imms - 4;
               WI23_TRACE_CTRL("JR");
+              pc = cpu.asregs.regs[src_reg] + imms - 4;
               break;
             }
             case 0x07: {

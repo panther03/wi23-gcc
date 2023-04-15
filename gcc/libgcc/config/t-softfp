@@ -60,8 +60,8 @@
 # This is another temporary measure, and cannot be used together with
 # softfp_compat.
 
-softfp_float_funcs = add$(m)3 div$(m)3 eq$(m)2 ge$(m)2 le$(m)2 mul$(m)3 \
-  neg$(m)2 sub$(m)3 unord$(m)2
+softfp_float_funcs = div$(m)3 eq$(m)2 ge$(m)2 le$(m)2 \
+  neg$(m)2 unord$(m)2
 softfp_floatint_funcs = fix$(m)$(i) fixuns$(m)$(i) \
   float$(i)$(m) floatun$(i)$(m)
 
