@@ -295,8 +295,8 @@ convert_target_flags (unsigned int tflags)
 }*/
 
 void wi23_trace_insn(sim_cpu* scpu, const char* iname, uint32_t pc, int regno, uint32_t memaddr, uint32_t memval, mem_action_t memact) {
-  char regval_str[11] = "0xXXXXXXXX";
-  char regno_str[4] = "XX";
+  char regval_str[11] = "0xxxxxxxxx";
+  char regno_str[4] = "xx";
 
   // super overcomplicated manual way of printing register lol
   if (regno != -1) {
@@ -321,12 +321,12 @@ void wi23_trace_insn(sim_cpu* scpu, const char* iname, uint32_t pc, int regno, u
     }
     regno_str[3] = 0;
 
-    sprintf(regval_str, "0x%08X", regval.i);
+    sprintf(regval_str, "0x%08x", regval.i);
   }
 
   switch (memact) {
     case LOAD:
-      TRACE_INSN(scpu, "PC: @0x%04X Inst: %s RegWrite: %s RegValue: %s LoadAddr: 0x%08X LoadValue: 0x%08X StoreAddr: 0xXXXXXXXX StoreValue: 0xXXXXXXXX",\
+      TRACE_INSN(scpu, "PC: @0x%04x Inst: %s RegWrite: %s RegValue: %s LoadAddr: 0x%08x LoadValue: 0x%08x StoreAddr: 0xxxxxxxxx StoreValue: 0xxxxxxxxx",\
         pc,\
         iname,\
         regno_str,\
@@ -336,7 +336,7 @@ void wi23_trace_insn(sim_cpu* scpu, const char* iname, uint32_t pc, int regno, u
       );
       break;
     case STORE:
-      TRACE_INSN(scpu, "PC: @0x%04X Inst: %s RegWrite: %s RegValue: %s LoadAddr: 0xXXXXXXXX LoadValue: 0xXXXXXXXX StoreAddr: 0x%08X StoreValue: 0x%08X",\
+      TRACE_INSN(scpu, "PC: @0x%04x Inst: %s RegWrite: %s RegValue: %s LoadAddr: 0xxxxxxxxx LoadValue: 0xxxxxxxxx StoreAddr: 0x%08x StoreValue: 0x%08x",\
         pc,\
         iname,\
         regno_str,\
@@ -346,7 +346,7 @@ void wi23_trace_insn(sim_cpu* scpu, const char* iname, uint32_t pc, int regno, u
       );
       break;
     default: // NONE
-      TRACE_INSN(scpu, "PC: @0x%04X Inst: %s RegWrite: %s RegValue: %s LoadAddr: 0xXXXXXXXX LoadValue: 0xXXXXXXXX StoreAddr: 0xXXXXXXXX StoreValue: 0xXXXXXXXX",
+      TRACE_INSN(scpu, "PC: @0x%04x Inst: %s RegWrite: %s RegValue: %s LoadAddr: 0xxxxxxxxx LoadValue: 0xxxxxxxxx StoreAddr: 0xxxxxxxxx StoreValue: 0xxxxxxxxx",
         pc,\
         iname,\
         regno_str,\
