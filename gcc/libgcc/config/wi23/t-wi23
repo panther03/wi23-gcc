@@ -1,4 +1,7 @@
-LIB2FUNCS_EXCLUDE += _mulsf3 _addsf3 _subsf3
+LIB2ADD += $(srcdir)/config/wi23/div.S \
 
 crt0.o: $(srcdir)/config/wi23/crt0.S
 	$(CC) -x assembler-with-cpp $< -c -o $@
+
+# Avoid the full unwinder being pulled along with the division libcalls.
+LIB2_DIVMOD_EXCEPTION_FLAGS := -fasynchronous-unwind-tables

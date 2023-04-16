@@ -100,11 +100,11 @@
    r24  - callee saved
    r25  - callee saved
    r26  - callee saved
-   gp   - global pointer (tbd) probably just make it another callee saved
+   r27  - callee saved
    fp   - frame pointer
    sp   - stack pointer
    ra   - return address
-   tmp  - temporary register - called INVALID because compiler should never try to allocate this
+   tmp  - scratch register
 
    Floating-point
 
@@ -138,8 +138,8 @@
    f27  - callee saved
    f28  - callee saved
    f29  - callee saved
-   f30  - callee saved
-   ftmp - temporary register - called INVALID because compiler should never try to allocate this
+   ft1  - scratch register
+   ft2  - scratch register
    
 */
 
@@ -148,15 +148,92 @@
     "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7", \
     "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", \
     "r16", "r17", "r18", "r19", "r20", "r21", "r22", "r23", \
-    "r24", "r25", "r26", "gp", "fp", "sp", "ra", "INVALID", \
+    "r24", "r25", "r26", "r27", "fp", "sp", "ra", "tmp", \
    /* floating-point regs */ \
     "f0", "f1", "f2", "f3", "f4", "f5", "f6", "f7", \
     "f8", "f9", "f10", "f11", "f12", "f13", "f14", "f15", \
     "f16", "f17", "f18", "f19", "f20", "f21", "f22", "f23", \
-    "f24", "f25", "f26", "f27", "f28", "f29", "f30", "INVALID", \
+    "f24", "f25", "f26", "f27", "f28", "f29", "ft1", "ft2", \
    /* fake regs   still not entirely clear on what these do lol */ \
     "?ap", "?fp" };
 
+#define WI23_R0     0
+#define WI23_R1     1
+#define WI23_R2     2
+#define WI23_R3     3
+#define WI23_R4     4
+#define WI23_R5     5
+#define WI23_R6     6
+#define WI23_R7     7
+#define WI23_R8     8
+#define WI23_R9     9
+#define WI23_R10    10
+#define WI23_R11    11
+#define WI23_R12    12
+#define WI23_R13    13
+#define WI23_R14    14
+#define WI23_R15    15
+#define WI23_R16    16
+#define WI23_R17    17
+#define WI23_R18    18
+#define WI23_R19    19
+#define WI23_R20    20
+#define WI23_R21    21
+#define WI23_R22    22
+#define WI23_R23    23
+#define WI23_R24    24
+#define WI23_R25    25
+#define WI23_R26    26
+#define WI23_R27    27
+#define WI23_FP     28
+#define WI23_SP     29
+#define WI23_RA     30
+#define WI23_TMP    31
+
+#define WI23_F0     32
+#define WI23_F1     33
+#define WI23_F2     34
+#define WI23_F3     35
+#define WI23_F4     36
+#define WI23_F5     37
+#define WI23_F6     38
+#define WI23_F7     39
+#define WI23_F8     40
+#define WI23_F9     41
+#define WI23_F10    42
+#define WI23_F11    43
+#define WI23_F12    44
+#define WI23_F13    45
+#define WI23_F14    46
+#define WI23_F15    47
+#define WI23_F16    48
+#define WI23_F17    49
+#define WI23_F18    50
+#define WI23_F19    51
+#define WI23_F20    52
+#define WI23_F21    53
+#define WI23_F22    54
+#define WI23_F23    55
+#define WI23_F24    56
+#define WI23_F25    57
+#define WI23_F26    58
+#define WI23_F27    59
+#define WI23_F28    60
+#define WI23_F29    61
+#define WI23_FT1    62
+#define WI23_FT2    63
+#define WI23_QFP    64
+#define WI23_QAP    65
+
+// Special register declarations
+#define GP_ARG_FIRST        WI23_R0
+#define GP_ARG_LAST         WI23_R8
+#define GP_RET_VAL_REGNUM   WI23_R9
+#define FP_ARG_FIRST        WI23_F0
+#define FP_ARG_LAST         WI23_F8
+#define FP_RET_VAL_REGNUM   WI23_F9
+#define FP_OFS                32
+#define LAST_REAL_REGISTER    63
 #define FIRST_PSEUDO_REGISTER 66
 
 enum reg_class
@@ -185,34 +262,47 @@ enum reg_class
     "ALL_REGS" }
 
 #define FIXED_REGISTERS		\
-{ /* general */ \
-  0, 0, 0, 0, 0, 0, 0, 0,	\
-  0, 0, 0, 0, 0, 0, 0, 0,	\
-  0, 0, 0, 0, 0, 0, 0, 0,	\
-  0, 0, 0, 0, 1, 1, 1, 1,	\
-  /* float */ \
-  0, 0, 0, 0, 0, 0, 0, 0,	\
-  0, 0, 0, 0, 0, 0, 0, 0,	\
-  0, 0, 0, 0, 0, 0, 0, 0,	\
-  0, 0, 0, 0, 0, 0, 0, 1,	\
-  /* fake */ \
-  1, 1}
-
-#define CALL_USED_REGISTERS		\
 { \
-  1, 1, 1, 1, 1, 1, 1, 1,	/* general */ \
-  1, 1, 1, 1, 1, 1, 1, 1,	\
-  1, 1, 1, 1, 0, 0, 0, 0,	\
-  0, 0, 0, 0, 1, 1, 1, 1,	\
-  1, 1, 1, 1, 1, 1, 1, 1,	/* float */ \
-  1, 1, 1, 1, 1, 1, 1, 1,	\
-  1, 1, 1, 1, 0, 0, 0, 0,	\
-  0, 0, 0, 0, 0, 0, 0, 1,	\
-  1, 1 /* fake */ }
+/*  r0  r1  r2  r3  r4  r5  r6  r7 */  0, 0, 0, 0, 0, 0, 0, 0,	\
+/*  r8  r9 r10 r11 r12 r13 r14 r15 */  0, 0, 0, 0, 0, 0, 0, 0,	\
+/* r16 r17 r18 r19 r20 r21 r22 r23 */  0, 0, 0, 0, 0, 0, 0, 0,	\
+/* r24 r25 r26 r27  fp  sp  ra tmp */  0, 0, 0, 0, 0, 1, 0, 1,	\
+/*  f0  f1  f2  f3  f4  f5  f6  f7 */  0, 0, 0, 0, 0, 0, 0, 0,	\
+/*  f8  f9 f10 f11 f12 f13 f14 f15 */  0, 0, 0, 0, 0, 0, 0, 0,	\
+/* f16 f17 f18 f19 f20 f21 f22 f23 */  0, 0, 0, 0, 0, 0, 0, 0,	\
+/* f24 f25 f26 f27 f28 f29 ft1 ft2 */  0, 0, 0, 0, 0, 0, 1, 1,	\
+/* ?fp ?ap                         */  1, 1, \
+}
+
+#define CALL_REALLY_USED_REGISTERS		\
+{ \
+  /*  r0  r1  r2  r3  r4  r5  r6  r7 */  1, 1, 1, 1, 1, 1, 1, 1,	\
+  /*  r8  r9 r10 r11 r12 r13 r14 r15 */  1, 1, 1, 1, 1, 1, 1, 1,	\
+  /* r16 r17 r18 r19 r20 r21 r22 r23 */  1, 1, 1, 0, 0, 0, 0, 0,	\
+  /* r24 r25 r26 r27  fp  sp  ra tmp */  0, 0, 0, 0, 0, 0, 0, 0,	\
+  /*  f0  f1  f2  f3  f4  f5  f6  f7 */  1, 1, 1, 1, 1, 1, 1, 1,	\
+  /*  f8  f9 f10 f11 f12 f13 f14 f15 */  1, 1, 1, 1, 1, 1, 1, 1,	\
+  /* f16 f17 f18 f19 f20 f21 f22 f23 */  1, 1, 1, 0, 0, 0, 0, 0,	\
+  /* f24 f25 f26 f27 f28 f29 ft1 ft2 */  0, 0, 0, 0, 0, 0, 0, 0,	\
+  /* ?fp ?ap                         */  0, 0, \
+}
+
+/* Registers used as temporaries in prologue/epilogue code. */
+#define WI23_PROLOGUE_TEMP_REGNUM (WI23_TMP)
+#define WI23_PROLOGUE_TEMP(MODE)	\
+  gen_rtx_REG (MODE, WI23_PROLOGUE_TEMP_REGNUM)
+
+/* Registers used for exception handling.  */
+#define WI23_EH_FIRST_REGNUM	(WI23_R17)
+#define WI23_EH_LAST_REGNUM	(WI23_R18)
+#define WI23_EH_TEMP_REGNUM	(WI23_TMP)
+
+/* We can't copy to or from our CC register. */
+#define AVOID_CCMODE_COPIES 1
 
 /* A C expression whose value is a register class containing hard
    register REGNO.  */
-#define REGNO_REG_CLASS(R) ((R > CSR_REGNUM && R <= FCSR_REGNUM) ? FLOAT_REGS : GENERAL_REGS)
+#define REGNO_REG_CLASS(R) ((R >= FP_OFS && R <= LAST_REAL_REGISTER) ? FLOAT_REGS : GENERAL_REGS)
 
 // immediate size checks, borrowed from nios2.h
 #define IMM16_S(X) ((unsigned HOST_WIDE_INT)(X) + 0x8000 < 0x10000)
@@ -282,14 +372,10 @@ typedef struct {
    space allocated by the caller.  */
 #define OUTGOING_REG_PARM_STACK_SPACE(FNTYPE) 1
 
-/* Define this if it is the responsibility of the caller to allocate
-   the area reserved for arguments passed in registers.  */
-#define REG_PARM_STACK_SPACE(FNDECL) (6 * UNITS_PER_WORD) // FIXME: changed this from moxie??
-
 /* Offset from the argument pointer register to the first argument's
    address.  On some machines it may depend on the data type of the
    function.  */
-#define FIRST_PARM_OFFSET(F) 12
+#define FIRST_PARM_OFFSET(F) 0
 
 /* Define this macro to nonzero value if the addresses of local variable slots
    are at negative offsets from the frame pointer.  */
@@ -298,24 +384,28 @@ typedef struct {
 /* Define this macro as a C expression that is nonzero for registers that are
    used by the epilogue or the return pattern.  The stack and frame
    pointer registers are already assumed to be used as needed.  */
-#define EPILOGUE_USES(R) (R == RA_REGNUM)
+#define EPILOGUE_USES(R) (R == WI23_RA)
 
 /* A C expression whose value is RTL representing the location of the
    incoming return address at the beginning of any function, before
    the prologue.  */
-#define INCOMING_RETURN_ADDR_RTX	gen_rtx_REG (Pmode, RA_REGNUM)
-
-// FIXME cba to implement this just going to not implement it and hope gcc doesnt explode
-// it did
-// just going to uncomment it because cba to investigate
+#define INCOMING_RETURN_ADDR_RTX	gen_rtx_REG (Pmode, WI23_RA)
 
 // Describe how we implement __builtin_eh_return.  
-#define EH_RETURN_DATA_REGNO(N)	((N) < 4 ? (N+2) : INVALID_REGNUM)
+#define EH_RETURN_DATA_REGNO(N)					\
+  ((N) <= (WI23_EH_LAST_REGNUM - WI23_EH_FIRST_REGNUM) ?	\
+   WI23_EH_FIRST_REGNUM + (N) : INVALID_REGNUM)
+
+/* A C expression whose value is RTL representing a location in which to store
+   a stack adjustment to be applied before function return. This is used to
+   unwind the stack to an exception handler's call frame. It will be assigned
+   zero on code paths that return normally.  */
+#define EH_RETURN_STACKADJ_RTX	gen_rtx_REG (SImode, WI23_EH_TEMP_REGNUM)
 
 // Store the return handler into the call frame. 
 #define EH_RETURN_HANDLER_RTX						\
   gen_frame_mem (Pmode,							\
-		 plus_constant (Pmode, frame_pointer_rtx, UNITS_PER_WORD))
+		 plus_constant (Pmode, hard_frame_pointer_rtx, UNITS_PER_WORD))
 
 
 /* Storage Layout */
@@ -335,6 +425,11 @@ typedef struct {
 /* Number of storage units in a word; normally the size of a
    general-purpose register, a power of two from 1 or 8.  */
 #define UNITS_PER_WORD 4
+
+/* Define this macro to 1 if operations between registers with
+   integral mode smaller than a word are always performed on the
+   entire register.  */
+#define WORD_REGISTER_OPERATIONS 1
 
 /* Define this macro to the minimum alignment enforced by hardware
    for the stack pointer on this machine.  The definition is a C
@@ -370,7 +465,7 @@ typedef struct {
 /* Make arrays of chars word-aligned for the same reasons.  */
 #define DATA_ALIGNMENT(TYPE, ALIGN)		\
   (TREE_CODE (TYPE) == ARRAY_TYPE		\
-   && TYPE_MODE (TREE_TYPE (TYPE)) == SImode	\
+   && TYPE_MODE (TREE_TYPE (TYPE)) == QImode	\
    && (ALIGN) < FASTEST_ALIGNMENT ? FASTEST_ALIGNMENT : (ALIGN))
      
 /* Set this nonzero if move instructions will actually fail to work
@@ -396,28 +491,30 @@ typedef struct {
 
 /* The register number of the stack pointer register, which must also
    be a fixed register according to `FIXED_REGISTERS'.  */
-#define STACK_POINTER_REGNUM SP_REGNUM
+#define STACK_POINTER_REGNUM WI23_SP
 
 /* The register number of the frame pointer register, which is used to
    access automatic variables in the stack frame.  */
-#define FRAME_POINTER_REGNUM SFP_REGNUM
+#define FRAME_POINTER_REGNUM WI23_QFP
 
 /* The register number of the arg pointer register, which is used to
    access the function's argument list.  */
-#define ARG_POINTER_REGNUM AP_REGNUM
+#define ARG_POINTER_REGNUM WI23_QAP
 
-#define HARD_FRAME_POINTER_REGNUM FP_REGNUM
+#define HARD_FRAME_POINTER_REGNUM WI23_FP
 
-#define ELIMINABLE_REGS							\
-{{ FRAME_POINTER_REGNUM, HARD_FRAME_POINTER_REGNUM },			\
- { ARG_POINTER_REGNUM,   HARD_FRAME_POINTER_REGNUM }}			
+#define ELIMINABLE_REGS					\
+{{ ARG_POINTER_REGNUM,   STACK_POINTER_REGNUM},		\
+ { ARG_POINTER_REGNUM,   HARD_FRAME_POINTER_REGNUM},	\
+ { FRAME_POINTER_REGNUM, STACK_POINTER_REGNUM},		\
+ { FRAME_POINTER_REGNUM, HARD_FRAME_POINTER_REGNUM}}
 
 /* This macro returns the initial difference between the specified pair
    of registers.  */
 // FIXME -- need to implement this function for wi23
 #define INITIAL_ELIMINATION_OFFSET(FROM, TO, OFFSET)			\
   do {									\
-    (OFFSET) = 0; /*wi23_initial_elimination_offset((FROM), (TO));*/ \
+    (OFFSET) = wi23_initial_elimination_offset((FROM), (TO)); \
   } while (0)
 
 /* A C expression that is nonzero if REGNO is the number of a hard
@@ -433,26 +530,14 @@ typedef struct {
 
 #define INDEX_REG_CLASS NO_REGS
 
-// FIXME only used by moxie
-#define HARD_REGNO_OK_FOR_BASE_P(NUM) \
-  ((unsigned) (NUM) < FIRST_PSEUDO_REGISTER \
-   && (REGNO_REG_CLASS(NUM) == GENERAL_REGS \
-       || (NUM) == HARD_FRAME_POINTER_REGNUM))
-
 /* A C expression which is nonzero if register number NUM is suitable
    for use as a base register in operand addresses.  */
-#ifdef REG_OK_STRICT
-#define REGNO_OK_FOR_BASE_P(NUM)		 \
-  (HARD_REGNO_OK_FOR_BASE_P(NUM) 		 \
-   || HARD_REGNO_OK_FOR_BASE_P(reg_renumber[(NUM)]))
-#else
-#define REGNO_OK_FOR_BASE_P(NUM)		 \
-  ((NUM) >= FIRST_PSEUDO_REGISTER || HARD_REGNO_OK_FOR_BASE_P(NUM))
-#endif
+#define REGNO_OK_FOR_BASE_P(REGNO)	\
+  wi23_regno_ok_for_base_p (REGNO, true)
 
 /* A C expression which is nonzero if register number NUM is suitable
    for use as an index register in operand addresses.  */
-#define REGNO_OK_FOR_INDEX_P(NUM) FP_REGNUM
+#define REGNO_OK_FOR_INDEX_P(NUM) 0
 
 /* The maximum number of bytes that a single instruction can move
    quickly between memory and registers or between two memory
@@ -460,7 +545,6 @@ typedef struct {
 #define MOVE_MAX 4
 
 /* All load operations zero extend.  */
-// FIXME: lbi sign extends?
 #define LOAD_EXTEND_OP(MEM) ZERO_EXTEND
 
 /* A number, the maximum number of registers that can appear in a
@@ -484,6 +568,16 @@ typedef struct {
 #define REGISTER_TARGET_PRAGMAS() do { \
   c_register_addr_space ("__flash", ADDR_SPACE_PM); \
 } while (0)
+
+/* Define these boolean macros to indicate whether or not your
+   architecture has (un)conditional branches that can span all of
+   memory.  */
+#define HAS_LONG_COND_BRANCH false
+#define HAS_LONG_UNCOND_BRANCH false
+
+/* Define this macro if it is as good or better to call a constant
+   function address than to call an address kept in a register.  */
+#define NO_FUNCTION_CSE 1
 
 extern int wi23_is_mem_pm(rtx o);
 #endif /* GCC_WI23_h */

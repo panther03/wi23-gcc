@@ -43,10 +43,11 @@ static htab_t regnames_hash_table = NULL;
 #define WI23_PSEUDO_SAVE_PC 0x500
 #define WI23_PSEUDO_PUSH    0x501
 #define WI23_PSEUDO_POP     0x502
-#define WI23_PSEUDO_FPUSH    0x503
-#define WI23_PSEUDO_FPOP     0x504
+#define WI23_PSEUDO_FPUSH   0x503
+#define WI23_PSEUDO_FPOP    0x504
 #define WI23_PSEUDO_RET     0x505
-#define WI23_PSEUDO_FMOVF     0x506
+#define WI23_PSEUDO_FMOVF   0x506
+#define WI23_PSEUDO_MOV     0x507
 //#define WI23_PSEUDO_CALL    0x506
 
 const wi23_opc_info_t wi23_pseudo_save_pc_op = { 0x00, WI23_PSEUDO_SAVE_PC, "spc" };
@@ -56,6 +57,7 @@ const wi23_opc_info_t wi23_pseudo_fpush_op = { 0x00, WI23_PSEUDO_FPUSH, "fpush" 
 const wi23_opc_info_t wi23_pseudo_fpop_op = { 0x00, WI23_PSEUDO_FPOP, "fpop" };
 const wi23_opc_info_t wi23_pseudo_ret_op = { 0x00, WI23_PSEUDO_RET, "ret" };
 const wi23_opc_info_t wi23_pseudo_fmovf_op = { 0x00, WI23_PSEUDO_FMOVF, "fmovf" };
+const wi23_opc_info_t wi23_pseudo_mov_op = { 0x00, WI23_PSEUDO_MOV, "mov" };
 //const wi23_opc_info_t wi23_pseudo_call_op = { 0x00, WI23_PSEUDO_CALL, "call" };
 
 // Borrowed from tc-riscv.c
@@ -122,6 +124,7 @@ md_begin (void)
   str_hash_insert(opcode_hash_table, wi23_pseudo_fpop_op.name,  &wi23_pseudo_fpop_op, 0);
   str_hash_insert(opcode_hash_table, wi23_pseudo_ret_op.name,  &wi23_pseudo_ret_op, 0);
   str_hash_insert(opcode_hash_table, wi23_pseudo_fmovf_op.name,  &wi23_pseudo_fmovf_op, 0);
+  str_hash_insert(opcode_hash_table, wi23_pseudo_mov_op.name,  &wi23_pseudo_mov_op, 0);
 
   ///////////////////
   // FNCODE TABLE //
@@ -322,7 +325,7 @@ md_assemble (char *str)
     ////////////////////////////////
     // R-type - no function code //
     //////////////////////////////
-    case WI23_RF_F_DST:
+    case WI23_RF_I_F_DST:
     case WI23_RF_I_DST:
       iword = (opcode->opcode << 26);
       
@@ -331,15 +334,15 @@ md_assemble (char *str)
 
       {
         int dst, src, trg;
-        dst = parse_register_operand (&op_end, (itype == WI23_RF_F_DST) ? RCLASS_FPR : RCLASS_GPR);
+        dst = parse_register_operand (&op_end, RCLASS_GPR);
         if (*op_end != ',')
           as_warn (_("expecting comma delimited register operands"));
         op_end++;
-        src = parse_register_operand (&op_end, (itype == WI23_RF_F_DST) ? RCLASS_FPR : RCLASS_GPR);
+        src = parse_register_operand (&op_end, (itype == WI23_RF_I_F_DST) ? RCLASS_FPR : RCLASS_GPR);
         if (*op_end != ',')
           as_warn (_("expecting comma delimited register operands"));
         op_end++;
-        trg = parse_register_operand (&op_end, (itype == WI23_RF_F_DST) ? RCLASS_FPR : RCLASS_GPR);
+        trg = parse_register_operand (&op_end, (itype == WI23_RF_I_F_DST) ? RCLASS_FPR : RCLASS_GPR);
         iword |= (dst << 11) + (trg << 16) + (src << 21);
       }
       break;
@@ -577,6 +580,9 @@ md_assemble (char *str)
       // Saving RA in the process
       iword = (0x06 << 26);
       break;
+    case WI23_PSEUDO_RET:
+      iword = (0x05 << 26) | (30 << 21);
+      break;
     case WI23_PSEUDO_FMOVF: {
       iword = (0x22 << 26) | (31 << 11);
       next_iword = (0x23 << 26) | (31 << 21);
@@ -597,20 +603,22 @@ md_assemble (char *str)
       }
       break;
     }
-    case WI23_PSEUDO_RET:
-      iword = (0x05 << 26) | (30 << 21);
-      break;
-    /*case WI23_PSEUDO_CALL:
-      iword = (0x07 << 26);
+    case WI23_PSEUDO_MOV:
+      iword = (0x08 << 26);
+      // Skip whitespace after opcode
       while (ISSPACE (*op_end)) op_end++;
       {
-        int dst;
+        int dst, src;
 
         dst = parse_register_operand (&op_end, RCLASS_GPR);
+        if (*op_end != ',')
+          as_warn (_("expecting comma delimited register operands"));
+        op_end++;
+        src = parse_register_operand (&op_end, RCLASS_GPR);
 
-        iword |= (dst << 21);
+        iword |= (dst << 16) + (src << 21);
       }
-      break;*/
+      break;
 
     ////////////
     // Other //

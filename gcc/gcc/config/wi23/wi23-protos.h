@@ -20,9 +20,11 @@ along with GCC; see the file COPYING3.  If not see
 extern void  wi23_expand_prologue (void);
 extern void  wi23_expand_epilogue (void);
 extern int   wi23_initial_elimination_offset (int, int);
+extern bool wi23_regno_ok_for_base_p (int, bool);
 extern bool  wi23_offset_address_p (rtx);
 extern const char* wi23_load_immediate(rtx, int32_t i, bool high);
+extern rtx wi23_legitimize_call_address(rtx);
 #ifdef RTX_CODE
 extern void wi23_expand_conditional_branch (rtx, enum rtx_code, rtx, rtx);
-//extern void wi23_absolute_loadstore(rtx*, machine_mode);
+extern void wi23_expand_conditional_fbranch (rtx, enum rtx_code, rtx, rtx);
 #endif

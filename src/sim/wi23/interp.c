@@ -60,12 +60,12 @@ static const char *reg_names[NUM_WI23_REGS*2] = { \
     "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7", \
     "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", \
     "r16", "r17", "r18", "r19", "r20", "r21", "r22", "r23", \
-    "r24", "r25", "r26", "gp", "fp", "sp", "ra", "csr", \
+    "r24", "r25", "r26", "r27", "fp", "sp", "ra", "tmp", \
    /* floating-point regs */ \
     "f0", "f1", "f2", "f3", "f4", "f5", "f6", "f7", \
     "f8", "f9", "f10", "f11", "f12", "f13", "f14", "f15", \
     "f16", "f17", "f18", "f19", "f20", "f21", "f22", "f23", \
-    "f24", "f25", "f26", "f27", "f28", "f29", "f30", "fcsr"};
+    "f24", "f25", "f26", "f27", "f28", "f29", "ft1", "ft2"};
 
 /* The machine state.
 
@@ -542,25 +542,25 @@ sim_engine_run (SIM_DESC sd,
           break;
 
         }
-        case WI23_RF_F_DST: {
-          float trg = cpu.asregs.regs[OP_RT_R(inst)];
-          float src = cpu.asregs.regs[OP_RS(inst)];
+        case WI23_RF_I_F_DST: {
+          float trg = cpu.asregs.fregs[OP_RT_R(inst)];
+          float src = cpu.asregs.fregs[OP_RS(inst)];
           unsigned dst_reg = OP_RD_R(inst);
 
           // TODO could be a dangerous way of handling these instructions
           switch (opcode->opcode){
             case 0x3C: {
-              cpu.asregs.fregs[dst_reg] = (float)(trg == src);
+              cpu.asregs.regs[dst_reg] = (float)(trg == src);
               WI23_TRACE_SETREG ("FEQ");
               break;
             }
             case 0x3E: {
-              cpu.asregs.fregs[dst_reg] = (float)(src <= trg);
+              cpu.asregs.regs[dst_reg] = (float)(src <= trg);
               WI23_TRACE_SETREG ("FLE");
               break;
             }
             case 0x3F: {
-              cpu.asregs.fregs[dst_reg] = (float)(src < trg);
+              cpu.asregs.regs[dst_reg] = (float)(src < trg);
               WI23_TRACE_SETREG ("FLT");
               break;
             }

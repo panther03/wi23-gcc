@@ -24,10 +24,9 @@ if [[ $DEBUG ]]; then
 fi
 
 #-T tests/script.ld
-wi23-elf-gcc -fno-builtin $1 -c -g -o "${OBJECT_OUT}"
-echo "wi23-elf-gcc -fno-builtin $1 -c -g ${OBJECT_OUT}"
+wi23-elf-gcc -O2 -fsingle-precision-constant -fno-builtin -fno-inline $1 -c -g -o "${OBJECT_OUT}"
 wi23-elf-gcc -o "${ELF_OUT}" "${OBJECT_OUT}"
-wi23-elf-objdump -dr -S "${OBJECT_OUT}" > out/object-out.log
+wi23-elf-objdump -sdr -S "${OBJECT_OUT}" > out/object-out.log
 wi23-elf-objdump -sdr -S "${ELF_OUT}" > out/exec-out.log
 wi23-elf-objcopy --verilog-data-width 4 "${ELF_OUT}"  -O verilog  "${HEX_OUT}"
 if [[ ! $DEBUG ]]; then
