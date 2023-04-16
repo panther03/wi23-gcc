@@ -25,13 +25,13 @@ const char * ireg_names[32] =
   { "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7",
     "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
     "r16", "r17", "r18", "r19", "r20", "r21", "r22", "r23",
-    "r24", "r25", "r26", "gp", "fp", "sp", "ra", "csr" };
+    "r24", "r25", "r26", "r27", "fp", "sp", "ra", "tmp" };
 
 const char * freg_names[32] =
   { "f0", "f1", "f2", "f3", "f4", "f5", "f6", "f7",
     "f8", "f9", "f10", "f11", "f12", "f13", "f14", "f15",
     "f16", "f17", "f18", "f19", "f20", "f21", "f22", "f23",
-    "f24", "f25", "f26", "f27", "f28", "f29", "f30", "fcsr" };
+    "f24", "f25", "f26", "f27", "f28", "f29", "ft1", "ft2" };
 
 const wi23_opc_info_t wi23_opc_info[64] =
   {
@@ -107,10 +107,10 @@ const wi23_opc_info_t wi23_opc_info[64] =
     { 0x3A, WI23_RF_I_DST,     "sra" },
 
     { 0x3B, WI23_RF_F_FN_DST,   "x" }, // float arithmetic
-    { 0x3C, WI23_RF_F_DST,      "feq" },
+    { 0x3C, WI23_RF_I_F_DST,      "feq" },
     { 0x3D, WI23_ILLEGAL,       "illegal" },
-    { 0x3E, WI23_RF_F_DST,      "fle" },
-    { 0x3F, WI23_RF_F_DST,      "flt" }
+    { 0x3E, WI23_RF_I_F_DST,      "fle" },
+    { 0x3F, WI23_RF_I_F_DST,      "flt" }
   };
 
 const wi23_fnc_info_t wi23_arith_fnc[4] =

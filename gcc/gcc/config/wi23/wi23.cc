@@ -55,9 +55,9 @@
 #include "predict.h"
 #include "tree-pass.h"
 #include "opts.h"
+#include "tm-constrs.h"
 
 /* This file should be included last.  */
-// ?????????? ^
 #include "target-def.h"
 
 #define LOSE_AND_RETURN(msgid, x)		\
@@ -67,7 +67,13 @@
       return;					\
     } while (0)
 
+#define BITSET_P(VALUE,BIT) (((VALUE) & (1L << (BIT))) != 0)
 
+/* If non-zero, this is an offset to be added to SP to redefine the CFA
+   when restoring the FP register from the stack.  Only valid when generating
+   the epilogue.  */
+
+static int epilogue_cfa_sp_offset;
 
 /* Worker function for TARGET_RETURN_IN_MEMORY.  */
 
@@ -83,35 +89,43 @@ wi23_return_in_memory (const_tree type, const_tree fntype ATTRIBUTE_UNUSED)
    If the precise function being called is known, FUNC is its
    FUNCTION_DECL; otherwise, FUNC is 0.  
 
-   We always return values in register r9 for wi23.  */
+   We always return values in registers r9 & f9 for wi23.  */
 
 static rtx
 wi23_function_value (const_tree valtype, 
 		      const_tree fntype_or_decl ATTRIBUTE_UNUSED,
 		      bool outgoing ATTRIBUTE_UNUSED)
 {
-  return gen_rtx_REG (TYPE_MODE (valtype), RET_VAL_REGNUM);
+  if ((TYPE_MODE (valtype)) == SFmode) {
+    return gen_rtx_REG (TYPE_MODE (valtype), FP_RET_VAL_REGNUM);
+  } else {
+    return gen_rtx_REG (TYPE_MODE (valtype), GP_RET_VAL_REGNUM);
+  }
 }
 
 /* Define how to find the value returned by a library function.
 
-   We always return values in register r9 for wi23.  */
+   We always return values in registers r9 & f9 for wi23.  */
 
 static rtx
 wi23_libcall_value (machine_mode mode,
                      const_rtx fun ATTRIBUTE_UNUSED)
 {
-  return gen_rtx_REG (mode, RET_VAL_REGNUM);
+  if (mode == SFmode) {
+    return gen_rtx_REG (mode, FP_RET_VAL_REGNUM);
+  } else {
+    return gen_rtx_REG (mode, GP_RET_VAL_REGNUM);
+  }
 }
 
 /* Handle TARGET_FUNCTION_VALUE_REGNO_P.
 
-   We always return values in register r9 for wi23.  */
+   We always return values in registers r9 & f9 for wi23.  */
 
 static bool
 wi23_function_value_regno_p (const unsigned int regno)
 {
-  return (regno == RET_VAL_REGNUM);
+  return (regno == GP_RET_VAL_REGNUM) || (regno == FP_RET_VAL_REGNUM);
 }
 
 /* Emit an error message when we're in an asm, and a fatal error for
@@ -188,15 +202,6 @@ wi23_print_operand (FILE *file, rtx x, int code)
     {
     case 'C': {
       enum rtx_code c = GET_CODE (x);
-      // FIXME: remove this when we actually add leu and ltu
-      if (c == LTU) {
-        fprintf (file, "lt");  
-        return;
-      } 
-      if (c == LEU) {
-        fprintf (file, "le");  
-        return;
-      }
       fprintf (file, "%s", GET_RTX_NAME (c));
       return;
     }
@@ -212,7 +217,7 @@ wi23_print_operand (FILE *file, rtx x, int code)
   switch (GET_CODE (operand))
     {
     case REG:
-      if (REGNO (operand) > FCSR_REGNUM)
+      if (REGNO (operand) > LAST_REAL_REGISTER)
 	internal_error ("internal error: bad register: %d", REGNO (operand));
       fprintf (file, "%s", reg_names[REGNO (operand)]);
       return;
@@ -234,19 +239,34 @@ wi23_print_operand (FILE *file, rtx x, int code)
     }
 }
 
+struct GTY(())  wi23_frame_info {
+  /* The size of the frame in bytes.  */
+  HOST_WIDE_INT total_size;
+
+  /* Bit X is set if the function saves or restores scalar register X.  */
+  unsigned long mask;
+
+  /* Offsets of register save areas from frame bottom */
+  HOST_WIDE_INT reg_sp_offset;
+
+  /* Offset of virtual frame pointer from stack pointer/frame bottom */
+  HOST_WIDE_INT frame_pointer_offset;
+
+  /* Offset of hard frame pointer from stack pointer/frame bottom */
+  HOST_WIDE_INT hard_frame_pointer_offset;
+
+  /* The offset of arg_pointer_rtx from the bottom of the frame.  */
+  HOST_WIDE_INT arg_pointer_offset;
+};
+
 /* Per-function machine data.  */
+
 struct GTY(()) machine_function
- {
-   /* Number of bytes saved on the stack for callee saved registers.  */
-   int callee_saved_reg_size;
+{
+  /* The current frame information, calculated by wi23_compute_frame.  */
+  struct wi23_frame_info frame;
 
-   /* Number of bytes saved on the stack for local variables.  */
-   int local_vars_size;
-
-   /* The sum of 2 sizes: locals vars and padding byte for saving the
-    * registers.  Used in expand_prologue () and expand_epilogue().  */
-   int size_for_adjusting_sp;
- };
+};
 
 /* Zero initialization is OK for all current fields.  */
 
@@ -264,150 +284,370 @@ wi23_option_override (void)
   init_machine_status = wi23_init_machine_status;
 }
 
+static bool
+wi23_callee_saved_regno_p (int regno)
+{
+  /* Check call-saved registers.  */
+  if ((df_regs_ever_live_p (regno) && !call_used_or_fixed_reg_p (regno))
+      || (crtl->calls_eh_return && (regno >= WI23_EH_FIRST_REGNUM
+				    && regno <= WI23_EH_LAST_REGNUM)))
+    {
+      return true;
+    }
+
+  return false;
+}
+
+static unsigned int
+wi23_stack_align (unsigned int loc)
+{
+  return (loc + ((STACK_BOUNDARY/BITS_PER_UNIT)-1)) & -(STACK_BOUNDARY/BITS_PER_UNIT);
+}
+
+/* WI23 stack frames grown downward.  High addresses are at the top.
+
+	+-------------------------------+
+	|                               |
+	|  incoming stack arguments     |
+	|                               |
+	+-------------------------------+ <-- incoming stack pointer
+	|                               |
+	|  callee-allocated save area   |
+	|  for arguments that are       |
+	|  split between registers and  |
+	|  the stack                    |
+	|                               |
+	+-------------------------------+ <-- arg_pointer_rtx
+	|                               |
+	|  callee-allocated save area   |
+	|  for register varargs         |
+	|                               |
+	+-------------------------------+ <-- hard_frame_pointer_rtx;
+	|                               |     stack_pointer_rtx + reg_sp_offset
+	|  Scalar registers save area   |       + UNITS_PER_WORD
+	|                               |
+	+-------------------------------+ <-- frame_pointer_rtx (virtual)
+	|                               |
+	|  local variables              |
+	|                               |
+P +-------------------------------+
+	|                               |
+	|  outgoing stack arguments     |
+	|                               |
+	+-------------------------------+ <-- stack_pointer_rtx
+
+   Dynamic stack allocations such as alloca insert data at point P.
+   They decrease stack_pointer_rtx but leave frame_pointer_rtx and
+   hard_frame_pointer_rtx unchanged.  */
+
 /* Compute the size of the local area and the size to be adjusted by the
  * prologue and epilogue.  */
 
 static void
 wi23_compute_frame (void)
 {
-  /* For aligning the local variables.  */
-  int stack_alignment = STACK_BOUNDARY / BITS_PER_UNIT;
-  int padding_locals;
-  int regno;
+  struct wi23_frame_info *frame;
+  HOST_WIDE_INT offset;
+  unsigned int regno, num_x_saved = 0;
 
-  /* Padding needed for each element of the frame.  */
-  cfun->machine->local_vars_size = get_frame_size ();
+  frame = &cfun->machine->frame;
 
-  /* Align to the stack alignment.  */
-  padding_locals = cfun->machine->local_vars_size % stack_alignment;
-  if (padding_locals)
-    padding_locals = stack_alignment - padding_locals;
+  memset (frame, 0, sizeof (*frame));
 
-  cfun->machine->local_vars_size += padding_locals;
+  /* Find out which scalar regs we need to save.  */
+  num_x_saved = 0;
+  for (regno = 0; regno <= LAST_REAL_REGISTER; regno++)
+  {
+    if (wi23_callee_saved_regno_p (regno))
+      frame->mask |= 1 << regno, num_x_saved++;
+  }
 
-  cfun->machine->callee_saved_reg_size = 8;
+  /* At the bottom of the frame are any outgoing stack arguments.  */
+  offset = wi23_stack_align (crtl->outgoing_args_size);
 
-  /* Save callee-saved registers.  */
-  for (regno = 0; regno < FIRST_PSEUDO_REGISTER; regno++)
-    if (df_regs_ever_live_p (regno) && !call_used_or_fixed_reg_p (regno))
-      cfun->machine->callee_saved_reg_size += 4;
+  /* Next are local stack variables.  */
+  /* TODO(m): For some functions (e.g. __negdi2) we get an offset here even
+     though there are no local stack variables.  */
+  offset += wi23_stack_align (get_frame_size ());
 
-  cfun->machine->size_for_adjusting_sp =
-    crtl->args.pretend_args_size
-    + cfun->machine->local_vars_size
-    + (ACCUMULATE_OUTGOING_ARGS
-       ? (HOST_WIDE_INT) crtl->outgoing_args_size : 0);
+  /* The virtual frame pointer points above the local variables.  */
+  frame->frame_pointer_offset = offset;
+
+  /* Next are the callee-saved scalar regs.  */
+  if (frame->mask)
+    {
+      unsigned x_save_size = wi23_stack_align (num_x_saved * UNITS_PER_WORD);
+      offset += x_save_size;
+    }
+  frame->reg_sp_offset = offset - UNITS_PER_WORD;
+
+  /* The hard frame pointer points above the callee-saved GPRs.  */
+  frame->hard_frame_pointer_offset = offset;
+
+  /* Next is the callee-allocated area for pretend stack arguments.  */
+  offset += wi23_stack_align (crtl->args.pretend_args_size);
+
+  /* Arg pointer must be below pretend args, but must be above alignment
+     padding.  */
+  frame->arg_pointer_offset = offset - crtl->args.pretend_args_size;
+  frame->total_size = offset;
+}
+
+static int
+wi23_num_saved_regs (struct wi23_frame_info *frame)
+{
+  int num_saved = 0;
+  for (int regno = 0; regno <= LAST_REAL_REGISTER; regno++)
+    if (BITSET_P (frame->mask, regno))
+      ++num_saved;
+  return num_saved;
+}
+
+/* Emit a move from SRC to DEST.  Assume that the move expanders can
+   handle all moves if !can_create_pseudo_p ().  The distinction is
+   important because, unlike emit_move_insn, the move expanders know
+   how to force Pmode objects into the constant pool even when the
+   constant pool address is not itself legitimate.  */
+
+static rtx
+wi23_emit_move (rtx dest, rtx src)
+{
+  return (can_create_pseudo_p ()
+	  ? emit_move_insn (dest, src)
+	  : emit_move_insn_1 (dest, src));
+}
+
+/* Make the last instruction frame-related and note that it performs
+   the operation described by FRAME_PATTERN.  */
+
+static void
+wi23_set_frame_expr (rtx frame_pattern)
+{
+  rtx insn;
+
+  insn = get_last_insn ();
+  RTX_FRAME_RELATED_P (insn) = 1;
+  REG_NOTES (insn) = alloc_EXPR_LIST (REG_FRAME_RELATED_EXPR,
+				      frame_pattern,
+				      REG_NOTES (insn));
+}
+
+/* Return a frame-related rtx that stores REG at MEM.
+   REG must be a single register.  */
+
+static rtx
+wi23_frame_set (rtx mem, rtx reg)
+{
+  rtx set = gen_rtx_SET (mem, reg);
+  RTX_FRAME_RELATED_P (set) = 1;
+  return set;
+}
+
+static void
+wi23_save_reg (rtx reg, rtx mem)
+{
+  wi23_emit_move (mem, reg);
+  wi23_set_frame_expr (wi23_frame_set (mem, reg));
+}
+
+/* Restore register REG from MEM.  */
+
+static void
+wi23_restore_reg (rtx reg, rtx mem)
+{
+  rtx insn = wi23_emit_move (reg, mem);
+  rtx dwarf = NULL_RTX;
+  dwarf = alloc_reg_note (REG_CFA_RESTORE, reg, dwarf);
+
+  if (epilogue_cfa_sp_offset && REGNO (reg) == HARD_FRAME_POINTER_REGNUM)
+    {
+      rtx cfa_adjust_rtx = gen_rtx_PLUS (Pmode, stack_pointer_rtx,
+					 GEN_INT (epilogue_cfa_sp_offset));
+      dwarf = alloc_reg_note (REG_CFA_DEF_CFA, cfa_adjust_rtx, dwarf);
+    }
+
+  REG_NOTES (insn) = dwarf;
+  RTX_FRAME_RELATED_P (insn) = 1;
+}
+
+/* Add a constant offset of any distance to a frame related pointer
+   (usually the stack pointer or the frame pointer). */
+
+static void
+wi23_emit_frame_addi (rtx dst_rtx, rtx src_rtx, const int offset)
+{
+  rtx insn;
+
+  if (IMM16_S (offset))
+    {
+      insn = gen_add3_insn (dst_rtx, src_rtx, GEN_INT (offset));
+      RTX_FRAME_RELATED_P (emit_insn (insn)) = 1;
+    }
+  else
+    {
+      gcc_unreachable();
+    }
 }
 
 void
 wi23_expand_prologue (void)
 {
-  int regno;
+  struct wi23_frame_info *frame = &cfun->machine->frame;
+  HOST_WIDE_INT size = frame->total_size;
+  int num_saved_regs;
   rtx insn;
 
-  wi23_compute_frame ();
-
   if (flag_stack_usage_info)
-    current_function_static_stack_size = cfun->machine->size_for_adjusting_sp;
+    current_function_static_stack_size = size;
+  
+  if (size > 0) {
+    insn = gen_add3_insn (stack_pointer_rtx,
+        stack_pointer_rtx,
+        GEN_INT (-size));
+    RTX_FRAME_RELATED_P (emit_insn (insn)) = 1;
+  }
 
-  insn = emit_insn (gen_movsi_push (gen_rtx_REG (Pmode, RA_REGNUM)));
-	RTX_FRAME_RELATED_P (insn) = 1;
-  insn = emit_insn (gen_movsi_push (gen_rtx_REG (Pmode, FP_REGNUM)));
-	RTX_FRAME_RELATED_P (insn) = 1;
-  /* Save callee-saved registers.  */
-  for (regno = 0; regno < FIRST_PSEUDO_REGISTER; regno++)
-    {
-      if (df_regs_ever_live_p (regno)
-	  && !call_used_or_fixed_reg_p (regno))
-	{
-	  insn = emit_insn (gen_movsi_push (gen_rtx_REG (Pmode, regno)));
-	  RTX_FRAME_RELATED_P (insn) = 1;
-	}
-    }
+  /* Save the registers.  */
+  num_saved_regs = wi23_num_saved_regs (frame);
+  if (num_saved_regs > 0) {
+    // total_size could be too big to fit in immediate. but we're not
+    // going to worry about that. :)
 
-  if (cfun->machine->size_for_adjusting_sp > 0)
-  {
-    int i = cfun->machine->size_for_adjusting_sp; 
-    if (i <= (1 << 15)) {
-      insn = emit_insn (gen_addsi3 (stack_pointer_rtx, 
-        stack_pointer_rtx, 
-        GEN_INT (-i)));
-      RTX_FRAME_RELATED_P (insn) = 1;
-    } else {
-      abort();
+    /* Save the scalar registers. */
+    HOST_WIDE_INT offset = frame->reg_sp_offset;
+    for (int regno = LAST_REAL_REGISTER; regno >= 0; regno--) {
+      if (BITSET_P (frame->mask, regno))
+      {
+        auto m = (regno >= FP_OFS) ? E_SFmode : word_mode;
+        rtx mem =
+          gen_frame_mem (m, plus_constant (Pmode,
+                    stack_pointer_rtx,
+                    offset));
+        wi23_save_reg (gen_rtx_REG (m, regno), mem);
+        offset -= UNITS_PER_WORD;
+      }
     }
   }
+
+  /* Set up the frame pointer, if we're using one.  */
+  if (frame_pointer_needed)
+  {
+    HOST_WIDE_INT offset = frame->hard_frame_pointer_offset;
+    wi23_emit_frame_addi (hard_frame_pointer_rtx, stack_pointer_rtx,
+            offset);
+  }
+
 }
 
 void
 wi23_expand_epilogue (void)
 {
-  int regno;
-  rtx reg;
+  struct wi23_frame_info *frame = &cfun->machine->frame;
+  HOST_WIDE_INT size = frame->total_size;
+  rtx insn;
+  int num_saved_regs;
 
-  if (cfun->machine->callee_saved_reg_size != 0)
-  {
-    int i = cfun->machine->size_for_adjusting_sp; 
-    if (i <= (1 << 15)) {
-      emit_insn (gen_addsi3 (stack_pointer_rtx, 
-        stack_pointer_rtx, 
-        GEN_INT (i)));
-    } else {
-      abort();
-    }
+  /* Reset the epilogue cfa info before starting to emit the epilogue.  */
+  epilogue_cfa_sp_offset = 0;
 
-    for (regno = FIRST_PSEUDO_REGISTER; regno-- > 0; ) {
-      if (!call_used_or_fixed_reg_p (regno)
-        && df_regs_ever_live_p (regno))
-      {
-        rtx preg = gen_rtx_REG (Pmode, regno);
-        emit_insn (gen_movsi_pop (preg));
+  /* Move past any dynamic stack allocations.  */
+  // REMOVED: WI23 does not support alloca
+
+  /* Restore the registers.  */
+  num_saved_regs = wi23_num_saved_regs (frame);
+  if (num_saved_regs > 0) {
+    HOST_WIDE_INT offset = frame->reg_sp_offset - (num_saved_regs - 1) * UNITS_PER_WORD;
+    for (int regno = 0; regno <= LAST_REAL_REGISTER; regno++) {
+      if (BITSET_P (frame->mask, regno)) {
+        auto m = (regno >= FP_OFS) ? E_SFmode : word_mode;
+        rtx mem =
+          gen_frame_mem (m, plus_constant (Pmode,
+                    stack_pointer_rtx,
+                    offset));
+        wi23_restore_reg (gen_rtx_REG (m, regno), mem);
+        offset += UNITS_PER_WORD;
       }
     }
-
-    emit_insn (gen_movsi_pop (gen_rtx_REG (Pmode, FP_REGNUM)));
-    emit_insn (gen_movsi_pop (gen_rtx_REG (Pmode, RA_REGNUM)));
   }
 
-  emit_jump_insn (gen_returner ());
+  /* Adjust stack pointer.  */
+  if (size > 0) {
+    if (frame_pointer_needed) {
+      epilogue_cfa_sp_offset = size;
+    }
+    insn = emit_insn (
+        gen_add3_insn (stack_pointer_rtx, stack_pointer_rtx,
+          GEN_INT(size)));
+
+    rtx dwarf = NULL_RTX;
+    rtx cfa_adjust_rtx = gen_rtx_PLUS (Pmode, stack_pointer_rtx, const0_rtx);
+    dwarf = alloc_reg_note (REG_CFA_DEF_CFA, cfa_adjust_rtx, dwarf);
+    RTX_FRAME_RELATED_P (insn) = 1;
+
+    REG_NOTES (insn) = dwarf;
+  }
+
+  /* If this function uses eh_return, add the final stack adjustment now.  */
+  if (crtl->calls_eh_return)
+  {
+    emit_insn (gen_add3_insn (stack_pointer_rtx, stack_pointer_rtx,
+      EH_RETURN_STACKADJ_RTX));
+  }
 }
-
-// TODO: Implement select_section thing from ft32 to support loading from program memory?
-
-/* Implements the macro INITIAL_ELIMINATION_OFFSET, return the OFFSET.  */
 
 int
 wi23_initial_elimination_offset (int from, int to)
 {
-  int ret;
-  
-  if ((from) == SFP_REGNUM && (to) == FP_REGNUM)
-    {
-      /* Compute this since we need to use cfun->machine->local_vars_size.  */
-      wi23_compute_frame ();
-      ret = -cfun->machine->callee_saved_reg_size;
-    }
-  else if ((from) == AP_REGNUM && (to) == FP_REGNUM)
-    ret = 0x00;
-  else
-    abort ();
+  HOST_WIDE_INT src, dest;
 
-  return ret;
+  wi23_compute_frame ();
+
+  if (to == HARD_FRAME_POINTER_REGNUM)
+    dest = cfun->machine->frame.hard_frame_pointer_offset;
+  else if (to == STACK_POINTER_REGNUM)
+    dest = 0; /* The stack pointer is the base of all offsets, hence 0.  */
+  else
+    gcc_unreachable ();
+
+  if (from == FRAME_POINTER_REGNUM)
+    src = cfun->machine->frame.frame_pointer_offset;
+  else if (from == ARG_POINTER_REGNUM)
+    src = cfun->machine->frame.arg_pointer_offset;
+  else
+    gcc_unreachable ();
+
+  return src - dest;
 }
 
 /* Helper function for `wi23_legitimate_address_p'.  */
 
-static bool
-wi23_reg_ok_for_base_p (const_rtx reg, bool strict_p)
+bool
+wi23_regno_ok_for_base_p (int regno, bool strict_p)
 {
-  int regno = REGNO (reg);
+  if (!HARD_REGISTER_NUM_P (regno))
+    {
+      if (!strict_p)
+	return true;
 
-  if (strict_p)
-    return HARD_REGNO_OK_FOR_BASE_P (regno)
-	   || HARD_REGNO_OK_FOR_BASE_P (reg_renumber[regno]);
-  else    
-    return !HARD_REGISTER_NUM_P (regno)
-	   || HARD_REGNO_OK_FOR_BASE_P (regno);
+      if (!reg_renumber)
+	return false;
+
+      regno = reg_renumber[regno];
+    }
+
+  /* The fake registers will be eliminated to either the stack or
+     hard frame pointer, both of which are usually valid base registers.
+     Reload deals with the cases where the eliminated form isn't valid.  */
+  return ((regno >= WI23_R0 && regno < FP_OFS)
+	  || regno == WI23_SP
+	  || regno == FRAME_POINTER_REGNUM
+	  || regno == ARG_POINTER_REGNUM);
+}
+
+static bool
+wi23_rtx_ok_for_base_p (rtx x, bool strict_p)
+{
+  return REG_P (x) && wi23_regno_ok_for_base_p (REGNO (x), strict_p);
 }
 
 /* Worker function for TARGET_LEGITIMATE_ADDRESS_P.  */
@@ -417,26 +657,38 @@ wi23_legitimate_address_p (machine_mode mode ATTRIBUTE_UNUSED,
 			    rtx x, bool strict_p,
 			    addr_space_t as)
 {
-  // TODO add support for instruction memory
-  gcc_assert (ADDR_SPACE_GENERIC_P (as));
-
   if (GET_CODE(x) == PLUS
       && REG_P (XEXP (x, 0))
-      && wi23_reg_ok_for_base_p (XEXP (x, 0), strict_p)
+      && wi23_rtx_ok_for_base_p (XEXP (x, 0), strict_p)
       && CONST_INT_P (XEXP (x, 1))
-      && IN_RANGE (INTVAL (XEXP (x, 1)), -32768, 32767))
+      && IN_RANGE (INTVAL (XEXP (x, 1)), -32768, 32767)) {
     return true;
-  if (REG_P (x) && wi23_reg_ok_for_base_p (x, strict_p))
+  }
+  if (REG_P (x) && wi23_rtx_ok_for_base_p (x, strict_p)) {
     return true;
+  } 
   if (GET_CODE (x) == SYMBOL_REF
       || GET_CODE (x) == LABEL_REF
-      || GET_CODE (x) == CONST)
+      || GET_CODE (x) == CONST) {
     return true;
+  }
+    
   return false;
 }
 
-// TODO: deal with varargs later
+/* Make ADDR suitable for use as a call or sibcall target.  */
 
+rtx
+wi23_legitimize_call_address (rtx addr)
+{
+  if (!wi23_call_insn_operand (addr, VOIDmode))
+    {
+      return copy_addr_to_reg (addr);
+    }
+  return addr;
+}
+
+// TODO: deal with varargs later
 
 // TODO add floating point reg support for both of these functions
 static rtx
@@ -444,26 +696,43 @@ wi23_function_arg (cumulative_args_t cum_v, const function_arg_info &arg)
 {
   CUMULATIVE_ARGS *cum = get_cumulative_args (cum_v);
 
-  if (cum->num_gprs < 9)
-    return gen_rtx_REG (arg.mode, cum->num_gprs);
-  else 
-    return NULL_RTX;
-}
+  if (arg.mode == SFmode) {
+    if (cum->num_fprs < 9)
+      return gen_rtx_REG (arg.mode, FP_ARG_FIRST + cum->num_fprs);
+    else 
+      return NULL_RTX;
+  } else {
+    if (cum->num_gprs < 9)
+      return gen_rtx_REG (arg.mode, cum->num_gprs);
+    else 
+      return NULL_RTX;
+  }
 
-#define WI23_FUNCTION_ARG_SIZE(MODE, TYPE)	\
-  ((MODE) != BLKmode ? GET_MODE_SIZE (MODE)	\
-   : (unsigned) int_size_in_bytes (TYPE))
+}
 
 static void
 wi23_function_arg_advance (cumulative_args_t cum_v,
 			    const function_arg_info &arg)
 {
   CUMULATIVE_ARGS *cum = get_cumulative_args (cum_v);
+  HOST_WIDE_INT param_size = arg.promoted_size_in_bytes() ;
+  gcc_assert (param_size >= 0);
 
-  // TODO: wtf was +3 here for in moxie??
-  cum->num_gprs = (cum->num_gprs < RA_REGNUM
-	  ? cum->num_gprs + ((WI23_FUNCTION_ARG_SIZE (arg.mode, arg.type)) / 4)
-	  : cum->num_gprs);
+  /* Convert to words (round up).  */
+  param_size = (UNITS_PER_WORD - 1 + param_size) / UNITS_PER_WORD;
+
+  if (arg.mode == SFmode) {
+    if (cum->num_fprs + param_size > 9)
+      cum->num_fprs = 9;
+    else
+      cum->num_fprs += param_size;
+  } else {
+    if (cum->num_gprs + param_size > 9)
+      cum->num_gprs = 9;
+    else
+      cum->num_gprs += param_size;
+  }
+
 }
 
 /* Used by constraints.md to distinguish between GENERIC and PM
@@ -482,7 +751,7 @@ wi23_load_immediate (rtx dst, int32_t i, bool high)
   char pattern[100];
   // if it fits into 16-bits, don't care if signed or not
   // FIXME: stupid way of doing this?
-  if ((i & 0xFFFF0000) == 0)
+  if ((i & 0xFFFF8000) == 0 || high)
   {
       if (high) {
         sprintf (pattern, "slbi  %%0,%d // low immediate high", i);
@@ -521,9 +790,9 @@ wi23_expand_conditional_branch (rtx label, rtx_code code, rtx op0, rtx op1)
     op0 = temp;
     op1 = const0_rtx;
     if (inverted) {
-      condition = gen_rtx_fmt_ee (NE, VOIDmode, op0, op1);  
-    } else {
       condition = gen_rtx_fmt_ee (EQ, VOIDmode, op0, op1);  
+    } else {
+      condition = gen_rtx_fmt_ee (NE, VOIDmode, op0, op1);  
     }
   } else {
     condition = gen_rtx_fmt_ee (code, VOIDmode, op0, op1);
@@ -533,19 +802,43 @@ wi23_expand_conditional_branch (rtx label, rtx_code code, rtx op0, rtx op1)
 		     gen_rtx_IF_THEN_ELSE (VOIDmode, condition, gen_rtx_LABEL_REF (VOIDmode, label), pc_rtx)));
 }
 
+// same shit except float
+void
+wi23_expand_conditional_fbranch (rtx label, rtx_code code, rtx op0, rtx op1)
+{
+  op0 = force_reg (SFmode, op0);
+  rtx condition;
+  rtx temp;
+  bool inverted = false;
+  op1 = force_reg (SFmode, op1);
+  temp = gen_reg_rtx (word_mode);
+  if (code == GT || code == GE || code == NE) {
+    code = reverse_condition(code);
+    inverted = true;
+  }
+  emit_move_insn (temp, gen_rtx_fmt_ee (code, word_mode, op0, op1));
+  // now for the integer branch part
+  op0 = temp;
+  op1 = const0_rtx;
+  if (inverted) {
+    condition = gen_rtx_fmt_ee (EQ, VOIDmode, op0, op1);  
+  } else {
+    condition = gen_rtx_fmt_ee (NE, VOIDmode, op0, op1);  
+  }
+  
+  emit_jump_insn (gen_rtx_SET (pc_rtx,
+		     gen_rtx_IF_THEN_ELSE (VOIDmode, condition, gen_rtx_LABEL_REF (VOIDmode, label), pc_rtx)));
+}
+
+
 static bool
 wi23_hard_regno_mode_ok (unsigned int regno, machine_mode mode)
 {
   
   if ((GET_MODE_CLASS (mode) != MODE_FLOAT) && (REGNO_REG_CLASS(regno) == FLOAT_REGS)) {
-    //printf("regno %d NOT OK\n", regno);  
     return false;
   }
 
-  //if (regno < 64 && regno >= 32) {
-  //  printf("?????????????? why %d %d \n", regno, GET_MODE_CLASS(mode));
-  //}
-  //printf("regno %d OK\n", regno);
   return true;
 }
 
@@ -553,15 +846,12 @@ static bool
 wi23_can_change_mode_class (machine_mode from, machine_mode to,
 			    reg_class_t rclass)
 {
-  if (rclass == FLOAT_REGS) {
-    return false;
-  }
-  /*if (rclass > 1) {
-    printf("from: %d\n", rclass);
-  }*/
-  return true;
+  return !reg_classes_intersect_p (FLOAT_REGS, rclass);
 }
 
+bool wi23_cannot_force_const_mem(machine_mode m, rtx r) {
+  return false;
+}
 
 
 /* The Global `targetm' Variable. */
@@ -577,15 +867,13 @@ wi23_can_change_mode_class (machine_mode from, machine_mode to,
 #define TARGET_MUST_PASS_IN_STACK	must_pass_in_stack_var_size
 #undef  TARGET_PASS_BY_REFERENCE
 #define TARGET_PASS_BY_REFERENCE    hook_pass_by_reference_must_pass_in_stack
-//#undef  TARGET_ARG_PARTIAL_BYTES
-//#define TARGET_ARG_PARTIAL_BYTES        hook_bool_void_false
 #undef  TARGET_FUNCTION_ARG
 #define TARGET_FUNCTION_ARG		wi23_function_arg
 #undef  TARGET_FUNCTION_ARG_ADVANCE
 #define TARGET_FUNCTION_ARG_ADVANCE	wi23_function_arg_advance
 
-#undef TARGET_LRA_P
-#define TARGET_LRA_P hook_bool_void_false
+//#undef TARGET_LRA_P
+//#define TARGET_LRA_P hook_bool_void_false
 
 #undef  TARGET_ADDR_SPACE_LEGITIMATE_ADDRESS_P
 #define TARGET_ADDR_SPACE_LEGITIMATE_ADDRESS_P	wi23_legitimate_address_p
@@ -630,8 +918,11 @@ wi23_can_change_mode_class (machine_mode from, machine_mode to,
 #undef TARGET_HARD_REGNO_MODE_OK
 #define TARGET_HARD_REGNO_MODE_OK wi23_hard_regno_mode_ok
 
-#undef TARGET_CAN_CHANGE_MODE_CLASS
-#define TARGET_CAN_CHANGE_MODE_CLASS wi23_can_change_mode_class
+//#undef TARGET_CAN_CHANGE_MODE_CLASS
+//#define TARGET_CAN_CHANGE_MODE_CLASS wi23_can_change_mode_class
+
+#undef  TARGET_CANNOT_FORCE_CONST_MEM
+#define TARGET_CANNOT_FORCE_CONST_MEM wi23_cannot_force_const_mem
 
 struct gcc_target targetm = TARGET_INITIALIZER;
 
