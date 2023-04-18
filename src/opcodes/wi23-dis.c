@@ -84,10 +84,10 @@ print_insn_wi23 (bfd_vma addr, struct disassemble_info * info)
       ireg_names[OP_RS(iword)],
       ireg_names[OP_RT_R(iword)]);
 	  break;
-  case WI23_RF_I_F_DST:
+  case WI23_RF_F_DST:
     fpr (stream, "%s\t%s,%s,%s",
       opcode->name,
-      ireg_names[OP_RD_R(iword)],
+      freg_names[OP_RD_R(iword)],
       freg_names[OP_RS(iword)],
       freg_names[OP_RT_R(iword)]);
 	  break;

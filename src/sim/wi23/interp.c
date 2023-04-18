@@ -542,7 +542,7 @@ sim_engine_run (SIM_DESC sd,
           break;
 
         }
-        case WI23_RF_I_F_DST: {
+        case WI23_RF_F_DST: {
           float trg = cpu.asregs.fregs[OP_RT_R(inst)];
           float src = cpu.asregs.fregs[OP_RS(inst)];
           unsigned dst_reg = OP_RD_R(inst);
@@ -550,17 +550,17 @@ sim_engine_run (SIM_DESC sd,
           // TODO could be a dangerous way of handling these instructions
           switch (opcode->opcode){
             case 0x3C: {
-              cpu.asregs.regs[dst_reg] = (float)(trg == src);
+              cpu.asregs.fregs[dst_reg] = (float)(trg == src);
               WI23_TRACE_SETREG ("FEQ");
               break;
             }
             case 0x3E: {
-              cpu.asregs.regs[dst_reg] = (float)(src <= trg);
+              cpu.asregs.fregs[dst_reg] = (float)(src <= trg);
               WI23_TRACE_SETREG ("FLE");
               break;
             }
             case 0x3F: {
-              cpu.asregs.regs[dst_reg] = (float)(src < trg);
+              cpu.asregs.fregs[dst_reg] = (float)(src < trg);
               WI23_TRACE_SETREG ("FLT");
               break;
             }

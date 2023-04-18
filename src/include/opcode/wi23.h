@@ -45,7 +45,7 @@
 #define WI23_RF_I_FN_DST 0x100 // (Integer) Destination Source Target with Function code
 #define WI23_RF_I_DST    0x101 // (Integer) Destination Source Target
 #define WI23_RF_F_FN_DST 0x110 // (Float) Destination Source Target with Function code
-#define WI23_RF_I_F_DST    0x111 // (Int) Destination (Float) Source Target
+#define WI23_RF_F_DST    0x111 // (Float) Destination Source Target
 #define WI23_RF_DS       0x102 // Destination Source
 
 

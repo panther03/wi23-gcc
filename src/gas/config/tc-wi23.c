@@ -325,7 +325,7 @@ md_assemble (char *str)
     ////////////////////////////////
     // R-type - no function code //
     //////////////////////////////
-    case WI23_RF_I_F_DST:
+    case WI23_RF_F_DST:
     case WI23_RF_I_DST:
       iword = (opcode->opcode << 26);
       
@@ -334,15 +334,15 @@ md_assemble (char *str)
 
       {
         int dst, src, trg;
-        dst = parse_register_operand (&op_end, RCLASS_GPR);
+        dst = parse_register_operand (&op_end, (itype == WI23_RF_F_DST) ? RCLASS_FPR : RCLASS_GPR);
         if (*op_end != ',')
           as_warn (_("expecting comma delimited register operands"));
         op_end++;
-        src = parse_register_operand (&op_end, (itype == WI23_RF_I_F_DST) ? RCLASS_FPR : RCLASS_GPR);
+        src = parse_register_operand (&op_end, (itype == WI23_RF_F_DST) ? RCLASS_FPR : RCLASS_GPR);
         if (*op_end != ',')
           as_warn (_("expecting comma delimited register operands"));
         op_end++;
-        trg = parse_register_operand (&op_end, (itype == WI23_RF_I_F_DST) ? RCLASS_FPR : RCLASS_GPR);
+        trg = parse_register_operand (&op_end, (itype == WI23_RF_F_DST) ? RCLASS_FPR : RCLASS_GPR);
         iword |= (dst << 11) + (trg << 16) + (src << 21);
       }
       break;
