@@ -46,6 +46,7 @@
         "ranges": "cpp",
         "span": "cpp",
         "stacktrace": "cpp",
-        "initializer_list": "cpp"
+        "initializer_list": "cpp",
+        "double.h": "c"
     }
 }

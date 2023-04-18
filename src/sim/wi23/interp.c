@@ -54,6 +54,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 #define FP_OFFSET 32
 
+// so that we dont have to see the traces for the startup section
+static bool trace_mute;
+
 /* wi23 register names.  */
 static const char *reg_names[NUM_WI23_REGS*2] = { \
    /* general-purpose regs */ \
@@ -297,6 +300,9 @@ convert_target_flags (unsigned int tflags)
 void wi23_trace_insn(sim_cpu* scpu, const char* iname, uint32_t pc, int regno, uint32_t memaddr, uint32_t memval, mem_action_t memact) {
   char regval_str[11] = "0xxxxxxxxx";
   char regno_str[4] = "xx";
+  
+  if (trace_mute)
+    return;
 
   // super overcomplicated manual way of printing register lol
   if (regno != -1) {
@@ -372,6 +378,7 @@ sim_engine_run (SIM_DESC sd,
   sim_cpu *scpu = STATE_CPU (sd, 0); /* FIXME <- nice fixme man bro didnt even put anything to fix */
   address_word cia = CPU_PC_GET (scpu);
   const bool _debug = DEBUG_P(scpu, 0);
+  trace_mute = _debug;
 
   //char * dmem = malloc(pow(2, 32));
 
@@ -393,7 +400,7 @@ sim_engine_run (SIM_DESC sd,
 
       opcode = &wi23_opc_info[XT(inst, 26, 6)];
 
-      if (_debug) {
+      if (_debug && !trace_mute) {
         sim_debug_printf(scpu, "Insn: %x; Regs: fp:0x%x, sp:0x%x, ra:0x%x\n", inst, cpu.asregs.regs[28], cpu.asregs.regs[29], cpu.asregs.regs[30]);
       }
 
@@ -415,21 +422,25 @@ sim_engine_run (SIM_DESC sd,
             switch (XT(inst, 0, 2)) {
               case 0x00: {
                 cpu.asregs.fregs[dst_reg] = src + trg;
+                dst_reg += FP_OFFSET;
                 WI23_TRACE_SETREG ("FADD");
                 break;
               }
               case 0x01: {
                 cpu.asregs.fregs[dst_reg] = trg - src;
+                dst_reg += FP_OFFSET;
                 WI23_TRACE_SETREG ("FSUB");
                 break;
               }
               case 0x02: {
                 cpu.asregs.fregs[dst_reg] = trg * src;
+                dst_reg += FP_OFFSET;
                 WI23_TRACE_SETREG ("FMUL");
                 break;
               }
               case 0x03: {
                 cpu.asregs.fregs[dst_reg] = trg / src;
+                dst_reg += FP_OFFSET;
                 WI23_TRACE_SETREG ("FDIV");
                 break;
               }
@@ -551,16 +562,19 @@ sim_engine_run (SIM_DESC sd,
           switch (opcode->opcode){
             case 0x3C: {
               cpu.asregs.fregs[dst_reg] = (float)(trg == src);
+              dst_reg += FP_OFFSET;
               WI23_TRACE_SETREG ("FEQ");
               break;
             }
             case 0x3E: {
               cpu.asregs.fregs[dst_reg] = (float)(src <= trg);
+              dst_reg += FP_OFFSET;
               WI23_TRACE_SETREG ("FLE");
               break;
             }
             case 0x3F: {
               cpu.asregs.fregs[dst_reg] = (float)(src < trg);
+              dst_reg += FP_OFFSET;
               WI23_TRACE_SETREG ("FLT");
               break;
             }
@@ -575,6 +589,7 @@ sim_engine_run (SIM_DESC sd,
         case WI23_RF_DS: {
           unsigned src = cpu.asregs.regs[OP_RS(inst)];
           unsigned dst_reg = OP_RD_R(inst);
+          raw_float_t val;
           // only used for compare & set insns
           // WI23_RF_DS is used for floating point conversion and btr insns
           switch (opcode->opcode) {
@@ -591,34 +606,32 @@ sim_engine_run (SIM_DESC sd,
               unsigned dst_reg = OP_RD_R(inst);
 
               cpu.asregs.fregs[dst_reg] = (float)src;
+              dst_reg += FP_OFFSET;
               WI23_TRACE_SETREG ("FCVTI");
               break;
             }
             case 0x22: {
-              float src = cpu.asregs.regs[OP_RS(inst)];
               unsigned dst_reg = OP_RD_R(inst);
+              val.f = cpu.asregs.fregs[OP_RS(inst)];
 
-              
-              memcpy((cpu.asregs.regs + dst_reg), &src, sizeof(src));
+              cpu.asregs.regs[dst_reg] = val.i;
 
               WI23_TRACE_SETREG ("IMOVF");
               break;
             }
             case 0x23: {
-              int32_t src = cpu.asregs.regs[OP_RS(inst)];
               unsigned dst_reg = OP_RD_R(inst);
+              val.i = cpu.asregs.regs[OP_RS(inst)];
 
-
-              memcpy((cpu.asregs.fregs + dst_reg), &src, sizeof(src));
-
+              cpu.asregs.fregs[dst_reg] = val.f;
+              
+              dst_reg += FP_OFFSET;
               WI23_TRACE_SETREG ("FMOVI");
               break;
             }
             case 0x24: {
-              float src = cpu.asregs.fregs[OP_RS(inst)];
               unsigned dst_reg = OP_RD_R(inst);
-
-              
+              val.f = cpu.asregs.fregs[OP_RS(inst)];
 
               WI23_TRACE_SETREG ("fclass -- UNIMPLEMENTED");
               break;
@@ -713,6 +726,7 @@ sim_engine_run (SIM_DESC sd,
               val.i = rlat(scpu, addr);
               cpu.asregs.fregs[dst_reg] = val.f;
 
+              dst_reg += FP_OFFSET;
               WI23_TRACE_LOAD ("FLD");
               break;
             }
@@ -899,7 +913,11 @@ sim_engine_run (SIM_DESC sd,
       // Wait for a key to be pressed to proceed to the next instruction
       //printf("\nPress any key to increment to the next instruction\n");
       if (_debug) {
-        getchar();
+        if (!trace_mute) { 
+          getchar();        
+        } else if (pc >= 0x70) {
+          trace_mute = false;
+        }
       }
     } while (1);
 }

@@ -70,7 +70,7 @@ FUNC_BEGIN (__umodsi3)
   mov  r10, ra
   jal   HIDDEN_JUMPTARGET(__udivsi3)
   mov  r9, r1
-  jr   r10
+  jr   r10, 0
 
   /* Handle negative arguments to __divsi3.  */
 .L10:
@@ -88,7 +88,7 @@ FUNC_BEGIN (__umodsi3)
   mov  r10, ra
   jal   HIDDEN_JUMPTARGET(__udivsi3)
   subi   r0, r0, 0
-  jr    r10
+  jr    r10, 0
 
 FUNC_BEGIN (__modsi3)
   mov   r10, ra
@@ -97,7 +97,7 @@ FUNC_BEGIN (__modsi3)
 .L30:
   jal    HIDDEN_JUMPTARGET(__udivsi3)    /* The dividend is not negative.  */
   mov   r0, r1
-  jr     r10
+  jr     r10, 0
 .L31:
   subi    r1, r1, 0
   bgez    r0, .L30
@@ -105,4 +105,4 @@ FUNC_BEGIN (__modsi3)
   subi    r0, r0, 0
   jal    HIDDEN_JUMPTARGET(__udivsi3)    /* The dividend is hella negative.  <- ???? */
   subi    r0, r1, 0
-  jr     tmp
+  jr     tmp, 0
