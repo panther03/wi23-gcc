@@ -43,7 +43,7 @@ FUNC_BEGIN (__udivsi3)
   bnez   tmp, .L2
 .L1:
 // WI-23 is definitely top 10 worst ISAs
-  xor tmp,tmp,tmp
+  lbi tmp, 0
   sle tmp,r9,tmp
   bnez tmp, .L2
   slli  r9, r9, 1
@@ -51,7 +51,7 @@ FUNC_BEGIN (__udivsi3)
   sltu  tmp, r9, r1
   bnez  tmp, .L1
 .L2:
-  xor r0,r0,r0
+  lbi tmp, 0
 .L3:
   sltu  tmp, r1, r9
   bnez  tmp, .L4
@@ -76,7 +76,7 @@ FUNC_BEGIN (__umodsi3)
 .L10:
   subi   r0, r0, 0
   /* Zero is handled as a negative so that the result will not be inverted.  */
-  xor tmp,tmp,tmp
+  lbi tmp, 0
   slt tmp,tmp,r1
   bnez tmp, .L12 /* Compute __udivsi3(-a0, a1), then negate the result.  */
 
