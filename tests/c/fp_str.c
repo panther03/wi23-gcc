@@ -194,6 +194,7 @@ void fp_to_str(float fp, char *buff) {
     return;
 }
 
+__attribute__((section(".text"))) 
 int main() {
 
     fp_to_str(3.1414f, SIM_PRINT_LOC);

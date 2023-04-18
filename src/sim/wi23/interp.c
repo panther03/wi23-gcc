@@ -201,7 +201,7 @@ rsat (sim_cpu *scpu, int32_t x)
 {
   address_word cia = CPU_PC_GET (scpu);
   
-  return (sim_core_read_aligned_2 (scpu, cia, read_map, x));
+  return (sim_core_read_aligned_2 (scpu, cia, read_map, RAM_BIAS + (x & 0xFFFF)));
 }
 
 /* Read 1 byte from memory.  */
@@ -211,7 +211,7 @@ rbat (sim_cpu *scpu, int32_t x)
 {
   address_word cia = CPU_PC_GET (scpu);
   
-  return (sim_core_read_aligned_1 (scpu, cia, read_map, x));
+  return (sim_core_read_aligned_1 (scpu, cia, read_map, RAM_BIAS + (x & 0xFFFF)));
 }
 
 /* Read 4 bytes from insn memory.  */
@@ -401,7 +401,7 @@ sim_engine_run (SIM_DESC sd,
       opcode = &wi23_opc_info[XT(inst, 26, 6)];
 
       if (_debug && !trace_mute) {
-        sim_debug_printf(scpu, "Insn: %x; Regs: fp:0x%x, sp:0x%x, ra:0x%x\n", inst, cpu.asregs.regs[28], cpu.asregs.regs[29], cpu.asregs.regs[30]);
+        sim_debug_printf(scpu, "Opcode type: %x, Insn: %x; Regs: fp:0x%x, sp:0x%x, ra:0x%x\n", inst, cpu.asregs.regs[28], cpu.asregs.regs[29], cpu.asregs.regs[30], opcode->itype);
       }
 
       // todo potential optimization if shit gets real slow: just switch directly on opcode? might be faster cause less branching
@@ -873,6 +873,25 @@ sim_engine_run (SIM_DESC sd,
           }
           break;
         }
+        case WI23_IF_I: {
+          // currently only IRQ uses this
+          unsigned int irq_num = IMM_ZX(inst);
+          if (irq_num == 0) {
+            int max_len = 80;
+            unsigned int addr = 0xF000;
+            char read_res;
+            printf("IRQ 0 result:\n");
+            while ((read_res = rbat(scpu,addr)) != 0 && (max_len > 0)) {
+              putchar(read_res);
+              addr++;
+              max_len--;
+            }
+            putchar('\n');
+            fflush(stdout);
+          }
+          WI23_TRACE_CTRL("IRQ");
+          break;
+        }
         case WI23_JF_D26: {
           signed int disp = D26(inst);
           switch (opcode->opcode) {
@@ -915,7 +934,7 @@ sim_engine_run (SIM_DESC sd,
       if (_debug) {
         if (!trace_mute) { 
           getchar();        
-        } else if (pc >= 0x70) {
+        } else if (pc >= 0x30) {
           trace_mute = false;
         }
       }
