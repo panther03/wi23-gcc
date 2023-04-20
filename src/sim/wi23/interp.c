@@ -463,7 +463,7 @@ sim_engine_run (SIM_DESC sd,
                 break;
               }
               case 0x01: {
-                cpu.asregs.regs[dst_reg] = src - trg;
+                cpu.asregs.regs[dst_reg] = trg - src;
                 WI23_TRACE_SETREG ("SUB");
                 break;
               }
@@ -503,7 +503,7 @@ sim_engine_run (SIM_DESC sd,
             }
           } else if (opcode->opcode == 0x1D) {
             if (XT(inst, 0, 2) == 0x00){
-              cpu.asregs.regs[dst_reg] = (src < trg);
+              cpu.asregs.regs[dst_reg] = ((int)src < (int)trg);
               WI23_TRACE_SETREG ("SLT");
             } else {
               cpu.asregs.regs[dst_reg] = ((unsigned)src < (unsigned)trg);
@@ -511,7 +511,7 @@ sim_engine_run (SIM_DESC sd,
             }
           } else if (opcode->opcode == 0x1E) {
             if (XT(inst, 0, 2) == 0x00){
-              cpu.asregs.regs[dst_reg] = (src <= trg);
+              cpu.asregs.regs[dst_reg] = ((int)src <= (int)trg);
               WI23_TRACE_SETREG ("SLE");
             } else {
               cpu.asregs.regs[dst_reg] = ((unsigned)src <= (unsigned)trg);
@@ -558,22 +558,27 @@ sim_engine_run (SIM_DESC sd,
           float src = cpu.asregs.fregs[OP_RS(inst)];
           unsigned dst_reg = OP_RD_R(inst);
 
+          raw_float_t val;
+
           // TODO could be a dangerous way of handling these instructions
           switch (opcode->opcode){
             case 0x3C: {
-              cpu.asregs.fregs[dst_reg] = (float)(trg == src);
+              val.i = (trg == src);
+              cpu.asregs.fregs[dst_reg] = val.f;
               dst_reg += FP_OFFSET;
               WI23_TRACE_SETREG ("FEQ");
               break;
             }
             case 0x3E: {
-              cpu.asregs.fregs[dst_reg] = (float)(src <= trg);
+              val.i = (src <= trg);
+              cpu.asregs.fregs[dst_reg] = val.f;
               dst_reg += FP_OFFSET;
               WI23_TRACE_SETREG ("FLE");
               break;
             }
             case 0x3F: {
-              cpu.asregs.fregs[dst_reg] = (float)(src < trg);
+              val.i = (src < trg);
+              cpu.asregs.fregs[dst_reg] = val.f;
               dst_reg += FP_OFFSET;
               WI23_TRACE_SETREG ("FLT");
               break;
@@ -689,7 +694,7 @@ sim_engine_run (SIM_DESC sd,
               break;
             }
             case 0x09: {
-              cpu.asregs.regs[dst_reg] = src - imms;
+              cpu.asregs.regs[dst_reg] = imms - src;
               WI23_TRACE_SETREG ("SUBI");
               break;
             }

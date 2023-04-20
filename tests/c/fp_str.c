@@ -197,11 +197,13 @@ void fp_to_str(float fp, char *buff) {
 __attribute__((section(".text"))) 
 int main() {
 
-    fp_to_str(3.1414f, SIM_PRINT_LOC);
+    //char buf[80];
+    fp_to_str(2.54334E34f, SIM_PRINT_LOC);
 
     asm volatile (
         "irq 0"
     );
+    //printf("%s\n", buf);
 
     return 0;
 }
