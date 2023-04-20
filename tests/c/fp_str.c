@@ -198,7 +198,7 @@ __attribute__((section(".text")))
 int main() {
 
     //char buf[80];
-    fp_to_str(2.54334E34f, SIM_PRINT_LOC);
+    fp_to_str(-2.54334E34f, SIM_PRINT_LOC);
 
     asm volatile (
         "irq 0"

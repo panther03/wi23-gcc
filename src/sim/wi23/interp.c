@@ -849,7 +849,7 @@ sim_engine_run (SIM_DESC sd,
         }
         case WI23_IF_SI_PC: {
           signed int imms = IMM_SX(inst);
-          unsigned src  = cpu.asregs.regs[OP_RS(inst)];
+          int src  = cpu.asregs.regs[OP_RS(inst)];
           switch (opcode->opcode) {
             case 0x0C: {
               WI23_TRACE_CTRL("BEQZ");
