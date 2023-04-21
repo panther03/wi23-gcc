@@ -47,6 +47,7 @@
         "span": "cpp",
         "stacktrace": "cpp",
         "initializer_list": "cpp",
-        "double.h": "c"
+        "double.h": "c",
+        "compare": "cpp"
     }
 }

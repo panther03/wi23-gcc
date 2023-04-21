@@ -67,7 +67,7 @@
       return;					\
     } while (0)
 
-#define BITSET_P(VALUE,BIT) (((VALUE) & (1L << (BIT))) != 0)
+#define BITSET_P(VALUE,BIT) (((VALUE) & ((uint64_t)(1UL << (BIT)))) != 0)
 
 /* If non-zero, this is an offset to be added to SP to redefine the CFA
    when restoring the FP register from the stack.  Only valid when generating
@@ -244,7 +244,7 @@ struct GTY(())  wi23_frame_info {
   HOST_WIDE_INT total_size;
 
   /* Bit X is set if the function saves or restores scalar register X.  */
-  unsigned long mask;
+  uint64_t mask;
 
   /* Offsets of register save areas from frame bottom */
   HOST_WIDE_INT reg_sp_offset;
@@ -358,8 +358,10 @@ wi23_compute_frame (void)
   num_x_saved = 0;
   for (regno = 0; regno <= LAST_REAL_REGISTER; regno++)
   {
-    if (wi23_callee_saved_regno_p (regno))
-      frame->mask |= 1 << regno, num_x_saved++;
+    if (wi23_callee_saved_regno_p (regno)) {
+      frame->mask |= (uint64_t)((1UL) << regno);
+      num_x_saved++;
+    }
   }
 
   /* At the bottom of the frame are any outgoing stack arguments.  */

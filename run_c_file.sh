@@ -25,7 +25,7 @@ fi
 
 #-T tests/script.ld
 #wi23-elf-gcc -O2 -fsingle-precision-constant -fno-builtin -fno-inline $1 -S -o "${ASM_OUT}" > /dev/null 2>&1
-wi23-elf-gcc -fsingle-precision-constant -fno-builtin -fno-inline $1 -c -g -o "${OBJECT_OUT}"
+wi23-elf-gcc -fsingle-precision-constant -fno-builtin -fno-inline -O2 $1 -c -g -o "${OBJECT_OUT}"
 wi23-elf-gcc -v -o "${ELF_OUT}" "${OBJECT_OUT}"
 wi23-elf-objdump -sdr -S "${OBJECT_OUT}" > out/object-out.log
 wi23-elf-objdump -sdr -S "${ELF_OUT}" > out/exec-out.log
