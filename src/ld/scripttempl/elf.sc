@@ -540,29 +540,10 @@ cat <<EOF
 
   ${TEXT_PLT+${PLT_NEXT_DATA-${PLT} ${OTHER_PLT_SECTIONS}}}
   ${TINY_READONLY_SECTION}
-  .text         ${RELOCATING-0} :
+  .text.startup ${RELOCATING-0} :
   {
-    ${RELOCATING+${TEXT_START_SYMBOLS}}
-    ${RELOCATING+*(.text.unlikely .text.*_unlikely .text.unlikely.*)}
-    ${RELOCATING+*(.text.exit .text.exit.*)}
     ${RELOCATING+*(.text.startup .text.startup.*)}
-    ${RELOCATING+*(.text.hot .text.hot.*)}
-    ${RELOCATING+*(SORT(.text.sorted.*))}
-    *(.text .stub${RELOCATING+ .text.* .gnu.linkonce.t.*})
-    /* .gnu.warning sections are handled specially by elf.em.  */
-    *(.gnu.warning)
-    ${RELOCATING+${OTHER_TEXT_SECTIONS}}
   } ${FILL}
-  .fini         ${RELOCATING-0}${RELOCATING+${FINI_ADDR}} :
-  {
-    ${RELOCATING+${FINI_START}}
-    KEEP (*(SORT_NONE(.fini)))
-    ${RELOCATING+${FINI_END}}
-  } ${FILL}
-  ${RELOCATING+${ETEXT_LAST_IN_RODATA_SEGMENT-PROVIDE (__${ETEXT_NAME} = .);}}
-  ${RELOCATING+${ETEXT_LAST_IN_RODATA_SEGMENT-PROVIDE (_${ETEXT_NAME} = .);}}
-  ${RELOCATING+${ETEXT_LAST_IN_RODATA_SEGMENT-PROVIDE (${ETEXT_NAME} = .);}}
-  ${RELOCATING+${TEXT_SEGMENT_ALIGN}}
 EOF
 
 if test -n "${SEPARATE_CODE}${SEPARATE_TEXT}"; then
@@ -739,6 +720,31 @@ cat <<EOF
 
   .gnu.build.attributes : { *(.gnu.build.attributes${RELOCATING+ .gnu.build.attributes.*}) }
 
+EOF
+
+cat <<EOF
+  .text         ${RELOCATING-0} :
+  {
+    ${RELOCATING+${TEXT_START_SYMBOLS}}
+    ${RELOCATING+*(.text.unlikely .text.*_unlikely .text.unlikely.*)}
+    ${RELOCATING+*(.text.exit .text.exit.*)}
+    ${RELOCATING+*(.text.hot .text.hot.*)}
+    ${RELOCATING+*(SORT(.text.sorted.*))}
+    *(.text .stub${RELOCATING+ .text.* .gnu.linkonce.t.*})
+    /* .gnu.warning sections are handled specially by elf.em.  */
+    *(.gnu.warning)
+    ${RELOCATING+${OTHER_TEXT_SECTIONS}}
+  } ${FILL}
+  .fini         ${RELOCATING-0}${RELOCATING+${FINI_ADDR}} :
+  {
+    ${RELOCATING+${FINI_START}}
+    KEEP (*(SORT_NONE(.fini)))
+    ${RELOCATING+${FINI_END}}
+  } ${FILL}
+  ${RELOCATING+${ETEXT_LAST_IN_RODATA_SEGMENT-PROVIDE (__${ETEXT_NAME} = .);}}
+  ${RELOCATING+${ETEXT_LAST_IN_RODATA_SEGMENT-PROVIDE (_${ETEXT_NAME} = .);}}
+  ${RELOCATING+${ETEXT_LAST_IN_RODATA_SEGMENT-PROVIDE (${ETEXT_NAME} = .);}}
+  ${RELOCATING+${TEXT_SEGMENT_ALIGN}}
 EOF
 
 . $srcdir/scripttempl/DWARF.sc

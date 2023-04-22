@@ -1,6 +1,6 @@
 .globl	__start
 	.weak	_start
-	.text
+	.section    .text.startup
 	.type	__start,@function
 __start:
 _start:
