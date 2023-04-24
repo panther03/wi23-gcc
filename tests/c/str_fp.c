@@ -346,7 +346,7 @@ float str_to_fp(char* str, int* err) {
 __attribute__((section(".text"))) 
 int main() {
 
-    const char* str = "2.54334e34";
+    const char* str = "-2.54334e34";
     int err = 0;
     float f = str_to_fp(str, &err);
 

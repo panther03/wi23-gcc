@@ -602,12 +602,12 @@ sim_engine_run (SIM_DESC sd,
               float src = cpu.asregs.fregs[OP_RS(inst)];
               unsigned dst_reg = OP_RD_R(inst);
               
-              cpu.asregs.regs[dst_reg] = (int)src;
+              cpu.asregs.regs[dst_reg] = (signed int)src;
               WI23_TRACE_SETREG ("ICVTF");
               break;
             }
             case 0x21: {
-              unsigned src = cpu.asregs.regs[OP_RS(inst)];
+              signed src = cpu.asregs.regs[OP_RS(inst)];
               unsigned dst_reg = OP_RD_R(inst);
 
               cpu.asregs.fregs[dst_reg] = (float)src;
